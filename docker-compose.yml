@@ -32,6 +32,8 @@ services:
       ACCESS_TOKEN_TTL_MINUTES: 60
       ALLOWED_ORIGINS: http://localhost:3000,http://localhost:8080
       BCRYPT_COST: 12
+      SMS_PROVIDER: dev
+      SMS_FROM: MobileChat
     ports:
       - "8080:8080"
 
