@@ -11,6 +11,7 @@ FROM alpine:3.20
 RUN adduser -D -H -u 10001 appuser
 WORKDIR /app
 COPY --from=builder /out/mobilechat-server /app/mobilechat-server
+COPY migrations /app/migrations
 USER appuser
 
 ENV PORT=8080
