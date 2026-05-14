@@ -68,8 +68,8 @@ func (r *Repository) GetUserByID(ctx context.Context, userID string) (domain.Use
 
 func (r *Repository) ListUserGroups(ctx context.Context, userID string) ([]domain.Group, error) {
 	query := `
-		SELECT g.id, g.title, g.description, g.visibility, g.owner_id, g.invite_code, g.created_at,
-		       COUNT(gm_all.user_id) AS member_count, gm.role
+		SELECT g.id, g.title, g.description, g.visibility, g.owner_id, COALESCE(g.invite_code, '') AS invite_code, g.created_at,
+		       COUNT(gm_all.user_id)::int AS member_count, gm.role
 		FROM groups g
 		JOIN group_members gm ON gm.group_id = g.id AND gm.user_id = $1
 		LEFT JOIN group_members gm_all ON gm_all.group_id = g.id
@@ -97,8 +97,8 @@ func (r *Repository) ListUserGroups(ctx context.Context, userID string) ([]domai
 func (r *Repository) SearchPublicGroups(ctx context.Context, queryText string) ([]domain.Group, error) {
 	queryText = strings.TrimSpace(queryText)
 	query := `
-		SELECT g.id, g.title, g.description, g.visibility, g.owner_id, NULLIF(g.invite_code, '') AS invite_code, g.created_at,
-		       COUNT(gm.user_id) AS member_count
+		SELECT g.id, g.title, g.description, g.visibility, g.owner_id, '' AS invite_code, g.created_at,
+		       COUNT(gm.user_id)::int AS member_count
 		FROM groups g
 		LEFT JOIN group_members gm ON gm.group_id = g.id
 		WHERE g.visibility = 'public'
@@ -117,9 +117,6 @@ func (r *Repository) SearchPublicGroups(ctx context.Context, queryText string) (
 		var group domain.Group
 		if err := rows.Scan(&group.ID, &group.Title, &group.Description, &group.Visibility, &group.OwnerID, &group.InviteCode, &group.CreatedAt, &group.MemberCount); err != nil {
 			return nil, fmt.Errorf("scan public group: %w", err)
-		}
-		if group.Visibility == domain.VisibilityPublic {
-			group.InviteCode = ""
 		}
 		groups = append(groups, group)
 	}
@@ -168,7 +165,7 @@ func (r *Repository) JoinPublicGroup(ctx context.Context, groupID, userID string
 }
 
 func (r *Repository) JoinByInviteCode(ctx context.Context, userID, inviteCode string) (domain.Group, error) {
-	query := `SELECT id, title, description, visibility, owner_id, invite_code, created_at FROM groups WHERE invite_code = $1 AND visibility = 'private'`
+	query := `SELECT id, title, description, visibility, owner_id, COALESCE(invite_code, '') AS invite_code, created_at FROM groups WHERE invite_code = $1 AND visibility = 'private'`
 	var group domain.Group
 	if err := r.db.QueryRow(ctx, query, strings.ToUpper(inviteCode)).Scan(&group.ID, &group.Title, &group.Description, &group.Visibility, &group.OwnerID, &group.InviteCode, &group.CreatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -266,7 +263,7 @@ func (r *Repository) ListMessages(ctx context.Context, groupID, userID string, l
 
 func (r *Repository) CountGroupMembers(ctx context.Context, groupID string) (int, error) {
 	var count int
-	if err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM group_members WHERE group_id = $1`, groupID).Scan(&count); err != nil {
+	if err := r.db.QueryRow(ctx, `SELECT COUNT(*)::int FROM group_members WHERE group_id = $1`, groupID).Scan(&count); err != nil {
 		return 0, fmt.Errorf("count group members: %w", err)
 	}
 	return count, nil
