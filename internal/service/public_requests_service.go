@@ -158,6 +158,18 @@ func (s *Service) DeletePublicRequestComment(ctx context.Context, moderatorID, c
 	return nil
 }
 
+func (s *Service) HidePublicRequest(ctx context.Context, moderatorID, requestID string) error {
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return NewValidationError("request_id is required")
+	}
+	if err := s.repo.HidePublicRequest(ctx, requestID, moderatorID); err != nil {
+		return err
+	}
+	s.RecordEvent(ctx, moderatorID, "public_request_hidden", "public_request", requestID)
+	return nil
+}
+
 func (s *Service) UpdatePublicRequestStatus(ctx context.Context, adminID, requestID string, status domain.PublicRequestStatus) error {
 	requestID = strings.TrimSpace(requestID)
 	if requestID == "" {
