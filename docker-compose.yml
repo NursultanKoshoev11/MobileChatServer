@@ -1,0 +1,39 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: mobilechat-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mobilechat
+      POSTGRES_USER: mobilechat
+      POSTGRES_PASSWORD: mobilechat_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mobilechat -d mobilechat"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: .
+    container_name: mobilechat-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      APP_ENV: development
+      PORT: 8080
+      DATABASE_URL: postgres://mobilechat:mobilechat_password@postgres:5432/mobilechat?sslmode=disable
+      JWT_SECRET: change-this-development-secret-at-least-32-characters
+      ACCESS_TOKEN_TTL_MINUTES: 60
+      ALLOWED_ORIGINS: http://localhost:3000,http://localhost:8080
+      BCRYPT_COST: 12
+    ports:
+      - "8080:8080"
+
+volumes:
+  postgres_data:
