@@ -5,11 +5,20 @@ import "time"
 type PublicRequestType string
 
 const (
-	PublicRequestSuggestion  PublicRequestType = "suggestion"
-	PublicRequestComplaint   PublicRequestType = "complaint"
-	PublicRequestRequirement PublicRequestType = "requirement"
-	PublicRequestProblem     PublicRequestType = "problem"
-	PublicRequestIdea        PublicRequestType = "idea"
+	PublicRequestAnnouncement PublicRequestType = "announcement"
+	PublicRequestSuggestion   PublicRequestType = "suggestion"
+	PublicRequestComplaint    PublicRequestType = "complaint"
+	PublicRequestRequirement  PublicRequestType = "requirement"
+	PublicRequestProblem      PublicRequestType = "problem"
+	PublicRequestIdea         PublicRequestType = "idea"
+)
+
+type PublicRequestInteractionMode string
+
+const (
+	InteractionModeReadOnly   PublicRequestInteractionMode = "read_only"
+	InteractionModeVoteOnly   PublicRequestInteractionMode = "vote_only"
+	InteractionModeDiscussion PublicRequestInteractionMode = "discussion"
 )
 
 type PublicRequestStatus string
@@ -23,28 +32,29 @@ const (
 )
 
 type PublicRequest struct {
-	ID           string              `json:"id"`
-	GroupID      string              `json:"group_id"`
-	AuthorID     string              `json:"author_id"`
-	AuthorName   string              `json:"author_name"`
-	RequestType  PublicRequestType   `json:"request_type"`
-	Title        string              `json:"title"`
-	Body         string              `json:"body"`
-	Status       PublicRequestStatus `json:"status"`
-	SupportCount int                 `json:"support_count"`
-	OpposeCount  int                 `json:"oppose_count"`
-	CommentCount int                 `json:"comment_count"`
-	MyVote       *string             `json:"my_vote,omitempty"`
-	CreatedAt    time.Time           `json:"created_at"`
-	UpdatedAt    time.Time           `json:"updated_at"`
+	ID              string                       `json:"id"`
+	GroupID         string                       `json:"group_id"`
+	AuthorID        string                       `json:"author_id"`
+	AuthorName      string                       `json:"author_name"`
+	RequestType     PublicRequestType            `json:"request_type"`
+	InteractionMode PublicRequestInteractionMode `json:"interaction_mode"`
+	Title           string                       `json:"title"`
+	Body            string                       `json:"body"`
+	Status          PublicRequestStatus          `json:"status"`
+	SupportCount    int                          `json:"support_count"`
+	OpposeCount     int                          `json:"oppose_count"`
+	CommentCount    int                          `json:"comment_count"`
+	MyVote          *string                      `json:"my_vote,omitempty"`
+	CreatedAt       time.Time                    `json:"created_at"`
+	UpdatedAt       time.Time                    `json:"updated_at"`
 }
 
 type PublicRequestComment struct {
-	ID          string     `json:"id"`
-	RequestID   string     `json:"request_id"`
-	AuthorID    string     `json:"author_id"`
-	AuthorName  string     `json:"author_name"`
-	Body        string     `json:"body"`
-	CreatedAt   time.Time  `json:"created_at"`
-	DeletedAt   *time.Time `json:"deleted_at,omitempty"`
+	ID         string     `json:"id"`
+	RequestID  string     `json:"request_id"`
+	AuthorID   string     `json:"author_id"`
+	AuthorName string     `json:"author_name"`
+	Body       string     `json:"body"`
+	CreatedAt  time.Time  `json:"created_at"`
+	DeletedAt  *time.Time `json:"deleted_at,omitempty"`
 }
