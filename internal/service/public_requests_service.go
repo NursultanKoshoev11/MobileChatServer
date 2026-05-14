@@ -126,6 +126,18 @@ func (s *Service) ListPublicRequestComments(ctx context.Context, viewerID, reque
 	return s.repo.ListPublicRequestComments(ctx, requestID, viewerID)
 }
 
+func (s *Service) DeletePublicRequestComment(ctx context.Context, moderatorID, commentID string) error {
+	commentID = strings.TrimSpace(commentID)
+	if commentID == "" {
+		return NewValidationError("comment_id is required")
+	}
+	if err := s.repo.DeletePublicRequestComment(ctx, commentID, moderatorID); err != nil {
+		return err
+	}
+	s.RecordEvent(ctx, moderatorID, "public_request_comment_deleted", "comment", commentID)
+	return nil
+}
+
 func (s *Service) UpdatePublicRequestStatus(ctx context.Context, adminID, requestID string, status domain.PublicRequestStatus) error {
 	requestID = strings.TrimSpace(requestID)
 	if requestID == "" {
