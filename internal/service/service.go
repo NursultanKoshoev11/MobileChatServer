@@ -33,12 +33,17 @@ type Config struct {
 }
 
 type Service struct {
-	repo *storage.Repository
-	cfg  Config
+	repo     *storage.Repository
+	cfg      Config
+	notifier Notifier
 }
 
-func New(repo *storage.Repository, cfg Config) *Service {
-	return &Service{repo: repo, cfg: cfg}
+func New(repo *storage.Repository, cfg Config, notifier ...Notifier) *Service {
+	selectedNotifier := Notifier(NoopNotifier{})
+	if len(notifier) > 0 && notifier[0] != nil {
+		selectedNotifier = notifier[0]
+	}
+	return &Service{repo: repo, cfg: cfg, notifier: selectedNotifier}
 }
 
 type RegisterInput struct {
