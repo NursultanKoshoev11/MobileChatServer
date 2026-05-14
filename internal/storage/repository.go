@@ -1,0 +1,304 @@
+package storage
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/NursultanKoshoev11/MobileChatServer/internal/domain"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type UserWithPassword struct {
+	User         domain.User
+	PasswordHash string
+}
+
+type Repository struct {
+	db *pgxpool.Pool
+}
+
+func NewRepository(db *pgxpool.Pool) *Repository {
+	return &Repository{db: db}
+}
+
+func (r *Repository) CreateUser(ctx context.Context, user domain.User, passwordHash string) (domain.User, error) {
+	query := `INSERT INTO users (id, email, display_name, password_hash, created_at, updated_at) VALUES ($1, $2, $3, $4, now(), now()) RETURNING created_at`
+	if err := r.db.QueryRow(ctx, query, user.ID, strings.ToLower(user.Email), user.DisplayName, passwordHash).Scan(&user.CreatedAt); err != nil {
+		return domain.User{}, fmt.Errorf("create user: %w", err)
+	}
+	user.Email = strings.ToLower(user.Email)
+	return user, nil
+}
+
+func (r *Repository) GetUserByEmail(ctx context.Context, email string) (UserWithPassword, error) {
+	query := `SELECT id, email, display_name, password_hash, created_at FROM users WHERE email = $1`
+	var result UserWithPassword
+	err := r.db.QueryRow(ctx, query, strings.ToLower(strings.TrimSpace(email))).Scan(
+		&result.User.ID,
+		&result.User.Email,
+		&result.User.DisplayName,
+		&result.PasswordHash,
+		&result.User.CreatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return UserWithPassword{}, ErrNotFound
+	}
+	if err != nil {
+		return UserWithPassword{}, fmt.Errorf("get user by email: %w", err)
+	}
+	return result, nil
+}
+
+func (r *Repository) GetUserByID(ctx context.Context, userID string) (domain.User, error) {
+	query := `SELECT id, email, display_name, created_at FROM users WHERE id = $1`
+	var user domain.User
+	err := r.db.QueryRow(ctx, query, userID).Scan(&user.ID, &user.Email, &user.DisplayName, &user.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.User{}, ErrNotFound
+	}
+	if err != nil {
+		return domain.User{}, fmt.Errorf("get user by id: %w", err)
+	}
+	return user, nil
+}
+
+func (r *Repository) ListUserGroups(ctx context.Context, userID string) ([]domain.Group, error) {
+	query := `
+		SELECT g.id, g.title, g.description, g.visibility, g.owner_id, g.invite_code, g.created_at,
+		       COUNT(gm_all.user_id) AS member_count, gm.role
+		FROM groups g
+		JOIN group_members gm ON gm.group_id = g.id AND gm.user_id = $1
+		LEFT JOIN group_members gm_all ON gm_all.group_id = g.id
+		GROUP BY g.id, gm.role
+		ORDER BY g.created_at DESC`
+	rows, err := r.db.Query(ctx, query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list user groups: %w", err)
+	}
+	defer rows.Close()
+
+	groups := make([]domain.Group, 0)
+	for rows.Next() {
+		var group domain.Group
+		var role domain.GroupRole
+		if err := rows.Scan(&group.ID, &group.Title, &group.Description, &group.Visibility, &group.OwnerID, &group.InviteCode, &group.CreatedAt, &group.MemberCount, &role); err != nil {
+			return nil, fmt.Errorf("scan user group: %w", err)
+		}
+		group.MyRole = &role
+		groups = append(groups, group)
+	}
+	return groups, rows.Err()
+}
+
+func (r *Repository) SearchPublicGroups(ctx context.Context, queryText string) ([]domain.Group, error) {
+	queryText = strings.TrimSpace(queryText)
+	query := `
+		SELECT g.id, g.title, g.description, g.visibility, g.owner_id, NULLIF(g.invite_code, '') AS invite_code, g.created_at,
+		       COUNT(gm.user_id) AS member_count
+		FROM groups g
+		LEFT JOIN group_members gm ON gm.group_id = g.id
+		WHERE g.visibility = 'public'
+		  AND ($1 = '' OR lower(g.title) LIKE '%' || lower($1) || '%' OR lower(g.description) LIKE '%' || lower($1) || '%')
+		GROUP BY g.id
+		ORDER BY g.created_at DESC
+		LIMIT 50`
+	rows, err := r.db.Query(ctx, query, queryText)
+	if err != nil {
+		return nil, fmt.Errorf("search public groups: %w", err)
+	}
+	defer rows.Close()
+
+	groups := make([]domain.Group, 0)
+	for rows.Next() {
+		var group domain.Group
+		if err := rows.Scan(&group.ID, &group.Title, &group.Description, &group.Visibility, &group.OwnerID, &group.InviteCode, &group.CreatedAt, &group.MemberCount); err != nil {
+			return nil, fmt.Errorf("scan public group: %w", err)
+		}
+		if group.Visibility == domain.VisibilityPublic {
+			group.InviteCode = ""
+		}
+		groups = append(groups, group)
+	}
+	return groups, rows.Err()
+}
+
+func (r *Repository) CreateGroup(ctx context.Context, group domain.Group) (domain.Group, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return domain.Group{}, fmt.Errorf("begin create group: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	query := `INSERT INTO groups (id, title, description, visibility, owner_id, invite_code, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, now(), now()) RETURNING created_at`
+	if err := tx.QueryRow(ctx, query, group.ID, group.Title, group.Description, group.Visibility, group.OwnerID, nullableInviteCode(group)).Scan(&group.CreatedAt); err != nil {
+		return domain.Group{}, fmt.Errorf("insert group: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO group_members (group_id, user_id, role) VALUES ($1, $2, 'owner')`, group.ID, group.OwnerID); err != nil {
+		return domain.Group{}, fmt.Errorf("insert group owner: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return domain.Group{}, fmt.Errorf("commit create group: %w", err)
+	}
+	role := domain.RoleOwner
+	group.MyRole = &role
+	group.MemberCount = 1
+	return group, nil
+}
+
+func (r *Repository) JoinPublicGroup(ctx context.Context, groupID, userID string) error {
+	var visibility domain.GroupVisibility
+	if err := r.db.QueryRow(ctx, `SELECT visibility FROM groups WHERE id = $1`, groupID).Scan(&visibility); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("load group visibility: %w", err)
+	}
+	if visibility != domain.VisibilityPublic {
+		return ErrForbidden
+	}
+	_, err := r.db.Exec(ctx, `INSERT INTO group_members (group_id, user_id, role) VALUES ($1, $2, 'member') ON CONFLICT (group_id, user_id) DO NOTHING`, groupID, userID)
+	if err != nil {
+		return fmt.Errorf("join public group: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) JoinByInviteCode(ctx context.Context, userID, inviteCode string) (domain.Group, error) {
+	query := `SELECT id, title, description, visibility, owner_id, invite_code, created_at FROM groups WHERE invite_code = $1 AND visibility = 'private'`
+	var group domain.Group
+	if err := r.db.QueryRow(ctx, query, strings.ToUpper(inviteCode)).Scan(&group.ID, &group.Title, &group.Description, &group.Visibility, &group.OwnerID, &group.InviteCode, &group.CreatedAt); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.Group{}, ErrNotFound
+		}
+		return domain.Group{}, fmt.Errorf("find group by invite code: %w", err)
+	}
+	if _, err := r.db.Exec(ctx, `INSERT INTO group_members (group_id, user_id, role) VALUES ($1, $2, 'member') ON CONFLICT (group_id, user_id) DO NOTHING`, group.ID, userID); err != nil {
+		return domain.Group{}, fmt.Errorf("join by invite code: %w", err)
+	}
+	role := domain.RoleMember
+	group.MyRole = &role
+	group.MemberCount, _ = r.CountGroupMembers(ctx, group.ID)
+	return group, nil
+}
+
+func (r *Repository) InviteUserByID(ctx context.Context, groupID, adminID, targetUserID string) error {
+	role, err := r.GetMemberRole(ctx, groupID, adminID)
+	if err != nil {
+		return err
+	}
+	if role != domain.RoleOwner && role != domain.RoleAdmin {
+		return ErrForbidden
+	}
+	if _, err := r.GetUserByID(ctx, targetUserID); err != nil {
+		return err
+	}
+	_, err = r.db.Exec(ctx, `INSERT INTO group_members (group_id, user_id, role) VALUES ($1, $2, 'member') ON CONFLICT (group_id, user_id) DO NOTHING`, groupID, targetUserID)
+	if err != nil {
+		return fmt.Errorf("invite user by id: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) CreateMessage(ctx context.Context, message domain.Message) (domain.Message, error) {
+	isMember, err := r.IsGroupMember(ctx, message.GroupID, message.SenderID)
+	if err != nil {
+		return domain.Message{}, err
+	}
+	if !isMember {
+		return domain.Message{}, ErrForbidden
+	}
+	query := `
+		INSERT INTO messages (id, group_id, sender_id, text, created_at)
+		VALUES ($1, $2, $3, $4, now())
+		RETURNING created_at`
+	if err := r.db.QueryRow(ctx, query, message.ID, message.GroupID, message.SenderID, message.Text).Scan(&message.CreatedAt); err != nil {
+		return domain.Message{}, fmt.Errorf("create message: %w", err)
+	}
+	user, err := r.GetUserByID(ctx, message.SenderID)
+	if err != nil {
+		return domain.Message{}, err
+	}
+	message.SenderName = user.DisplayName
+	return message, nil
+}
+
+func (r *Repository) ListMessages(ctx context.Context, groupID, userID string, limit int, before time.Time) ([]domain.Message, error) {
+	isMember, err := r.IsGroupMember(ctx, groupID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !isMember {
+		return nil, ErrForbidden
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	query := `
+		SELECT m.id, m.group_id, m.sender_id, u.display_name, m.text, m.created_at
+		FROM messages m
+		JOIN users u ON u.id = m.sender_id
+		WHERE m.group_id = $1 AND ($2::timestamptz IS NULL OR m.created_at < $2)
+		ORDER BY m.created_at DESC
+		LIMIT $3`
+	var beforePtr *time.Time
+	if !before.IsZero() {
+		beforePtr = &before
+	}
+	rows, err := r.db.Query(ctx, query, groupID, beforePtr, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list messages: %w", err)
+	}
+	defer rows.Close()
+	messages := make([]domain.Message, 0)
+	for rows.Next() {
+		var message domain.Message
+		if err := rows.Scan(&message.ID, &message.GroupID, &message.SenderID, &message.SenderName, &message.Text, &message.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan message: %w", err)
+		}
+		messages = append(messages, message)
+	}
+	return messages, rows.Err()
+}
+
+func (r *Repository) CountGroupMembers(ctx context.Context, groupID string) (int, error) {
+	var count int
+	if err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM group_members WHERE group_id = $1`, groupID).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count group members: %w", err)
+	}
+	return count, nil
+}
+
+func (r *Repository) IsGroupMember(ctx context.Context, groupID, userID string) (bool, error) {
+	var exists bool
+	if err := r.db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2)`, groupID, userID).Scan(&exists); err != nil {
+		return false, fmt.Errorf("check group member: %w", err)
+	}
+	return exists, nil
+}
+
+func (r *Repository) GetMemberRole(ctx context.Context, groupID, userID string) (domain.GroupRole, error) {
+	var role domain.GroupRole
+	if err := r.db.QueryRow(ctx, `SELECT role FROM group_members WHERE group_id = $1 AND user_id = $2`, groupID, userID).Scan(&role); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", ErrForbidden
+		}
+		return "", fmt.Errorf("get member role: %w", err)
+	}
+	return role, nil
+}
+
+func nullableInviteCode(group domain.Group) any {
+	if group.Visibility == domain.VisibilityPrivate && group.InviteCode != "" {
+		return group.InviteCode
+	}
+	return nil
+}
+
+var (
+	ErrNotFound  = errors.New("not found")
+	ErrForbidden = errors.New("forbidden")
+)
