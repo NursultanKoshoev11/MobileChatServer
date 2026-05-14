@@ -76,6 +76,7 @@ func (s *Service) CreatePublicRequest(ctx context.Context, authorID, groupID str
 		return domain.PublicRequest{}, err
 	}
 	s.RecordEvent(ctx, authorID, "public_request_created", "group", groupID)
+	go s.notifyGroupAboutNewPublicRequest(context.Background(), authorID, groupID, request.ID, request.Title, request.Body)
 	return request, nil
 }
 
