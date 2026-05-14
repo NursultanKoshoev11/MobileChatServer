@@ -2,10 +2,12 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/domain"
+	"github.com/jackc/pgx/v5"
 )
 
 func (r *Repository) CreatePublicRequest(ctx context.Context, request domain.PublicRequest) (domain.PublicRequest, error) {
@@ -96,9 +98,9 @@ func (r *Repository) ListPublicRequests(ctx context.Context, groupID, viewerID s
 }
 
 func (r *Repository) VotePublicRequest(ctx context.Context, requestID, userID, voteType string) error {
-	var groupID string
-	if err := r.db.QueryRow(ctx, `SELECT group_id FROM public_requests WHERE id = $1`, requestID).Scan(&groupID); err != nil {
-		return ErrNotFound
+	groupID, err := r.publicRequestGroupID(ctx, requestID)
+	if err != nil {
+		return err
 	}
 	isMember, err := r.IsGroupMember(ctx, groupID, userID)
 	if err != nil {
@@ -118,7 +120,18 @@ func (r *Repository) VotePublicRequest(ctx context.Context, requestID, userID, v
 }
 
 func (r *Repository) ClearPublicRequestVote(ctx context.Context, requestID, userID string) error {
-	_, err := r.db.Exec(ctx, `DELETE FROM public_request_votes WHERE request_id = $1 AND user_id = $2`, requestID, userID)
+	groupID, err := r.publicRequestGroupID(ctx, requestID)
+	if err != nil {
+		return err
+	}
+	isMember, err := r.IsGroupMember(ctx, groupID, userID)
+	if err != nil {
+		return err
+	}
+	if !isMember {
+		return ErrForbidden
+	}
+	_, err = r.db.Exec(ctx, `DELETE FROM public_request_votes WHERE request_id = $1 AND user_id = $2`, requestID, userID)
 	if err != nil {
 		return fmt.Errorf("clear public request vote: %w", err)
 	}
@@ -126,9 +139,9 @@ func (r *Repository) ClearPublicRequestVote(ctx context.Context, requestID, user
 }
 
 func (r *Repository) CreatePublicRequestComment(ctx context.Context, comment domain.PublicRequestComment) (domain.PublicRequestComment, error) {
-	var groupID string
-	if err := r.db.QueryRow(ctx, `SELECT group_id FROM public_requests WHERE id = $1`, comment.RequestID).Scan(&groupID); err != nil {
-		return domain.PublicRequestComment{}, ErrNotFound
+	groupID, err := r.publicRequestGroupID(ctx, comment.RequestID)
+	if err != nil {
+		return domain.PublicRequestComment{}, err
 	}
 	isMember, err := r.IsGroupMember(ctx, groupID, comment.AuthorID)
 	if err != nil {
@@ -152,9 +165,9 @@ func (r *Repository) CreatePublicRequestComment(ctx context.Context, comment dom
 }
 
 func (r *Repository) ListPublicRequestComments(ctx context.Context, requestID, viewerID string) ([]domain.PublicRequestComment, error) {
-	var groupID string
-	if err := r.db.QueryRow(ctx, `SELECT group_id FROM public_requests WHERE id = $1`, requestID).Scan(&groupID); err != nil {
-		return nil, ErrNotFound
+	groupID, err := r.publicRequestGroupID(ctx, requestID)
+	if err != nil {
+		return nil, err
 	}
 	isMember, err := r.IsGroupMember(ctx, groupID, viewerID)
 	if err != nil {
@@ -186,9 +199,9 @@ func (r *Repository) ListPublicRequestComments(ctx context.Context, requestID, v
 }
 
 func (r *Repository) UpdatePublicRequestStatus(ctx context.Context, requestID, adminID string, status domain.PublicRequestStatus) error {
-	var groupID string
-	if err := r.db.QueryRow(ctx, `SELECT group_id FROM public_requests WHERE id = $1`, requestID).Scan(&groupID); err != nil {
-		return ErrNotFound
+	groupID, err := r.publicRequestGroupID(ctx, requestID)
+	if err != nil {
+		return err
 	}
 	role, err := r.GetMemberRole(ctx, groupID, adminID)
 	if err != nil {
@@ -202,4 +215,15 @@ func (r *Repository) UpdatePublicRequestStatus(ctx context.Context, requestID, a
 		return fmt.Errorf("update public request status: %w", err)
 	}
 	return nil
+}
+
+func (r *Repository) publicRequestGroupID(ctx context.Context, requestID string) (string, error) {
+	var groupID string
+	if err := r.db.QueryRow(ctx, `SELECT group_id FROM public_requests WHERE id = $1`, requestID).Scan(&groupID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", ErrNotFound
+		}
+		return "", fmt.Errorf("load public request group: %w", err)
+	}
+	return groupID, nil
 }
