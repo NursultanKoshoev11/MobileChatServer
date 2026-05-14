@@ -109,6 +109,31 @@ func (s *PhoneAuthService) VerifyCode(ctx context.Context, input VerifyPhoneCode
 	return s.issuePhoneSession(ctx, user)
 }
 
+func (s *PhoneAuthService) Refresh(ctx context.Context, input RefreshInput) (domain.PhoneSession, error) {
+	refreshToken := strings.TrimSpace(input.RefreshToken)
+	if refreshToken == "" {
+		return domain.PhoneSession{}, NewValidationError("refresh_token is required")
+	}
+	record, err := s.repo.GetRefreshSession(ctx, security.HashToken(refreshToken))
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			return domain.PhoneSession{}, ErrUnauthorized
+		}
+		return domain.PhoneSession{}, err
+	}
+	if record.RevokedAt != nil || time.Now().UTC().After(record.ExpiresAt) {
+		return domain.PhoneSession{}, ErrUnauthorized
+	}
+	if err := s.repo.RevokeRefreshSession(ctx, record.ID); err != nil {
+		return domain.PhoneSession{}, err
+	}
+	user, err := s.repo.GetAuthPhoneUserByID(ctx, record.UserID)
+	if err != nil {
+		return domain.PhoneSession{}, err
+	}
+	return s.issuePhoneSession(ctx, user)
+}
+
 func (s *PhoneAuthService) issuePhoneSession(ctx context.Context, user domain.PhoneAuthUser) (domain.PhoneSession, error) {
 	accessToken, err := security.SignAccessToken(user.ID, s.cfg.JWTSecret, s.cfg.AccessTokenTTL)
 	if err != nil {
