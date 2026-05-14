@@ -8,15 +8,18 @@ import (
 )
 
 type Config struct {
-	Port             string
-	DatabaseURL      string
-	JWTSecret        string
-	AccessTokenTTL   time.Duration
-	AllowedOrigins   string
-	BCryptCost       int
-	Environment      string
-	SMSProvider      string
-	SMSFrom          string
+	Port                 string
+	DatabaseURL          string
+	JWTSecret            string
+	AccessTokenTTL       time.Duration
+	AllowedOrigins       string
+	BCryptCost           int
+	Environment          string
+	SMSProvider          string
+	SMSFrom              string
+	FCMProjectID         string
+	FCMClientEmail       string
+	FCMPrivateKey        string
 }
 
 func Load() (Config, error) {
@@ -29,6 +32,9 @@ func Load() (Config, error) {
 		BCryptCost:     getEnvInt("BCRYPT_COST", 12),
 		SMSProvider:    getEnv("SMS_PROVIDER", "dev"),
 		SMSFrom:        getEnv("SMS_FROM", "MobileChat"),
+		FCMProjectID:   os.Getenv("FCM_PROJECT_ID"),
+		FCMClientEmail: os.Getenv("FCM_CLIENT_EMAIL"),
+		FCMPrivateKey:  os.Getenv("FCM_PRIVATE_KEY"),
 	}
 
 	accessTokenTTLMinutes := getEnvInt("ACCESS_TOKEN_TTL_MINUTES", 60)
