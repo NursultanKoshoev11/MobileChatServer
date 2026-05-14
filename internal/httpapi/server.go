@@ -270,8 +270,9 @@ func (s *Server) recoverer(next http.Handler) http.Handler {
 }
 
 func (s *Server) writeError(w http.ResponseWriter, err error) {
+	var validationErr service.ValidationError
 	switch {
-	case errors.As(err, &service.ValidationError{}):
+	case errors.As(err, &validationErr):
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 	case errors.Is(err, service.ErrUnauthorized):
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
