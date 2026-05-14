@@ -51,7 +51,10 @@ func (n *FCMNotifier) SendToTokens(ctx context.Context, tokens []string, message
 	if client == nil {
 		client = http.DefaultClient
 	}
+
 	seen := map[string]bool{}
+	failed := 0
+	var lastErr error
 	for _, token := range tokens {
 		token = strings.TrimSpace(token)
 		if token == "" || seen[token] {
@@ -59,8 +62,13 @@ func (n *FCMNotifier) SendToTokens(ctx context.Context, tokens []string, message
 		}
 		seen[token] = true
 		if err := n.sendOne(ctx, client, accessToken, token, message); err != nil {
-			return err
+			failed++
+			lastErr = err
+			continue
 		}
+	}
+	if failed > 0 {
+		return fmt.Errorf("fcm send failed for %d token(s): %w", failed, lastErr)
 	}
 	return nil
 }
@@ -178,6 +186,7 @@ func (n *FCMNotifier) signedJWT() (string, error) {
 }
 
 func parsePrivateKey(raw string) (*rsa.PrivateKey, error) {
+	raw = strings.TrimSpace(raw)
 	raw = strings.ReplaceAll(raw, `\n`, "\n")
 	raw = strings.ReplaceAll(raw, `\r`, "")
 	raw = strings.ReplaceAll(raw, `\u003d`, "=")
