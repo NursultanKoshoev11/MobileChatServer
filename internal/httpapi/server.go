@@ -80,6 +80,9 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 		r.Get("/api/groups/{groupID}/messages", server.listMessages)
 		r.Post("/api/groups/{groupID}/messages", server.sendMessage)
 		r.Get("/api/groups/{groupID}/ws", server.groupWebSocket)
+		r.Get("/api/invites", server.listInvites)
+		r.Post("/api/invites/{inviteID}/accept", server.acceptInvite)
+		r.Post("/api/invites/{inviteID}/decline", server.declineInvite)
 	})
 
 	return r
@@ -193,11 +196,37 @@ func (s *Server) inviteUser(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &input) {
 		return
 	}
-	if err := s.svc.InviteUserByID(r.Context(), currentUser(r).ID, chi.URLParam(r, "groupID"), input.TargetUserID); err != nil {
+	invite, err := s.svc.CreateInviteRequest(r.Context(), currentUser(r).ID, chi.URLParam(r, "groupID"), input.TargetUserID)
+	if err != nil {
 		s.writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "invited"})
+	writeJSON(w, http.StatusCreated, invite)
+}
+
+func (s *Server) listInvites(w http.ResponseWriter, r *http.Request) {
+	invites, err := s.svc.ListPendingInvites(r.Context(), currentUser(r).ID)
+	if err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, invites)
+}
+
+func (s *Server) acceptInvite(w http.ResponseWriter, r *http.Request) {
+	if err := s.svc.AcceptInviteRequest(r.Context(), currentUser(r).ID, chi.URLParam(r, "inviteID")); err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "accepted"})
+}
+
+func (s *Server) declineInvite(w http.ResponseWriter, r *http.Request) {
+	if err := s.svc.DeclineInviteRequest(r.Context(), currentUser(r).ID, chi.URLParam(r, "inviteID")); err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "declined"})
 }
 
 func (s *Server) listMessages(w http.ResponseWriter, r *http.Request) {
