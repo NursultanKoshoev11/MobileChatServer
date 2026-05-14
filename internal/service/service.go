@@ -220,6 +220,16 @@ func (s *Service) ListMessages(ctx context.Context, userID, groupID string, limi
 
 func (s *Service) SendMessage(ctx context.Context, senderID, groupID string, input SendMessageInput) (domain.Message, error) {
 	text := strings.TrimSpace(input.Text)
+	if groupID == "" {
+		return domain.Message{}, NewValidationError("group_id is required")
+	}
+	role, err := s.repo.GetMemberRole(ctx, groupID, senderID)
+	if err != nil {
+		return domain.Message{}, err
+	}
+	if role != domain.RoleOwner && role != domain.RoleAdmin {
+		return domain.Message{}, storage.ErrForbidden
+	}
 	if text == "" {
 		return domain.Message{}, NewValidationError("text is required")
 	}
