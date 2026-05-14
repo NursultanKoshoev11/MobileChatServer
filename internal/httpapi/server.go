@@ -12,10 +12,12 @@ import (
 	"time"
 
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/domain"
+	"github.com/NursultanKoshoev11/MobileChatServer/internal/realtime"
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/service"
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/storage"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/gorilla/websocket"
 )
 
 const maxJSONBodyBytes = 1 << 20
@@ -26,6 +28,9 @@ type Server struct {
 	svc            *service.Service
 	logger         *log.Logger
 	allowedOrigins map[string]bool
+	hub            *realtime.Hub
+	limiter        *RateLimiter
+	upgrader       websocket.Upgrader
 }
 
 func New(svc *service.Service, logger *log.Logger, allowedOrigins string) http.Handler {
@@ -33,6 +38,16 @@ func New(svc *service.Service, logger *log.Logger, allowedOrigins string) http.H
 		svc:            svc,
 		logger:         logger,
 		allowedOrigins: parseOrigins(allowedOrigins),
+		hub:            realtime.NewHub(logger),
+		limiter:        NewRateLimiter(120, time.Minute),
+	}
+	server.upgrader = websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+		CheckOrigin: func(r *http.Request) bool {
+			origin := r.Header.Get("Origin")
+			return origin == "" || server.allowedOrigins["*"] || server.allowedOrigins[origin]
+		},
 	}
 
 	r := chi.NewRouter()
@@ -41,12 +56,14 @@ func New(svc *service.Service, logger *log.Logger, allowedOrigins string) http.H
 	r.Use(server.recoverer)
 	r.Use(server.requestLogger)
 	r.Use(server.cors)
+	r.Use(server.rateLimit)
 
 	r.Get("/api/health", server.health)
 
 	r.Route("/api/auth", func(r chi.Router) {
 		r.Post("/register", server.register)
 		r.Post("/login", server.login)
+		r.Post("/refresh", server.refresh)
 	})
 
 	r.Group(func(r chi.Router) {
@@ -60,6 +77,7 @@ func New(svc *service.Service, logger *log.Logger, allowedOrigins string) http.H
 		r.Post("/api/groups/{groupID}/invite-user", server.inviteUser)
 		r.Get("/api/groups/{groupID}/messages", server.listMessages)
 		r.Post("/api/groups/{groupID}/messages", server.sendMessage)
+		r.Get("/api/groups/{groupID}/ws", server.groupWebSocket)
 	})
 
 	return r
@@ -88,6 +106,19 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	session, err := s.svc.Login(r.Context(), input)
+	if err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, session)
+}
+
+func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
+	var input service.RefreshInput
+	if !readJSON(w, r, &input) {
+		return
+	}
+	session, err := s.svc.RefreshSession(r.Context(), input)
 	if err != nil {
 		s.writeError(w, err)
 		return
@@ -195,12 +226,33 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &input) {
 		return
 	}
-	message, err := s.svc.SendMessage(r.Context(), currentUser(r).ID, chi.URLParam(r, "groupID"), input)
+	groupID := chi.URLParam(r, "groupID")
+	message, err := s.svc.SendMessage(r.Context(), currentUser(r).ID, groupID, input)
 	if err != nil {
 		s.writeError(w, err)
 		return
 	}
+	s.hub.BroadcastGroup(groupID, realtime.Event{Type: "message.created", GroupID: groupID, Payload: message})
 	writeJSON(w, http.StatusCreated, message)
+}
+
+func (s *Server) groupWebSocket(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r)
+	groupID := chi.URLParam(r, "groupID")
+	if _, err := s.svc.ListMessages(r.Context(), user.ID, groupID, 1, time.Time{}); err != nil {
+		s.writeError(w, err)
+		return
+	}
+	conn, err := s.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		s.logger.Printf("websocket upgrade failed: %v", err)
+		return
+	}
+	client := realtime.NewClient(s.hub, conn, user, groupID)
+	s.hub.Register(client)
+	client.Send <- realtime.Event{Type: "connection.ready", GroupID: groupID, Payload: map[string]string{"user_id": user.ID}}
+	go client.WritePump()
+	go client.ReadPump()
 }
 
 func (s *Server) auth(next http.Handler) http.Handler {
@@ -218,6 +270,20 @@ func (s *Server) auth(next http.Handler) http.Handler {
 		}
 		ctx := context.WithValue(r.Context(), userContextKey{}, user)
 		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func (s *Server) rateLimit(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		key := clientIP(r)
+		if user := currentUser(r); user.ID != "" {
+			key = user.ID
+		}
+		if !s.limiter.Allow(key) {
+			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "rate limit exceeded"})
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 
