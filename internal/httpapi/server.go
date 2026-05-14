@@ -94,6 +94,7 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 		r.Post("/api/requests/{requestID}/comments", server.createPublicRequestComment)
 		r.Delete("/api/requests/comments/{commentID}", server.deletePublicRequestComment)
 		r.Post("/api/requests/{requestID}/status", server.updatePublicRequestStatus)
+		r.Post("/api/requests/{requestID}/hide", server.hidePublicRequest)
 	})
 
 	return r
