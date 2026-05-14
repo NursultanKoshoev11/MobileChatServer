@@ -60,6 +60,7 @@ func (r *Repository) ListPublicRequests(ctx context.Context, groupID, viewerID s
 		LEFT JOIN public_request_votes v ON v.request_id = pr.id
 		LEFT JOIN public_request_votes myv ON myv.request_id = pr.id AND myv.user_id = $2
 		WHERE pr.group_id = $1
+		  AND pr.hidden_at IS NULL
 		  AND ($3::timestamptz IS NULL OR pr.created_at < $3)
 		  AND ($4::boolean = false OR pr.author_id = $2)
 		GROUP BY pr.id, u.display_name, myv.vote_type
@@ -230,7 +231,7 @@ func (r *Repository) DeletePublicRequestComment(ctx context.Context, commentID, 
 		SELECT pr.group_id
 		FROM public_request_comments c
 		JOIN public_requests pr ON pr.id = c.request_id
-		WHERE c.id = $1 AND c.deleted_at IS NULL`, commentID).Scan(&groupID)
+		WHERE c.id = $1 AND c.deleted_at IS NULL AND pr.hidden_at IS NULL`, commentID).Scan(&groupID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
@@ -254,6 +255,28 @@ func (r *Repository) DeletePublicRequestComment(ctx context.Context, commentID, 
 	return nil
 }
 
+func (r *Repository) HidePublicRequest(ctx context.Context, requestID, moderatorID string) error {
+	groupID, err := r.publicRequestGroupID(ctx, requestID)
+	if err != nil {
+		return err
+	}
+	role, err := r.GetMemberRole(ctx, groupID, moderatorID)
+	if err != nil {
+		return err
+	}
+	if role != domain.RoleOwner && role != domain.RoleAdmin {
+		return ErrForbidden
+	}
+	result, err := r.db.Exec(ctx, `UPDATE public_requests SET hidden_at = now(), hidden_by = $1, updated_at = now() WHERE id = $2 AND hidden_at IS NULL`, moderatorID, requestID)
+	if err != nil {
+		return fmt.Errorf("hide public request: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (r *Repository) UpdatePublicRequestStatus(ctx context.Context, requestID, adminID string, status domain.PublicRequestStatus) error {
 	groupID, err := r.publicRequestGroupID(ctx, requestID)
 	if err != nil {
@@ -266,7 +289,7 @@ func (r *Repository) UpdatePublicRequestStatus(ctx context.Context, requestID, a
 	if role != domain.RoleOwner && role != domain.RoleAdmin {
 		return ErrForbidden
 	}
-	_, err = r.db.Exec(ctx, `UPDATE public_requests SET status = $1, updated_at = now() WHERE id = $2`, status, requestID)
+	_, err = r.db.Exec(ctx, `UPDATE public_requests SET status = $1, updated_at = now() WHERE id = $2 AND hidden_at IS NULL`, status, requestID)
 	if err != nil {
 		return fmt.Errorf("update public request status: %w", err)
 	}
@@ -275,7 +298,7 @@ func (r *Repository) UpdatePublicRequestStatus(ctx context.Context, requestID, a
 
 func (r *Repository) publicRequestGroupID(ctx context.Context, requestID string) (string, error) {
 	var groupID string
-	if err := r.db.QueryRow(ctx, `SELECT group_id FROM public_requests WHERE id = $1`, requestID).Scan(&groupID); err != nil {
+	if err := r.db.QueryRow(ctx, `SELECT group_id FROM public_requests WHERE id = $1 AND hidden_at IS NULL`, requestID).Scan(&groupID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", ErrNotFound
 		}
@@ -286,7 +309,7 @@ func (r *Repository) publicRequestGroupID(ctx context.Context, requestID string)
 
 func (r *Repository) publicRequestInteractionMode(ctx context.Context, requestID string) (domain.PublicRequestInteractionMode, error) {
 	var mode domain.PublicRequestInteractionMode
-	if err := r.db.QueryRow(ctx, `SELECT interaction_mode FROM public_requests WHERE id = $1`, requestID).Scan(&mode); err != nil {
+	if err := r.db.QueryRow(ctx, `SELECT interaction_mode FROM public_requests WHERE id = $1 AND hidden_at IS NULL`, requestID).Scan(&mode); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", ErrNotFound
 		}
