@@ -15,6 +15,8 @@ type Config struct {
 	AllowedOrigins   string
 	BCryptCost       int
 	Environment      string
+	SMSProvider      string
+	SMSFrom          string
 }
 
 func Load() (Config, error) {
@@ -25,6 +27,8 @@ func Load() (Config, error) {
 		AllowedOrigins: getEnv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:8080"),
 		Environment:    getEnv("APP_ENV", "development"),
 		BCryptCost:     getEnvInt("BCRYPT_COST", 12),
+		SMSProvider:    getEnv("SMS_PROVIDER", "dev"),
+		SMSFrom:        getEnv("SMS_FROM", "MobileChat"),
 	}
 
 	accessTokenTTLMinutes := getEnvInt("ACCESS_TOKEN_TTL_MINUTES", 60)
@@ -38,6 +42,9 @@ func Load() (Config, error) {
 	}
 	if cfg.BCryptCost < 10 || cfg.BCryptCost > 15 {
 		return Config{}, fmt.Errorf("BCRYPT_COST must be between 10 and 15")
+	}
+	if cfg.Environment == "production" && cfg.SMSProvider == "dev" {
+		return Config{}, fmt.Errorf("SMS_PROVIDER=dev is not allowed in production")
 	}
 
 	return cfg, nil
