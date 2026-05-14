@@ -71,6 +71,8 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 	r.Group(func(r chi.Router) {
 		r.Use(server.auth)
 		r.Get("/api/me", server.me)
+		r.Post("/api/push/register", server.registerPushToken)
+		r.Delete("/api/push/token", server.deletePushToken)
 		r.Get("/api/groups", server.listGroups)
 		r.Post("/api/groups", server.createGroup)
 		r.Get("/api/groups/search", server.searchGroups)
