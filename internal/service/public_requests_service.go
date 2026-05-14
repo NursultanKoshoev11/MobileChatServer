@@ -16,9 +16,10 @@ const (
 )
 
 type CreatePublicRequestInput struct {
-	RequestType domain.PublicRequestType `json:"request_type"`
-	Title       string                   `json:"title"`
-	Body        string                   `json:"body"`
+	RequestType     domain.PublicRequestType            `json:"request_type"`
+	InteractionMode domain.PublicRequestInteractionMode `json:"interaction_mode"`
+	Title           string                              `json:"title"`
+	Body            string                              `json:"body"`
 }
 
 type CreatePublicRequestCommentInput struct {
@@ -39,6 +40,13 @@ func (s *Service) CreatePublicRequest(ctx context.Context, authorID, groupID str
 	if !validPublicRequestType(input.RequestType) {
 		return domain.PublicRequest{}, NewValidationError("request_type is invalid")
 	}
+	mode := input.InteractionMode
+	if mode == "" {
+		mode = domain.InteractionModeDiscussion
+	}
+	if !validInteractionMode(mode) {
+		return domain.PublicRequest{}, NewValidationError("interaction_mode is invalid")
+	}
 	if len(title) < 3 || len(title) > maxPublicRequestTitleLen {
 		return domain.PublicRequest{}, NewValidationError(fmt.Sprintf("title must be between 3 and %d characters", maxPublicRequestTitleLen))
 	}
@@ -46,12 +54,13 @@ func (s *Service) CreatePublicRequest(ctx context.Context, authorID, groupID str
 		return domain.PublicRequest{}, NewValidationError(fmt.Sprintf("body must be between 5 and %d characters", maxPublicRequestBodyLen))
 	}
 	request, err := s.repo.CreatePublicRequest(ctx, domain.PublicRequest{
-		ID:          "REQ-" + strings.ToUpper(randomHex(12)),
-		GroupID:     groupID,
-		AuthorID:    authorID,
-		RequestType: input.RequestType,
-		Title:       title,
-		Body:        body,
+		ID:              "REQ-" + strings.ToUpper(randomHex(12)),
+		GroupID:         groupID,
+		AuthorID:        authorID,
+		RequestType:     input.RequestType,
+		InteractionMode: mode,
+		Title:           title,
+		Body:            body,
 	})
 	if err != nil {
 		return domain.PublicRequest{}, err
@@ -155,7 +164,16 @@ func (s *Service) UpdatePublicRequestStatus(ctx context.Context, adminID, reques
 
 func validPublicRequestType(value domain.PublicRequestType) bool {
 	switch value {
-	case domain.PublicRequestSuggestion, domain.PublicRequestComplaint, domain.PublicRequestRequirement, domain.PublicRequestProblem, domain.PublicRequestIdea:
+	case domain.PublicRequestAnnouncement, domain.PublicRequestSuggestion, domain.PublicRequestComplaint, domain.PublicRequestRequirement, domain.PublicRequestProblem, domain.PublicRequestIdea:
+		return true
+	default:
+		return false
+	}
+}
+
+func validInteractionMode(value domain.PublicRequestInteractionMode) bool {
+	switch value {
+	case domain.InteractionModeReadOnly, domain.InteractionModeVoteOnly, domain.InteractionModeDiscussion:
 		return true
 	default:
 		return false
