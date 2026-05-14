@@ -25,10 +25,10 @@ import (
 const firebaseMessagingScope = "https://www.googleapis.com/auth/firebase.messaging"
 
 type FCMNotifier struct {
-	ProjectID    string
-	ClientEmail  string
-	PrivateKey   string
-	HTTPClient   *http.Client
+	ProjectID   string
+	ClientEmail string
+	PrivateKey  string
+	HTTPClient  *http.Client
 
 	mu          sync.Mutex
 	accessToken string
@@ -179,6 +179,7 @@ func (n *FCMNotifier) signedJWT() (string, error) {
 
 func parsePrivateKey(raw string) (*rsa.PrivateKey, error) {
 	raw = strings.ReplaceAll(raw, `\n`, "\n")
+	raw = strings.ReplaceAll(raw, `\r`, "")
 	block, _ := pem.Decode([]byte(raw))
 	if block == nil {
 		return nil, fmt.Errorf("invalid private key pem")
