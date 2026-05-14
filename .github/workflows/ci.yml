@@ -42,6 +42,9 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
+      - name: Go fmt
+        run: gofmt -w .
+
       - name: Go fmt check
         run: test -z "$(gofmt -l .)"
 
