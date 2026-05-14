@@ -80,9 +80,17 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 		r.Get("/api/groups/{groupID}/messages", server.listMessages)
 		r.Post("/api/groups/{groupID}/messages", server.sendMessage)
 		r.Get("/api/groups/{groupID}/ws", server.groupWebSocket)
+		r.Post("/api/groups/{groupID}/requests", server.createPublicRequest)
+		r.Get("/api/groups/{groupID}/requests", server.listPublicRequests)
 		r.Get("/api/invites", server.listInvites)
 		r.Post("/api/invites/{inviteID}/accept", server.acceptInvite)
 		r.Post("/api/invites/{inviteID}/decline", server.declineInvite)
+		r.Post("/api/requests/{requestID}/support", server.supportPublicRequest)
+		r.Post("/api/requests/{requestID}/oppose", server.opposePublicRequest)
+		r.Delete("/api/requests/{requestID}/vote", server.clearPublicRequestVote)
+		r.Get("/api/requests/{requestID}/comments", server.listPublicRequestComments)
+		r.Post("/api/requests/{requestID}/comments", server.createPublicRequestComment)
+		r.Post("/api/requests/{requestID}/status", server.updatePublicRequestStatus)
 	})
 
 	return r
@@ -267,6 +275,99 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, message)
 }
 
+func (s *Server) createPublicRequest(w http.ResponseWriter, r *http.Request) {
+	var input service.CreatePublicRequestInput
+	if !readJSON(w, r, &input) {
+		return
+	}
+	request, err := s.svc.CreatePublicRequest(r.Context(), currentUser(r).ID, chi.URLParam(r, "groupID"), input)
+	if err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, request)
+}
+
+func (s *Server) listPublicRequests(w http.ResponseWriter, r *http.Request) {
+	limit := 50
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			limit = parsed
+		}
+	}
+	var before time.Time
+	if raw := r.URL.Query().Get("before"); raw != "" {
+		if parsed, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+			before = parsed
+		}
+	}
+	mineOnly := r.URL.Query().Get("mine") == "true"
+	requests, err := s.svc.ListPublicRequests(r.Context(), currentUser(r).ID, chi.URLParam(r, "groupID"), limit, before, mineOnly)
+	if err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, requests)
+}
+
+func (s *Server) supportPublicRequest(w http.ResponseWriter, r *http.Request) {
+	if err := s.svc.VotePublicRequest(r.Context(), currentUser(r).ID, chi.URLParam(r, "requestID"), "support"); err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "supported"})
+}
+
+func (s *Server) opposePublicRequest(w http.ResponseWriter, r *http.Request) {
+	if err := s.svc.VotePublicRequest(r.Context(), currentUser(r).ID, chi.URLParam(r, "requestID"), "oppose"); err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "opposed"})
+}
+
+func (s *Server) clearPublicRequestVote(w http.ResponseWriter, r *http.Request) {
+	if err := s.svc.ClearPublicRequestVote(r.Context(), currentUser(r).ID, chi.URLParam(r, "requestID")); err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "cleared"})
+}
+
+func (s *Server) createPublicRequestComment(w http.ResponseWriter, r *http.Request) {
+	var input service.CreatePublicRequestCommentInput
+	if !readJSON(w, r, &input) {
+		return
+	}
+	comment, err := s.svc.CreatePublicRequestComment(r.Context(), currentUser(r).ID, chi.URLParam(r, "requestID"), input)
+	if err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, comment)
+}
+
+func (s *Server) listPublicRequestComments(w http.ResponseWriter, r *http.Request) {
+	comments, err := s.svc.ListPublicRequestComments(r.Context(), currentUser(r).ID, chi.URLParam(r, "requestID"))
+	if err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, comments)
+}
+
+func (s *Server) updatePublicRequestStatus(w http.ResponseWriter, r *http.Request) {
+	var input service.UpdatePublicRequestStatusInput
+	if !readJSON(w, r, &input) {
+		return
+	}
+	if err := s.svc.UpdatePublicRequestStatus(r.Context(), currentUser(r).ID, chi.URLParam(r, "requestID"), input.Status); err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
+
 func (s *Server) groupWebSocket(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
 	groupID := chi.URLParam(r, "groupID")
@@ -335,7 +436,7 @@ func (s *Server) cors(next http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
 		}
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID")
 		w.Header().Set("Access-Control-Expose-Headers", "X-Request-ID")
 		if r.Method == http.MethodOptions {
