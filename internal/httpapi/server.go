@@ -259,12 +259,11 @@ func (s *Server) groupWebSocket(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		header := r.Header.Get("Authorization")
-		if !strings.HasPrefix(header, "Bearer ") {
+		token := bearerTokenFromRequest(r)
+		if token == "" {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "missing bearer token"})
 			return
 		}
-		token := strings.TrimSpace(strings.TrimPrefix(header, "Bearer "))
 		user, err := s.svc.Authenticate(r.Context(), token)
 		if err != nil {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
@@ -273,6 +272,17 @@ func (s *Server) auth(next http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), userContextKey{}, user)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func bearerTokenFromRequest(r *http.Request) string {
+	header := r.Header.Get("Authorization")
+	if strings.HasPrefix(header, "Bearer ") {
+		return strings.TrimSpace(strings.TrimPrefix(header, "Bearer "))
+	}
+	if token := strings.TrimSpace(r.URL.Query().Get("token")); token != "" && strings.HasSuffix(r.URL.Path, "/ws") {
+		return token
+	}
+	return ""
 }
 
 func (s *Server) rateLimit(next http.Handler) http.Handler {
