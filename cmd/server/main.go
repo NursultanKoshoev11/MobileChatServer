@@ -12,6 +12,7 @@ import (
 
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/config"
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/httpapi"
+	"github.com/NursultanKoshoev11/MobileChatServer/internal/push"
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/service"
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/sms"
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/storage"
@@ -39,11 +40,20 @@ func main() {
 	}
 
 	repo := storage.NewRepository(db.Pool)
+	notifier := &push.FCMNotifier{
+		ProjectID:   cfg.FCMProjectID,
+		ClientEmail: cfg.FCMClientEmail,
+		PrivateKey:  cfg.FCMPrivateKey,
+		HTTPClient:  &http.Client{Timeout: 10 * time.Second},
+	}
+	if !notifier.Enabled() {
+		logger.Println("push notifications disabled: FCM env vars are not configured")
+	}
 	svc := service.New(repo, service.Config{
 		JWTSecret:      cfg.JWTSecret,
 		AccessTokenTTL: cfg.AccessTokenTTL,
 		BCryptCost:     cfg.BCryptCost,
-	})
+	}, notifier)
 
 	var smsSender sms.Sender = sms.DevSender{Logger: logger}
 	if cfg.SMSProvider != "dev" {
