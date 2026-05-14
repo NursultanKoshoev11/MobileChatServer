@@ -1,0 +1,50 @@
+package domain
+
+import "time"
+
+type PublicRequestType string
+
+const (
+	PublicRequestSuggestion  PublicRequestType = "suggestion"
+	PublicRequestComplaint   PublicRequestType = "complaint"
+	PublicRequestRequirement PublicRequestType = "requirement"
+	PublicRequestProblem     PublicRequestType = "problem"
+	PublicRequestIdea        PublicRequestType = "idea"
+)
+
+type PublicRequestStatus string
+
+const (
+	PublicRequestStatusNew         PublicRequestStatus = "new"
+	PublicRequestStatusUnderReview PublicRequestStatus = "under_review"
+	PublicRequestStatusAccepted    PublicRequestStatus = "accepted"
+	PublicRequestStatusRejected    PublicRequestStatus = "rejected"
+	PublicRequestStatusResolved    PublicRequestStatus = "resolved"
+)
+
+type PublicRequest struct {
+	ID           string              `json:"id"`
+	GroupID      string              `json:"group_id"`
+	AuthorID     string              `json:"author_id"`
+	AuthorName   string              `json:"author_name"`
+	RequestType  PublicRequestType   `json:"request_type"`
+	Title        string              `json:"title"`
+	Body         string              `json:"body"`
+	Status       PublicRequestStatus `json:"status"`
+	SupportCount int                 `json:"support_count"`
+	OpposeCount  int                 `json:"oppose_count"`
+	CommentCount int                 `json:"comment_count"`
+	MyVote       *string             `json:"my_vote,omitempty"`
+	CreatedAt    time.Time           `json:"created_at"`
+	UpdatedAt    time.Time           `json:"updated_at"`
+}
+
+type PublicRequestComment struct {
+	ID          string     `json:"id"`
+	RequestID   string     `json:"request_id"`
+	AuthorID    string     `json:"author_id"`
+	AuthorName  string     `json:"author_name"`
+	Body        string     `json:"body"`
+	CreatedAt   time.Time  `json:"created_at"`
+	DeletedAt   *time.Time `json:"deleted_at,omitempty"`
+}
