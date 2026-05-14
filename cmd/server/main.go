@@ -13,6 +13,7 @@ import (
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/config"
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/httpapi"
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/service"
+	"github.com/NursultanKoshoev11/MobileChatServer/internal/sms"
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/storage"
 )
 
@@ -44,7 +45,17 @@ func main() {
 		BCryptCost:     cfg.BCryptCost,
 	})
 
-	handler := httpapi.New(svc, logger, cfg.AllowedOrigins)
+	var smsSender sms.Sender = sms.DevSender{Logger: logger}
+	if cfg.SMSProvider != "dev" {
+		smsSender = sms.DisabledSender{}
+	}
+	phoneAuth := service.NewPhoneAuth(repo, service.PhoneAuthConfig{
+		JWTSecret:      cfg.JWTSecret,
+		AccessTokenTTL: cfg.AccessTokenTTL,
+		Environment:    cfg.Environment,
+	}, smsSender)
+
+	handler := httpapi.New(svc, phoneAuth, logger, cfg.AllowedOrigins)
 	server := &http.Server{
 		Addr:              ":" + cfg.Port,
 		Handler:           handler,
