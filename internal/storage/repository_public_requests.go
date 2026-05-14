@@ -53,7 +53,7 @@ func (r *Repository) ListPublicRequests(ctx context.Context, groupID, viewerID s
 		       COALESCE(SUM(CASE WHEN v.vote_type = 'support' THEN 1 ELSE 0 END), 0)::int AS support_count,
 		       COALESCE(SUM(CASE WHEN v.vote_type = 'oppose' THEN 1 ELSE 0 END), 0)::int AS oppose_count,
 		       (SELECT COUNT(*)::int FROM public_request_comments c WHERE c.request_id = pr.id AND c.deleted_at IS NULL) AS comment_count,
-		       myv.vote_type AS my_vote,
+		       COALESCE(myv.vote_type, '') AS my_vote,
 		       pr.created_at, pr.updated_at
 		FROM public_requests pr
 		JOIN users u ON u.id = pr.author_id
@@ -74,6 +74,7 @@ func (r *Repository) ListPublicRequests(ctx context.Context, groupID, viewerID s
 	requests := make([]domain.PublicRequest, 0)
 	for rows.Next() {
 		var request domain.PublicRequest
+		var myVote string
 		if err := rows.Scan(
 			&request.ID,
 			&request.GroupID,
@@ -86,11 +87,14 @@ func (r *Repository) ListPublicRequests(ctx context.Context, groupID, viewerID s
 			&request.SupportCount,
 			&request.OpposeCount,
 			&request.CommentCount,
-			&request.MyVote,
+			&myVote,
 			&request.CreatedAt,
 			&request.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan public request: %w", err)
+		}
+		if myVote != "" {
+			request.MyVote = &myVote
 		}
 		requests = append(requests, request)
 	}
