@@ -26,6 +26,7 @@ type userContextKey struct{}
 
 type Server struct {
 	svc            *service.Service
+	phoneAuth      *service.PhoneAuthService
 	logger         *log.Logger
 	allowedOrigins map[string]bool
 	hub            *realtime.Hub
@@ -33,9 +34,10 @@ type Server struct {
 	upgrader       websocket.Upgrader
 }
 
-func New(svc *service.Service, logger *log.Logger, allowedOrigins string) http.Handler {
+func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.Logger, allowedOrigins string) http.Handler {
 	server := &Server{
 		svc:            svc,
+		phoneAuth:      phoneAuth,
 		logger:         logger,
 		allowedOrigins: parseOrigins(allowedOrigins),
 		hub:            realtime.NewHub(logger),
@@ -61,9 +63,9 @@ func New(svc *service.Service, logger *log.Logger, allowedOrigins string) http.H
 	r.Get("/api/health", server.health)
 
 	r.Route("/api/auth", func(r chi.Router) {
-		r.Post("/register", server.register)
-		r.Post("/login", server.login)
-		r.Post("/refresh", server.refresh)
+		r.Post("/request-code", server.requestPhoneCode)
+		r.Post("/verify-code", server.verifyPhoneCode)
+		r.Post("/refresh", server.refreshPhoneSession)
 	})
 
 	r.Group(func(r chi.Router) {
@@ -87,25 +89,25 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (s *Server) register(w http.ResponseWriter, r *http.Request) {
-	var input service.RegisterInput
+func (s *Server) requestPhoneCode(w http.ResponseWriter, r *http.Request) {
+	var input service.RequestPhoneCodeInput
 	if !readJSON(w, r, &input) {
 		return
 	}
-	session, err := s.svc.Register(r.Context(), input)
+	result, err := s.phoneAuth.RequestCode(r.Context(), input)
 	if err != nil {
 		s.writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, session)
+	writeJSON(w, http.StatusOK, result)
 }
 
-func (s *Server) login(w http.ResponseWriter, r *http.Request) {
-	var input service.LoginInput
+func (s *Server) verifyPhoneCode(w http.ResponseWriter, r *http.Request) {
+	var input service.VerifyPhoneCodeInput
 	if !readJSON(w, r, &input) {
 		return
 	}
-	session, err := s.svc.Login(r.Context(), input)
+	session, err := s.phoneAuth.VerifyCode(r.Context(), input)
 	if err != nil {
 		s.writeError(w, err)
 		return
@@ -113,12 +115,12 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, session)
 }
 
-func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
+func (s *Server) refreshPhoneSession(w http.ResponseWriter, r *http.Request) {
 	var input service.RefreshInput
 	if !readJSON(w, r, &input) {
 		return
 	}
-	session, err := s.svc.RefreshSession(r.Context(), input)
+	session, err := s.phoneAuth.Refresh(r.Context(), input)
 	if err != nil {
 		s.writeError(w, err)
 		return
@@ -343,7 +345,7 @@ func (s *Server) writeError(w http.ResponseWriter, err error) {
 	case errors.Is(err, service.ErrUnauthorized):
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 	case errors.Is(err, service.ErrInvalidCredentials):
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid email or password"})
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid or expired verification code"})
 	case errors.Is(err, storage.ErrForbidden):
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 	case errors.Is(err, storage.ErrNotFound):
