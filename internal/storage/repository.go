@@ -35,7 +35,7 @@ func (r *Repository) CreateUser(ctx context.Context, user domain.User, passwordH
 }
 
 func (r *Repository) GetUserByEmail(ctx context.Context, email string) (UserWithPassword, error) {
-	query := `SELECT id, email, display_name, password_hash, created_at FROM users WHERE email = $1`
+	query := `SELECT id, COALESCE(email, ''), display_name, COALESCE(password_hash, ''), created_at FROM users WHERE email = $1`
 	var result UserWithPassword
 	err := r.db.QueryRow(ctx, query, strings.ToLower(strings.TrimSpace(email))).Scan(
 		&result.User.ID,
@@ -54,7 +54,7 @@ func (r *Repository) GetUserByEmail(ctx context.Context, email string) (UserWith
 }
 
 func (r *Repository) GetUserByID(ctx context.Context, userID string) (domain.User, error) {
-	query := `SELECT id, email, display_name, created_at FROM users WHERE id = $1`
+	query := `SELECT id, COALESCE(email, ''), display_name, created_at FROM users WHERE id = $1`
 	var user domain.User
 	err := r.db.QueryRow(ctx, query, userID).Scan(&user.ID, &user.Email, &user.DisplayName, &user.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
