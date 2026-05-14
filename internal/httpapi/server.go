@@ -90,6 +90,7 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 		r.Delete("/api/requests/{requestID}/vote", server.clearPublicRequestVote)
 		r.Get("/api/requests/{requestID}/comments", server.listPublicRequestComments)
 		r.Post("/api/requests/{requestID}/comments", server.createPublicRequestComment)
+		r.Delete("/api/requests/comments/{commentID}", server.deletePublicRequestComment)
 		r.Post("/api/requests/{requestID}/status", server.updatePublicRequestStatus)
 	})
 
@@ -354,6 +355,14 @@ func (s *Server) listPublicRequestComments(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeJSON(w, http.StatusOK, comments)
+}
+
+func (s *Server) deletePublicRequestComment(w http.ResponseWriter, r *http.Request) {
+	if err := s.svc.DeletePublicRequestComment(r.Context(), currentUser(r).ID, chi.URLParam(r, "commentID")); err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
 func (s *Server) updatePublicRequestStatus(w http.ResponseWriter, r *http.Request) {
