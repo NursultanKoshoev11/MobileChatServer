@@ -1,0 +1,343 @@
+package httpapi
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"log"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/NursultanKoshoev11/MobileChatServer/internal/domain"
+	"github.com/NursultanKoshoev11/MobileChatServer/internal/service"
+	"github.com/NursultanKoshoev11/MobileChatServer/internal/storage"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+)
+
+const maxJSONBodyBytes = 1 << 20
+
+type userContextKey struct{}
+
+type Server struct {
+	svc            *service.Service
+	logger         *log.Logger
+	allowedOrigins map[string]bool
+}
+
+func New(svc *service.Service, logger *log.Logger, allowedOrigins string) http.Handler {
+	server := &Server{
+		svc:            svc,
+		logger:         logger,
+		allowedOrigins: parseOrigins(allowedOrigins),
+	}
+
+	r := chi.NewRouter()
+	r.Use(middleware.RequestID)
+	r.Use(middleware.RealIP)
+	r.Use(server.recoverer)
+	r.Use(server.requestLogger)
+	r.Use(server.cors)
+
+	r.Get("/api/health", server.health)
+
+	r.Route("/api/auth", func(r chi.Router) {
+		r.Post("/register", server.register)
+		r.Post("/login", server.login)
+	})
+
+	r.Group(func(r chi.Router) {
+		r.Use(server.auth)
+		r.Get("/api/me", server.me)
+		r.Get("/api/groups", server.listGroups)
+		r.Post("/api/groups", server.createGroup)
+		r.Get("/api/groups/search", server.searchGroups)
+		r.Post("/api/groups/join-by-code", server.joinByCode)
+		r.Post("/api/groups/{groupID}/join", server.joinPublicGroup)
+		r.Post("/api/groups/{groupID}/invite-user", server.inviteUser)
+		r.Get("/api/groups/{groupID}/messages", server.listMessages)
+		r.Post("/api/groups/{groupID}/messages", server.sendMessage)
+	})
+
+	return r
+}
+
+func (s *Server) health(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) register(w http.ResponseWriter, r *http.Request) {
+	var input service.RegisterInput
+	if !readJSON(w, r, &input) {
+		return
+	}
+	session, err := s.svc.Register(r.Context(), input)
+	if err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, session)
+}
+
+func (s *Server) login(w http.ResponseWriter, r *http.Request) {
+	var input service.LoginInput
+	if !readJSON(w, r, &input) {
+		return
+	}
+	session, err := s.svc.Login(r.Context(), input)
+	if err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, session)
+}
+
+func (s *Server) me(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, currentUser(r))
+}
+
+func (s *Server) listGroups(w http.ResponseWriter, r *http.Request) {
+	groups, err := s.svc.ListUserGroups(r.Context(), currentUser(r).ID)
+	if err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, groups)
+}
+
+func (s *Server) searchGroups(w http.ResponseWriter, r *http.Request) {
+	groups, err := s.svc.SearchPublicGroups(r.Context(), r.URL.Query().Get("q"))
+	if err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, groups)
+}
+
+func (s *Server) createGroup(w http.ResponseWriter, r *http.Request) {
+	var input service.CreateGroupInput
+	if !readJSON(w, r, &input) {
+		return
+	}
+	group, err := s.svc.CreateGroup(r.Context(), currentUser(r).ID, input)
+	if err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, group)
+}
+
+func (s *Server) joinPublicGroup(w http.ResponseWriter, r *http.Request) {
+	if err := s.svc.JoinPublicGroup(r.Context(), currentUser(r).ID, chi.URLParam(r, "groupID")); err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "joined"})
+}
+
+func (s *Server) joinByCode(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		InviteCode string `json:"invite_code"`
+	}
+	if !readJSON(w, r, &input) {
+		return
+	}
+	group, err := s.svc.JoinByInviteCode(r.Context(), currentUser(r).ID, input.InviteCode)
+	if err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, group)
+}
+
+func (s *Server) inviteUser(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		TargetUserID string `json:"target_user_id"`
+	}
+	if !readJSON(w, r, &input) {
+		return
+	}
+	if err := s.svc.InviteUserByID(r.Context(), currentUser(r).ID, chi.URLParam(r, "groupID"), input.TargetUserID); err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "invited"})
+}
+
+func (s *Server) listMessages(w http.ResponseWriter, r *http.Request) {
+	limit := 50
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err == nil {
+			limit = parsed
+		}
+	}
+	var before time.Time
+	if raw := r.URL.Query().Get("before"); raw != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, raw)
+		if err == nil {
+			before = parsed
+		}
+	}
+	messages, err := s.svc.ListMessages(r.Context(), currentUser(r).ID, chi.URLParam(r, "groupID"), limit, before)
+	if err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, messages)
+}
+
+func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
+	var input service.SendMessageInput
+	if !readJSON(w, r, &input) {
+		return
+	}
+	message, err := s.svc.SendMessage(r.Context(), currentUser(r).ID, chi.URLParam(r, "groupID"), input)
+	if err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, message)
+}
+
+func (s *Server) auth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		header := r.Header.Get("Authorization")
+		if !strings.HasPrefix(header, "Bearer ") {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "missing bearer token"})
+			return
+		}
+		token := strings.TrimSpace(strings.TrimPrefix(header, "Bearer "))
+		user, err := s.svc.Authenticate(r.Context(), token)
+		if err != nil {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+		ctx := context.WithValue(r.Context(), userContextKey{}, user)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func (s *Server) cors(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if origin != "" && (s.allowedOrigins["*"] || s.allowedOrigins[origin]) {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Vary", "Origin")
+		}
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID")
+		w.Header().Set("Access-Control-Expose-Headers", "X-Request-ID")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) requestLogger(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		started := time.Now()
+		recorder := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(recorder, r)
+		s.logger.Printf(
+			"request_id=%s method=%s path=%s status=%d bytes=%d duration_ms=%d remote=%s",
+			middleware.GetReqID(r.Context()),
+			r.Method,
+			r.URL.Path,
+			recorder.status,
+			recorder.bytes,
+			time.Since(started).Milliseconds(),
+			r.RemoteAddr,
+		)
+	})
+}
+
+func (s *Server) recoverer(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				s.logger.Printf("panic request_id=%s method=%s path=%s error=%v", middleware.GetReqID(r.Context()), r.Method, r.URL.Path, recovered)
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) writeError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.As(err, &service.ValidationError{}):
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+	case errors.Is(err, service.ErrUnauthorized):
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+	case errors.Is(err, service.ErrInvalidCredentials):
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid email or password"})
+	case errors.Is(err, storage.ErrForbidden):
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+	case errors.Is(err, storage.ErrNotFound):
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+	default:
+		s.logger.Printf("internal error: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+	}
+}
+
+func readJSON(w http.ResponseWriter, r *http.Request, target any) bool {
+	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return false
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "request body must contain only one JSON object"})
+		return false
+	}
+	return true
+}
+
+func writeJSON(w http.ResponseWriter, status int, payload any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(payload)
+}
+
+func currentUser(r *http.Request) domain.User {
+	user, _ := r.Context().Value(userContextKey{}).(domain.User)
+	return user
+}
+
+func parseOrigins(raw string) map[string]bool {
+	result := map[string]bool{}
+	for _, item := range strings.Split(raw, ",") {
+		origin := strings.TrimSpace(item)
+		if origin != "" {
+			result[origin] = true
+		}
+	}
+	return result
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+	bytes  int
+}
+
+func (r *statusRecorder) WriteHeader(status int) {
+	r.status = status
+	r.ResponseWriter.WriteHeader(status)
+}
+
+func (r *statusRecorder) Write(data []byte) (int, error) {
+	written, err := r.ResponseWriter.Write(data)
+	r.bytes += written
+	return written, err
+}
