@@ -1,17 +1,30 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
+)
+
+const (
+	maxJSONBodyBytes  = 1 << 20
+	maxDisplayNameLen = 40
+	maxGroupTitleLen  = 80
+	maxDescriptionLen = 240
+	maxMessageLen     = 2000
 )
 
 type User struct {
@@ -97,8 +110,11 @@ func (s *Store) seedDemoData() {
 
 func (s *Store) Login(displayName string) (*User, error) {
 	displayName = strings.TrimSpace(displayName)
-	if displayName == "" {
-		return nil, errors.New("display_name is required")
+	if len(displayName) < 2 {
+		return nil, errors.New("display_name must contain at least 2 characters")
+	}
+	if len(displayName) > maxDisplayNameLen {
+		return nil, fmt.Errorf("display_name must be at most %d characters", maxDisplayNameLen)
 	}
 
 	s.mu.Lock()
@@ -146,10 +162,20 @@ func (s *Store) SearchPublicGroups(query string) []*Group {
 }
 
 func (s *Store) CreateGroup(ownerID, title, description string, visibility GroupVisibility) (*Group, error) {
+	ownerID = strings.TrimSpace(ownerID)
 	title = strings.TrimSpace(title)
 	description = strings.TrimSpace(description)
-	if title == "" {
-		return nil, errors.New("title is required")
+	if ownerID == "" {
+		return nil, errors.New("owner_id is required")
+	}
+	if len(title) < 3 {
+		return nil, errors.New("title must contain at least 3 characters")
+	}
+	if len(title) > maxGroupTitleLen {
+		return nil, fmt.Errorf("title must be at most %d characters", maxGroupTitleLen)
+	}
+	if len(description) > maxDescriptionLen {
+		return nil, fmt.Errorf("description must be at most %d characters", maxDescriptionLen)
 	}
 	if visibility != VisibilityPublic && visibility != VisibilityPrivate {
 		return nil, errors.New("visibility must be public or private")
@@ -182,6 +208,12 @@ func (s *Store) CreateGroup(ownerID, title, description string, visibility Group
 }
 
 func (s *Store) JoinPublicGroup(groupID, userID string) error {
+	groupID = strings.TrimSpace(groupID)
+	userID = strings.TrimSpace(userID)
+	if groupID == "" || userID == "" {
+		return errors.New("group_id and user_id are required")
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -201,9 +233,10 @@ func (s *Store) JoinPublicGroup(groupID, userID string) error {
 }
 
 func (s *Store) JoinByInviteCode(userID, inviteCode string) (*Group, error) {
+	userID = strings.TrimSpace(userID)
 	inviteCode = strings.ToUpper(strings.TrimSpace(inviteCode))
-	if inviteCode == "" {
-		return nil, errors.New("invite_code is required")
+	if userID == "" || inviteCode == "" {
+		return nil, errors.New("user_id and invite_code are required")
 	}
 
 	s.mu.Lock()
@@ -223,6 +256,13 @@ func (s *Store) JoinByInviteCode(userID, inviteCode string) (*Group, error) {
 }
 
 func (s *Store) InviteUserByID(groupID, adminID, targetUserID string) error {
+	groupID = strings.TrimSpace(groupID)
+	adminID = strings.TrimSpace(adminID)
+	targetUserID = strings.TrimSpace(targetUserID)
+	if groupID == "" || adminID == "" || targetUserID == "" {
+		return errors.New("group_id, admin_id, and target_user_id are required")
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -242,6 +282,11 @@ func (s *Store) InviteUserByID(groupID, adminID, targetUserID string) error {
 }
 
 func (s *Store) ListMessages(groupID string) ([]*Message, error) {
+	groupID = strings.TrimSpace(groupID)
+	if groupID == "" {
+		return nil, errors.New("group_id is required")
+	}
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -258,9 +303,17 @@ func (s *Store) ListMessages(groupID string) ([]*Message, error) {
 }
 
 func (s *Store) SendMessage(groupID, senderID, text string) (*Message, error) {
+	groupID = strings.TrimSpace(groupID)
+	senderID = strings.TrimSpace(senderID)
 	text = strings.TrimSpace(text)
+	if groupID == "" || senderID == "" {
+		return nil, errors.New("group_id and sender_id are required")
+	}
 	if text == "" {
 		return nil, errors.New("text is required")
+	}
+	if len(text) > maxMessageLen {
+		return nil, fmt.Errorf("text must be at most %d characters", maxMessageLen)
 	}
 
 	s.mu.Lock()
@@ -295,39 +348,69 @@ type Server struct {
 }
 
 func main() {
+	logger := log.New(os.Stdout, "mobilechat-server ", log.LstdFlags|log.LUTC|log.Lmicroseconds)
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 
-	server := &Server{store: NewStore()}
+	app := &Server{store: NewStore()}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/health", server.handleHealth)
-	mux.HandleFunc("/api/auth/login", server.handleLogin)
-	mux.HandleFunc("/api/groups", server.handleGroups)
-	mux.HandleFunc("/api/groups/search", server.handleSearchGroups)
-	mux.HandleFunc("/api/groups/join-by-code", server.handleJoinByCode)
-	mux.HandleFunc("/api/groups/", server.handleGroupActions)
+	mux.HandleFunc("/api/health", app.handleHealth)
+	mux.HandleFunc("/api/auth/login", app.handleLogin)
+	mux.HandleFunc("/api/groups", app.handleGroups)
+	mux.HandleFunc("/api/groups/search", app.handleSearchGroups)
+	mux.HandleFunc("/api/groups/join-by-code", app.handleJoinByCode)
+	mux.HandleFunc("/api/groups/", app.handleGroupActions)
 
-	log.Printf("MobileChatServer listening on :%s", port)
-	if err := http.ListenAndServe(":"+port, withCORS(mux)); err != nil {
-		log.Fatal(err)
+	handler := withRecovery(logger, withRequestLogger(logger, withCORS(mux)))
+	server := &http.Server{
+		Addr:              ":" + port,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
+
+	go func() {
+		logger.Printf("listening on %s", server.Addr)
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Fatalf("server failed: %v", err)
+		}
+	}()
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+	<-stop
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	logger.Println("shutdown started")
+	if err := server.Shutdown(ctx); err != nil {
+		logger.Printf("graceful shutdown failed: %v", err)
+		if closeErr := server.Close(); closeErr != nil {
+			logger.Printf("forced close failed: %v", closeErr)
+		}
+	}
+	logger.Println("shutdown completed")
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 	var request struct {
 		DisplayName string `json:"display_name"`
 	}
-	if err := readJSON(r, &request); err != nil {
+	if err := readJSON(w, r, &request); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -351,7 +434,7 @@ func (s *Server) handleGroups(w http.ResponseWriter, r *http.Request) {
 			Description string          `json:"description"`
 			Visibility  GroupVisibility `json:"visibility"`
 		}
-		if err := readJSON(r, &request); err != nil {
+		if err := readJSON(w, r, &request); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -367,23 +450,21 @@ func (s *Server) handleGroups(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSearchGroups(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.store.SearchPublicGroups(r.URL.Query().Get("q")))
 }
 
 func (s *Server) handleJoinByCode(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 	var request struct {
 		UserID     string `json:"user_id"`
 		InviteCode string `json:"invite_code"`
 	}
-	if err := readJSON(r, &request); err != nil {
+	if err := readJSON(w, r, &request); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -419,14 +500,13 @@ func (s *Server) handleGroupActions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleJoinPublicGroup(w http.ResponseWriter, r *http.Request, groupID string) {
-	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 	var request struct {
 		UserID string `json:"user_id"`
 	}
-	if err := readJSON(r, &request); err != nil {
+	if err := readJSON(w, r, &request); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -438,15 +518,14 @@ func (s *Server) handleJoinPublicGroup(w http.ResponseWriter, r *http.Request, g
 }
 
 func (s *Server) handleInviteUserByID(w http.ResponseWriter, r *http.Request, groupID string) {
-	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 	var request struct {
 		AdminID      string `json:"admin_id"`
 		TargetUserID string `json:"target_user_id"`
 	}
-	if err := readJSON(r, &request); err != nil {
+	if err := readJSON(w, r, &request); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -471,7 +550,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request, groupID 
 			SenderID string `json:"sender_id"`
 			Text     string `json:"text"`
 		}
-		if err := readJSON(r, &request); err != nil {
+		if err := readJSON(w, r, &request); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -489,8 +568,9 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request, groupID 
 func withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID")
+		w.Header().Set("Access-Control-Expose-Headers", "X-Request-ID")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -499,11 +579,80 @@ func withCORS(next http.Handler) http.Handler {
 	})
 }
 
-func readJSON(r *http.Request, target any) error {
+func withRequestLogger(logger *log.Logger, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		started := time.Now()
+		requestID := r.Header.Get("X-Request-ID")
+		if requestID == "" {
+			requestID = "REQ-" + strings.ToUpper(randomHex(4))
+		}
+		w.Header().Set("X-Request-ID", requestID)
+
+		recorder := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(recorder, r)
+
+		logger.Printf(
+			"request_id=%s method=%s path=%s status=%d bytes=%d duration_ms=%d remote=%s",
+			requestID,
+			r.Method,
+			r.URL.Path,
+			recorder.status,
+			recorder.bytes,
+			time.Since(started).Milliseconds(),
+			r.RemoteAddr,
+		)
+	})
+}
+
+func withRecovery(logger *log.Logger, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				logger.Printf("panic method=%s path=%s error=%v", r.Method, r.URL.Path, recovered)
+				writeError(w, http.StatusInternalServerError, "internal server error")
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+	bytes  int
+}
+
+func (r *statusRecorder) WriteHeader(status int) {
+	r.status = status
+	r.ResponseWriter.WriteHeader(status)
+}
+
+func (r *statusRecorder) Write(data []byte) (int, error) {
+	written, err := r.ResponseWriter.Write(data)
+	r.bytes += written
+	return written, err
+}
+
+func requireMethod(w http.ResponseWriter, r *http.Request, method string) bool {
+	if r.Method == method {
+		return true
+	}
+	writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	return false
+}
+
+func readJSON(w http.ResponseWriter, r *http.Request, target any) error {
 	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
-	return decoder.Decode(target)
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return errors.New("request body must contain only one JSON object")
+	}
+	return nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
