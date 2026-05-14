@@ -19,10 +19,10 @@ func (r *Repository) CreatePublicRequest(ctx context.Context, request domain.Pub
 		return domain.PublicRequest{}, ErrForbidden
 	}
 	query := `
-		INSERT INTO public_requests (id, group_id, author_id, request_type, title, body, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, 'new', now(), now())
+		INSERT INTO public_requests (id, group_id, author_id, request_type, interaction_mode, title, body, status, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, 'new', now(), now())
 		RETURNING status, created_at, updated_at`
-	if err := r.db.QueryRow(ctx, query, request.ID, request.GroupID, request.AuthorID, request.RequestType, request.Title, request.Body).Scan(&request.Status, &request.CreatedAt, &request.UpdatedAt); err != nil {
+	if err := r.db.QueryRow(ctx, query, request.ID, request.GroupID, request.AuthorID, request.RequestType, request.InteractionMode, request.Title, request.Body).Scan(&request.Status, &request.CreatedAt, &request.UpdatedAt); err != nil {
 		return domain.PublicRequest{}, fmt.Errorf("create public request: %w", err)
 	}
 	user, err := r.GetUserByID(ctx, request.AuthorID)
@@ -49,7 +49,7 @@ func (r *Repository) ListPublicRequests(ctx context.Context, groupID, viewerID s
 		beforePtr = &before
 	}
 	query := `
-		SELECT pr.id, pr.group_id, pr.author_id, u.display_name, pr.request_type, pr.title, pr.body, pr.status,
+		SELECT pr.id, pr.group_id, pr.author_id, u.display_name, pr.request_type, pr.interaction_mode, pr.title, pr.body, pr.status,
 		       COALESCE(SUM(CASE WHEN v.vote_type = 'support' THEN 1 ELSE 0 END), 0)::int AS support_count,
 		       COALESCE(SUM(CASE WHEN v.vote_type = 'oppose' THEN 1 ELSE 0 END), 0)::int AS oppose_count,
 		       (SELECT COUNT(*)::int FROM public_request_comments c WHERE c.request_id = pr.id AND c.deleted_at IS NULL) AS comment_count,
@@ -81,6 +81,7 @@ func (r *Repository) ListPublicRequests(ctx context.Context, groupID, viewerID s
 			&request.AuthorID,
 			&request.AuthorName,
 			&request.RequestType,
+			&request.InteractionMode,
 			&request.Title,
 			&request.Body,
 			&request.Status,
@@ -106,6 +107,13 @@ func (r *Repository) VotePublicRequest(ctx context.Context, requestID, userID, v
 	if err != nil {
 		return err
 	}
+	mode, err := r.publicRequestInteractionMode(ctx, requestID)
+	if err != nil {
+		return err
+	}
+	if mode == domain.InteractionModeReadOnly {
+		return ErrForbidden
+	}
 	isMember, err := r.IsGroupMember(ctx, groupID, userID)
 	if err != nil {
 		return err
@@ -128,6 +136,13 @@ func (r *Repository) ClearPublicRequestVote(ctx context.Context, requestID, user
 	if err != nil {
 		return err
 	}
+	mode, err := r.publicRequestInteractionMode(ctx, requestID)
+	if err != nil {
+		return err
+	}
+	if mode == domain.InteractionModeReadOnly {
+		return ErrForbidden
+	}
 	isMember, err := r.IsGroupMember(ctx, groupID, userID)
 	if err != nil {
 		return err
@@ -146,6 +161,13 @@ func (r *Repository) CreatePublicRequestComment(ctx context.Context, comment dom
 	groupID, err := r.publicRequestGroupID(ctx, comment.RequestID)
 	if err != nil {
 		return domain.PublicRequestComment{}, err
+	}
+	mode, err := r.publicRequestInteractionMode(ctx, comment.RequestID)
+	if err != nil {
+		return domain.PublicRequestComment{}, err
+	}
+	if mode != domain.InteractionModeDiscussion {
+		return domain.PublicRequestComment{}, ErrForbidden
 	}
 	isMember, err := r.IsGroupMember(ctx, groupID, comment.AuthorID)
 	if err != nil {
@@ -260,4 +282,15 @@ func (r *Repository) publicRequestGroupID(ctx context.Context, requestID string)
 		return "", fmt.Errorf("load public request group: %w", err)
 	}
 	return groupID, nil
+}
+
+func (r *Repository) publicRequestInteractionMode(ctx context.Context, requestID string) (domain.PublicRequestInteractionMode, error) {
+	var mode domain.PublicRequestInteractionMode
+	if err := r.db.QueryRow(ctx, `SELECT interaction_mode FROM public_requests WHERE id = $1`, requestID).Scan(&mode); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", ErrNotFound
+		}
+		return "", fmt.Errorf("load public request interaction mode: %w", err)
+	}
+	return mode, nil
 }
