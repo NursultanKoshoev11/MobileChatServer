@@ -202,6 +202,36 @@ func (r *Repository) ListPublicRequestComments(ctx context.Context, requestID, v
 	return comments, rows.Err()
 }
 
+func (r *Repository) DeletePublicRequestComment(ctx context.Context, commentID, moderatorID string) error {
+	var groupID string
+	err := r.db.QueryRow(ctx, `
+		SELECT pr.group_id
+		FROM public_request_comments c
+		JOIN public_requests pr ON pr.id = c.request_id
+		WHERE c.id = $1 AND c.deleted_at IS NULL`, commentID).Scan(&groupID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("load comment group: %w", err)
+	}
+	role, err := r.GetMemberRole(ctx, groupID, moderatorID)
+	if err != nil {
+		return err
+	}
+	if role != domain.RoleOwner && role != domain.RoleAdmin {
+		return ErrForbidden
+	}
+	result, err := r.db.Exec(ctx, `UPDATE public_request_comments SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL`, commentID)
+	if err != nil {
+		return fmt.Errorf("delete public request comment: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (r *Repository) UpdatePublicRequestStatus(ctx context.Context, requestID, adminID string, status domain.PublicRequestStatus) error {
 	groupID, err := r.publicRequestGroupID(ctx, requestID)
 	if err != nil {
