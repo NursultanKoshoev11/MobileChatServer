@@ -21,6 +21,7 @@ const (
 	maxDescriptionLen = 240
 	maxMessageLen     = 2000
 	minPasswordLen    = 8
+	refreshTokenTTL   = 30 * 24 * time.Hour
 )
 
 var emailPattern = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
@@ -49,6 +50,10 @@ type RegisterInput struct {
 type LoginInput struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
+}
+
+type RefreshInput struct {
+	RefreshToken string `json:"refresh_token"`
 }
 
 type CreateGroupInput struct {
@@ -90,7 +95,7 @@ func (s *Service) Register(ctx context.Context, input RegisterInput) (domain.Ses
 	if err != nil {
 		return domain.Session{}, err
 	}
-	return s.issueSession(user)
+	return s.issueSession(ctx, user)
 }
 
 func (s *Service) Login(ctx context.Context, input LoginInput) (domain.Session, error) {
@@ -108,7 +113,32 @@ func (s *Service) Login(ctx context.Context, input LoginInput) (domain.Session, 
 	if !security.CheckPassword(record.PasswordHash, input.Password) {
 		return domain.Session{}, ErrInvalidCredentials
 	}
-	return s.issueSession(record.User)
+	return s.issueSession(ctx, record.User)
+}
+
+func (s *Service) RefreshSession(ctx context.Context, input RefreshInput) (domain.Session, error) {
+	refreshToken := strings.TrimSpace(input.RefreshToken)
+	if refreshToken == "" {
+		return domain.Session{}, NewValidationError("refresh_token is required")
+	}
+	record, err := s.repo.GetRefreshSession(ctx, security.HashToken(refreshToken))
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			return domain.Session{}, ErrUnauthorized
+		}
+		return domain.Session{}, err
+	}
+	if record.RevokedAt != nil || time.Now().UTC().After(record.ExpiresAt) {
+		return domain.Session{}, ErrUnauthorized
+	}
+	if err := s.repo.RevokeRefreshSession(ctx, record.ID); err != nil {
+		return domain.Session{}, err
+	}
+	user, err := s.repo.GetUserByID(ctx, record.UserID)
+	if err != nil {
+		return domain.Session{}, err
+	}
+	return s.issueSession(ctx, user)
 }
 
 func (s *Service) Authenticate(ctx context.Context, token string) (domain.User, error) {
@@ -205,12 +235,20 @@ func (s *Service) SendMessage(ctx context.Context, senderID, groupID string, inp
 	return s.repo.CreateMessage(ctx, message)
 }
 
-func (s *Service) issueSession(user domain.User) (domain.Session, error) {
-	token, err := security.SignAccessToken(user.ID, s.cfg.JWTSecret, s.cfg.AccessTokenTTL)
+func (s *Service) issueSession(ctx context.Context, user domain.User) (domain.Session, error) {
+	accessToken, err := security.SignAccessToken(user.ID, s.cfg.JWTSecret, s.cfg.AccessTokenTTL)
 	if err != nil {
 		return domain.Session{}, err
 	}
-	return domain.Session{AccessToken: token, User: user}, nil
+	refreshToken, err := security.NewOpaqueToken(48)
+	if err != nil {
+		return domain.Session{}, err
+	}
+	refreshSessionID := "RT-" + strings.ToUpper(randomHex(12))
+	if err := s.repo.CreateRefreshSession(ctx, refreshSessionID, user.ID, security.HashToken(refreshToken), time.Now().UTC().Add(refreshTokenTTL)); err != nil {
+		return domain.Session{}, err
+	}
+	return domain.Session{AccessToken: accessToken, RefreshToken: refreshToken, User: user}, nil
 }
 
 func normalizeEmail(email string) string {
