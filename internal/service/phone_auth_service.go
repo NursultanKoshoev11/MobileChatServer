@@ -100,6 +100,7 @@ func (s *PhoneAuthService) VerifyCode(ctx context.Context, input VerifyPhoneCode
 			ID:          "U-" + strings.ToUpper(randomHex(8)),
 			Mobile:      mobile,
 			DisplayName: displayName,
+			Role:        domain.UserRoleUser,
 		})
 	}
 	if err != nil {
@@ -135,6 +136,18 @@ func (s *PhoneAuthService) Refresh(ctx context.Context, input RefreshInput) (dom
 }
 
 func (s *PhoneAuthService) issuePhoneSession(ctx context.Context, user domain.PhoneAuthUser) (domain.PhoneSession, error) {
+	if storedUser, err := s.repo.GetUserByID(ctx, user.ID); err == nil {
+		user.Role = storedUser.Role
+		if user.DisplayName == "" {
+			user.DisplayName = storedUser.DisplayName
+		}
+		if user.Mobile == "" {
+			user.Mobile = storedUser.Phone
+		}
+	}
+	if user.Role == "" {
+		user.Role = domain.UserRoleUser
+	}
 	accessToken, err := security.SignAccessToken(user.ID, s.cfg.JWTSecret, s.cfg.AccessTokenTTL)
 	if err != nil {
 		return domain.PhoneSession{}, err
