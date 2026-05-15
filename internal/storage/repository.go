@@ -313,6 +313,17 @@ func (r *Repository) GetMemberRole(ctx context.Context, groupID, userID string) 
 	return role, nil
 }
 
+func nullableInviteCode(group domain.Group) any {
+	value := strings.TrimSpace(group.InviteCode)
+	if value == "" {
+		value = strings.TrimSpace(group.ID)
+	}
+	if value == "" {
+		return nil
+	}
+	return strings.ToUpper(value)
+}
+
 func nullableString(value string) any {
 	value = strings.TrimSpace(value)
 	if value == "" {
