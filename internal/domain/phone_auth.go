@@ -6,6 +6,7 @@ type PhoneAuthUser struct {
 	ID          string    `json:"id"`
 	Mobile      string    `json:"mobile"`
 	DisplayName string    `json:"display_name"`
+	Role        UserRole  `json:"role"`
 	CreatedAt   time.Time `json:"created_at"`
 }
 
