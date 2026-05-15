@@ -215,11 +215,28 @@ func (s *Server) joinByCode(w http.ResponseWriter, r *http.Request) {
 func (s *Server) inviteUser(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		TargetUserID string `json:"target_user_id"`
+		Mobile       string `json:"mobile"`
+		Phone        string `json:"phone"`
+		TargetMobile string `json:"target_mobile"`
 	}
 	if !readJSON(w, r, &input) {
 		return
 	}
-	invite, err := s.svc.CreateInviteRequest(r.Context(), currentUser(r).ID, chi.URLParam(r, "groupID"), input.TargetUserID)
+	target := strings.TrimSpace(input.TargetUserID)
+	mobile := firstNonEmpty(input.Mobile, input.Phone, input.TargetMobile)
+	if mobile == "" && strings.HasPrefix(target, "+") {
+		mobile = target
+		target = ""
+	}
+	if target == "" && mobile != "" {
+		user, err := s.svc.FindUserByPhone(r.Context(), mobile)
+		if err != nil {
+			s.writeError(w, err)
+			return
+		}
+		target = user.ID
+	}
+	invite, err := s.svc.CreateInviteRequest(r.Context(), currentUser(r).ID, chi.URLParam(r, "groupID"), target)
 	if err != nil {
 		s.writeError(w, err)
 		return
@@ -288,6 +305,16 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	s.hub.BroadcastGroup(groupID, realtime.Event{Type: "message.created", GroupID: groupID, Payload: message})
 	writeJSON(w, http.StatusCreated, message)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (s *Server) createPublicRequest(w http.ResponseWriter, r *http.Request) {
@@ -498,78 +525,3 @@ func (s *Server) recoverer(next http.Handler) http.Handler {
 		}()
 		next.ServeHTTP(w, r)
 	})
-}
-
-func (s *Server) writeError(w http.ResponseWriter, err error) {
-	var validationErr service.ValidationError
-	switch {
-	case errors.As(err, &validationErr):
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-	case errors.Is(err, service.ErrUnauthorized):
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
-	case errors.Is(err, service.ErrInvalidCredentials):
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid or expired verification code"})
-	case errors.Is(err, storage.ErrForbidden):
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
-	case errors.Is(err, storage.ErrNotFound):
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
-	default:
-		s.logger.Printf("internal error: %v", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
-	}
-}
-
-func readJSON(w http.ResponseWriter, r *http.Request, target any) bool {
-	defer r.Body.Close()
-	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(target); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return false
-	}
-	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "request body must contain only one JSON object"})
-		return false
-	}
-	return true
-}
-
-func writeJSON(w http.ResponseWriter, status int, payload any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(payload)
-}
-
-func currentUser(r *http.Request) domain.User {
-	user, _ := r.Context().Value(userContextKey{}).(domain.User)
-	return user
-}
-
-func parseOrigins(raw string) map[string]bool {
-	result := map[string]bool{}
-	for _, item := range strings.Split(raw, ",") {
-		origin := strings.TrimSpace(item)
-		if origin != "" {
-			result[origin] = true
-		}
-	}
-	return result
-}
-
-type statusRecorder struct {
-	http.ResponseWriter
-	status int
-	bytes  int
-}
-
-func (r *statusRecorder) WriteHeader(status int) {
-	r.status = status
-	r.ResponseWriter.WriteHeader(status)
-}
-
-func (r *statusRecorder) Write(data []byte) (int, error) {
-	written, err := r.ResponseWriter.Write(data)
-	r.bytes += written
-	return written, err
-}
