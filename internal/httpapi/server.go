@@ -95,6 +95,12 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 		r.Delete("/api/requests/comments/{commentID}", server.deletePublicRequestComment)
 		r.Post("/api/requests/{requestID}/status", server.updatePublicRequestStatus)
 		r.Post("/api/requests/{requestID}/hide", server.hidePublicRequest)
+		r.Post("/api/group-creation-requests", server.createGroupCreationRequest)
+		r.Get("/api/group-creation-requests", server.listMyGroupCreationRequests)
+		r.Get("/api/admin/group-creation-requests", server.listGroupCreationRequestsForAdmin)
+		r.Post("/api/admin/group-creation-requests/{requestID}/approve", server.approveGroupCreationRequest)
+		r.Post("/api/admin/group-creation-requests/{requestID}/reject", server.rejectGroupCreationRequest)
+		r.Post("/api/admin/group-creation-requests/{requestID}/need-more-info", server.needMoreInfoForGroupCreationRequest)
 	})
 
 	return r
@@ -166,11 +172,16 @@ func (s *Server) searchGroups(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) createGroup(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r)
+	if user.Role != domain.UserRolePlatformAdmin && user.Role != domain.UserRoleSuperAdmin {
+		s.writeError(w, storage.ErrForbidden)
+		return
+	}
 	var input service.CreateGroupInput
 	if !readJSON(w, r, &input) {
 		return
 	}
-	group, err := s.svc.CreateGroup(r.Context(), currentUser(r).ID, input)
+	group, err := s.svc.CreateGroup(r.Context(), user.ID, input)
 	if err != nil {
 		s.writeError(w, err)
 		return
