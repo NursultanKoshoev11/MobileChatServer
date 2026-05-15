@@ -26,8 +26,11 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 }
 
 func (r *Repository) CreateUser(ctx context.Context, user domain.User, passwordHash string) (domain.User, error) {
-	query := `INSERT INTO users (id, email, display_name, password_hash, created_at, updated_at) VALUES ($1, $2, $3, $4, now(), now()) RETURNING created_at`
-	if err := r.db.QueryRow(ctx, query, user.ID, strings.ToLower(user.Email), user.DisplayName, passwordHash).Scan(&user.CreatedAt); err != nil {
+	if user.Role == "" {
+		user.Role = domain.UserRoleUser
+	}
+	query := `INSERT INTO users (id, email, phone, display_name, password_hash, role, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, now(), now()) RETURNING created_at`
+	if err := r.db.QueryRow(ctx, query, user.ID, strings.ToLower(user.Email), nullableString(user.Phone), user.DisplayName, passwordHash, user.Role).Scan(&user.CreatedAt); err != nil {
 		return domain.User{}, fmt.Errorf("create user: %w", err)
 	}
 	user.Email = strings.ToLower(user.Email)
@@ -35,13 +38,15 @@ func (r *Repository) CreateUser(ctx context.Context, user domain.User, passwordH
 }
 
 func (r *Repository) GetUserByEmail(ctx context.Context, email string) (UserWithPassword, error) {
-	query := `SELECT id, COALESCE(email, ''), display_name, COALESCE(password_hash, ''), created_at FROM users WHERE email = $1`
+	query := `SELECT id, COALESCE(email, ''), COALESCE(phone, ''), display_name, COALESCE(password_hash, ''), COALESCE(role, 'user'), created_at FROM users WHERE email = $1`
 	var result UserWithPassword
 	err := r.db.QueryRow(ctx, query, strings.ToLower(strings.TrimSpace(email))).Scan(
 		&result.User.ID,
 		&result.User.Email,
+		&result.User.Phone,
 		&result.User.DisplayName,
 		&result.PasswordHash,
+		&result.User.Role,
 		&result.User.CreatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -54,9 +59,9 @@ func (r *Repository) GetUserByEmail(ctx context.Context, email string) (UserWith
 }
 
 func (r *Repository) GetUserByID(ctx context.Context, userID string) (domain.User, error) {
-	query := `SELECT id, COALESCE(email, ''), display_name, created_at FROM users WHERE id = $1`
+	query := `SELECT id, COALESCE(email, ''), COALESCE(phone, ''), display_name, COALESCE(role, 'user'), created_at FROM users WHERE id = $1`
 	var user domain.User
-	err := r.db.QueryRow(ctx, query, userID).Scan(&user.ID, &user.Email, &user.DisplayName, &user.CreatedAt)
+	err := r.db.QueryRow(ctx, query, userID).Scan(&user.ID, &user.Email, &user.Phone, &user.DisplayName, &user.Role, &user.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.User{}, ErrNotFound
 	}
@@ -293,6 +298,14 @@ func nullableInviteCode(group domain.Group) any {
 		return group.InviteCode
 	}
 	return nil
+}
+
+func nullableString(value string) any {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return value
 }
 
 var (
