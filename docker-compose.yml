@@ -4,38 +4,47 @@ services:
     container_name: mobilechat-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: mobilechat
-      POSTGRES_USER: mobilechat
-      POSTGRES_PASSWORD: mobilechat_password
-    ports:
-      - "5432:5432"
+      POSTGRES_DB: ${POSTGRES_DB:-mobilechat}
+      POSTGRES_USER: ${POSTGRES_USER:-mobilechat}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mobilechat_change_me_password}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U mobilechat -d mobilechat"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-mobilechat} -d $${POSTGRES_DB:-mobilechat}"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
 
   api:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: mobilechat-api
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
     environment:
-      APP_ENV: development
-      PORT: 8080
-      DATABASE_URL: postgres://mobilechat:mobilechat_password@postgres:5432/mobilechat?sslmode=disable
-      JWT_SECRET: change-this-development-secret-at-least-32-characters
-      ACCESS_TOKEN_TTL_MINUTES: 60
-      ALLOWED_ORIGINS: http://localhost:3000,http://localhost:8080
-      BCRYPT_COST: 12
-      SMS_PROVIDER: dev
-      SMS_FROM: MobileChat
+      APP_ENV: ${APP_ENV:-development}
+      PORT: ${PORT:-8080}
+      DATABASE_URL: ${DATABASE_URL:-postgres://mobilechat:mobilechat_change_me_password@postgres:5432/mobilechat?sslmode=disable}
+      JWT_SECRET: ${JWT_SECRET:-mobilechat-local-dev-secret-change-me-32-chars-min}
+      ACCESS_TOKEN_TTL_MINUTES: ${ACCESS_TOKEN_TTL_MINUTES:-60}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-*}
+      BCRYPT_COST: ${BCRYPT_COST:-12}
+      SMS_PROVIDER: ${SMS_PROVIDER:-dev}
+      SMS_FROM: ${SMS_FROM:-MobileChat}
+      FCM_PROJECT_ID: ${FCM_PROJECT_ID:-}
+      FCM_CLIENT_EMAIL: ${FCM_CLIENT_EMAIL:-}
+      FCM_PRIVATE_KEY: ${FCM_PRIVATE_KEY:-}
     ports:
-      - "8080:8080"
+      - "${API_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/api/health >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
 
 volumes:
   postgres_data:
