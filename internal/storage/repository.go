@@ -90,7 +90,7 @@ func (r *Repository) GetUserByID(ctx context.Context, userID string) (domain.Use
 
 func (r *Repository) ListUserGroups(ctx context.Context, userID string) ([]domain.Group, error) {
 	query := `
-		SELECT g.id, g.title, g.description, g.visibility, g.owner_id, COALESCE(g.invite_code, '') AS invite_code, g.created_at,
+		SELECT g.id, g.title, g.description, g.visibility, g.owner_id, COALESCE(g.invite_code, g.id) AS invite_code, g.created_at,
 		       COUNT(gm_all.user_id)::int AS member_count, gm.role
 		FROM groups g
 		JOIN group_members gm ON gm.group_id = g.id AND gm.user_id = $1
@@ -119,7 +119,7 @@ func (r *Repository) ListUserGroups(ctx context.Context, userID string) ([]domai
 func (r *Repository) SearchPublicGroups(ctx context.Context, queryText string) ([]domain.Group, error) {
 	queryText = strings.TrimSpace(queryText)
 	query := `
-		SELECT g.id, g.title, g.description, g.visibility, g.owner_id, COALESCE(g.invite_code, '') AS invite_code, g.created_at,
+		SELECT g.id, g.title, g.description, g.visibility, g.owner_id, COALESCE(g.invite_code, g.id) AS invite_code, g.created_at,
 		       COUNT(gm.user_id)::int AS member_count
 		FROM groups g
 		LEFT JOIN group_members gm ON gm.group_id = g.id
@@ -146,6 +146,9 @@ func (r *Repository) SearchPublicGroups(ctx context.Context, queryText string) (
 }
 
 func (r *Repository) CreateGroup(ctx context.Context, group domain.Group) (domain.Group, error) {
+	if strings.TrimSpace(group.InviteCode) == "" {
+		group.InviteCode = strings.ToUpper(strings.TrimSpace(group.ID))
+	}
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return domain.Group{}, fmt.Errorf("begin create group: %w", err)
@@ -153,7 +156,7 @@ func (r *Repository) CreateGroup(ctx context.Context, group domain.Group) (domai
 	defer tx.Rollback(ctx)
 
 	query := `INSERT INTO groups (id, title, description, visibility, owner_id, invite_code, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, now(), now()) RETURNING created_at`
-	if err := tx.QueryRow(ctx, query, group.ID, group.Title, group.Description, group.Visibility, group.OwnerID, nullableInviteCode(group)).Scan(&group.CreatedAt); err != nil {
+	if err := tx.QueryRow(ctx, query, group.ID, group.Title, group.Description, group.Visibility, group.OwnerID, group.InviteCode).Scan(&group.CreatedAt); err != nil {
 		return domain.Group{}, fmt.Errorf("insert group: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO group_members (group_id, user_id, role) VALUES ($1, $2, 'owner')`, group.ID, group.OwnerID); err != nil {
@@ -187,9 +190,9 @@ func (r *Repository) JoinPublicGroup(ctx context.Context, groupID, userID string
 }
 
 func (r *Repository) JoinByInviteCode(ctx context.Context, userID, inviteCode string) (domain.Group, error) {
-	query := `SELECT id, title, description, visibility, owner_id, COALESCE(invite_code, '') AS invite_code, created_at FROM groups WHERE invite_code = $1`
+	query := `SELECT id, title, description, visibility, owner_id, COALESCE(invite_code, id) AS invite_code, created_at FROM groups WHERE UPPER(COALESCE(invite_code, id)) = $1 OR UPPER(id) = $1`
 	var group domain.Group
-	if err := r.db.QueryRow(ctx, query, strings.ToUpper(inviteCode)).Scan(&group.ID, &group.Title, &group.Description, &group.Visibility, &group.OwnerID, &group.InviteCode, &group.CreatedAt); err != nil {
+	if err := r.db.QueryRow(ctx, query, strings.ToUpper(strings.TrimSpace(inviteCode))).Scan(&group.ID, &group.Title, &group.Description, &group.Visibility, &group.OwnerID, &group.InviteCode, &group.CreatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.Group{}, ErrNotFound
 		}
@@ -308,13 +311,6 @@ func (r *Repository) GetMemberRole(ctx context.Context, groupID, userID string) 
 		return "", fmt.Errorf("get member role: %w", err)
 	}
 	return role, nil
-}
-
-func nullableInviteCode(group domain.Group) any {
-	if group.InviteCode != "" {
-		return group.InviteCode
-	}
-	return nil
 }
 
 func nullableString(value string) any {
