@@ -1,6 +1,16 @@
 ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user';
-ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('user', 'platform_admin', 'super_admin'));
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'users_role_check'
+    ) THEN
+        ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('user', 'platform_admin', 'super_admin'));
+    END IF;
+END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone_unique ON users (phone) WHERE phone IS NOT NULL AND phone <> '';
 CREATE INDEX IF NOT EXISTS idx_users_role ON users (role);
