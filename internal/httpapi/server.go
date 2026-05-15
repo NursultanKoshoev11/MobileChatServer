@@ -153,6 +153,26 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, currentUser(r))
 }
 
+func (s *Server) registerPushToken(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Token    string `json:"token"`
+		Platform string `json:"platform"`
+	}
+	if !readJSON(w, r, &input) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "registered"})
+}
+
+func (s *Server) deletePushToken(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Token    string `json:"token"`
+		Platform string `json:"platform"`
+	}
+	_ = readJSON(w, r, &input)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
 func (s *Server) listGroups(w http.ResponseWriter, r *http.Request) {
 	groups, err := s.svc.ListUserGroups(r.Context(), currentUser(r).ID)
 	if err != nil {
@@ -272,15 +292,13 @@ func (s *Server) declineInvite(w http.ResponseWriter, r *http.Request) {
 func (s *Server) listMessages(w http.ResponseWriter, r *http.Request) {
 	limit := 50
 	if raw := r.URL.Query().Get("limit"); raw != "" {
-		parsed, err := strconv.Atoi(raw)
-		if err == nil {
+		if parsed, err := strconv.Atoi(raw); err == nil {
 			limit = parsed
 		}
 	}
 	var before time.Time
 	if raw := r.URL.Query().Get("before"); raw != "" {
-		parsed, err := time.Parse(time.RFC3339Nano, raw)
-		if err == nil {
+		if parsed, err := time.Parse(time.RFC3339Nano, raw); err == nil {
 			before = parsed
 		}
 	}
@@ -418,6 +436,10 @@ func (s *Server) updatePublicRequestStatus(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }
 
+func (s *Server) hidePublicRequest(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusForbidden, map[string]string{"error": "hiding publications is disabled"})
+}
+
 func (s *Server) groupWebSocket(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
 	groupID := chi.URLParam(r, "groupID")
@@ -502,16 +524,7 @@ func (s *Server) requestLogger(next http.Handler) http.Handler {
 		started := time.Now()
 		recorder := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(recorder, r)
-		s.logger.Printf(
-			"request_id=%s method=%s path=%s status=%d bytes=%d duration_ms=%d remote=%s",
-			middleware.GetReqID(r.Context()),
-			r.Method,
-			r.URL.Path,
-			recorder.status,
-			recorder.bytes,
-			time.Since(started).Milliseconds(),
-			r.RemoteAddr,
-		)
+		s.logger.Printf("request_id=%s method=%s path=%s status=%d bytes=%d duration_ms=%d remote=%s", middleware.GetReqID(r.Context()), r.Method, r.URL.Path, recorder.status, recorder.bytes, time.Since(started).Milliseconds(), r.RemoteAddr)
 	})
 }
 
@@ -525,3 +538,96 @@ func (s *Server) recoverer(next http.Handler) http.Handler {
 		}()
 		next.ServeHTTP(w, r)
 	})
+}
+
+func currentUser(r *http.Request) domain.User {
+	user, _ := r.Context().Value(userContextKey{}).(domain.User)
+	return user
+}
+
+func readJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
+	defer r.Body.Close()
+	decoder := json.NewDecoder(io.LimitReader(r.Body, maxJSONBodyBytes))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(dst); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body"})
+		return false
+	}
+	return true
+}
+
+func writeJSON(w http.ResponseWriter, status int, payload any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if payload == nil {
+		return
+	}
+	_ = json.NewEncoder(w).Encode(payload)
+}
+
+func (s *Server) writeError(w http.ResponseWriter, err error) {
+	if err == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		return
+	}
+	var validation service.ValidationError
+	switch {
+	case errors.As(err, &validation):
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": validation.Error()})
+	case errors.Is(err, service.ErrUnauthorized):
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+	case errors.Is(err, service.ErrInvalidCredentials):
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
+	case errors.Is(err, storage.ErrNotFound):
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+	case errors.Is(err, storage.ErrForbidden):
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+	default:
+		s.logger.Printf("http error: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+	}
+}
+
+func parseOrigins(raw string) map[string]bool {
+	result := map[string]bool{}
+	for _, item := range strings.Split(raw, ",") {
+		item = strings.TrimSpace(item)
+		if item != "" {
+			result[item] = true
+		}
+	}
+	if len(result) == 0 {
+		result["*"] = true
+	}
+	return result
+}
+
+func clientIP(r *http.Request) string {
+	if value := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); value != "" {
+		return strings.TrimSpace(strings.Split(value, ",")[0])
+	}
+	if value := strings.TrimSpace(r.Header.Get("X-Real-IP")); value != "" {
+		return value
+	}
+	return r.RemoteAddr
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+	bytes  int
+}
+
+func (r *statusRecorder) WriteHeader(status int) {
+	r.status = status
+	r.ResponseWriter.WriteHeader(status)
+}
+
+func (r *statusRecorder) Write(data []byte) (int, error) {
+	if r.status == 0 {
+		r.status = http.StatusOK
+	}
+	n, err := r.ResponseWriter.Write(data)
+	r.bytes += n
+	return n, err
+}
