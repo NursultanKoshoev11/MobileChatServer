@@ -18,8 +18,9 @@ type VerifyPhoneCodeInput struct {
 }
 
 type RequestPhoneCodeOutput struct {
-	Status  string `json:"status"`
-	DevCode string `json:"dev_code,omitempty"`
+	Status        string `json:"status"`
+	DevCode       string `json:"dev_code,omitempty"`
+	AccountExists bool   `json:"account_exists"`
 }
 
 func normalizeMobile(raw string) (string, error) {
