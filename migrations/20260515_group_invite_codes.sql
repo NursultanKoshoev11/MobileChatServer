@@ -1,4 +1,7 @@
 -- Ensure every group has an invite code so users can join by code or QR.
+ALTER TABLE groups
+ADD COLUMN IF NOT EXISTS invite_code text;
+
 UPDATE groups
 SET invite_code = upper(substr(md5(random()::text || clock_timestamp()::text), 1, 10))
 WHERE invite_code IS NULL OR invite_code = '';
