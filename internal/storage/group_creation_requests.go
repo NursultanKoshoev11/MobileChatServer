@@ -2,10 +2,12 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/domain"
+	"github.com/jackc/pgx/v5"
 )
 
 func (r *Repository) CreateGroupCreationRequest(ctx context.Context, request domain.GroupCreationRequest) (domain.GroupCreationRequest, error) {
@@ -19,8 +21,11 @@ func (r *Repository) CreateGroupCreationRequest(ctx context.Context, request dom
 func (r *Repository) GetGroupCreationRequestByID(ctx context.Context, id string) (domain.GroupCreationRequest, error) {
 	var req domain.GroupCreationRequest
 	err := r.db.QueryRow(ctx, `SELECT id, requester_id, applicant_name, position, organization_name, organization_type, region, official_phone, official_email, website, group_title, group_description, reason, documents, status, admin_comment, COALESCE(created_group_id,''), COALESCE(reviewed_by,''), created_at, updated_at, reviewed_at FROM group_creation_requests WHERE id=$1`, strings.TrimSpace(id)).Scan(&req.ID, &req.RequesterID, &req.ApplicantName, &req.Position, &req.OrganizationName, &req.OrganizationType, &req.Region, &req.OfficialPhone, &req.OfficialEmail, &req.Website, &req.GroupTitle, &req.GroupDescription, &req.Reason, &req.Documents, &req.Status, &req.AdminComment, &req.CreatedGroupID, &req.ReviewedBy, &req.CreatedAt, &req.UpdatedAt, &req.ReviewedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.GroupCreationRequest{}, ErrNotFound
+	}
 	if err != nil {
-		return domain.GroupCreationRequest{}, err
+		return domain.GroupCreationRequest{}, fmt.Errorf("get group creation request: %w", err)
 	}
 	return req, nil
 }
