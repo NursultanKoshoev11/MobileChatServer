@@ -40,8 +40,17 @@ func (s *PhoneAuthService) RequestCode(ctx context.Context, input RequestPhoneCo
 		return RequestPhoneCodeOutput{}, err
 	}
 
+	accountExists := true
+	if _, err := s.repo.GetPhoneUserByMobile(ctx, mobile); err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			accountExists = false
+		} else {
+			return RequestPhoneCodeOutput{}, err
+		}
+	}
+
 	if s.isDevelopmentMode() {
-		return RequestPhoneCodeOutput{Status: "dev_code_not_sent", DevCode: "any_non_empty_code"}, nil
+		return RequestPhoneCodeOutput{Status: "dev_code_not_sent", DevCode: "any_non_empty_code", AccountExists: accountExists}, nil
 	}
 
 	code, err := newNumericCode(6)
@@ -58,7 +67,7 @@ func (s *PhoneAuthService) RequestCode(ctx context.Context, input RequestPhoneCo
 	if err := s.sender.SendVerificationCode(ctx, mobile, code); err != nil {
 		return RequestPhoneCodeOutput{}, err
 	}
-	return RequestPhoneCodeOutput{Status: "code_sent"}, nil
+	return RequestPhoneCodeOutput{Status: "code_sent", AccountExists: accountExists}, nil
 }
 
 func (s *PhoneAuthService) VerifyCode(ctx context.Context, input VerifyPhoneCodeInput) (domain.PhoneSession, error) {
@@ -145,7 +154,7 @@ func (s *PhoneAuthService) getOrCreatePhoneUser(ctx context.Context, mobile stri
 	if errors.Is(err, storage.ErrNotFound) {
 		displayName := strings.TrimSpace(displayNameInput)
 		if displayName == "" {
-			displayName = "User " + mobile[len(mobile)-4:]
+			return domain.PhoneAuthUser{}, NewValidationError("display_name is required for new account")
 		}
 		if len(displayName) < 2 || len(displayName) > maxDisplayNameLen {
 			return domain.PhoneAuthUser{}, NewValidationError(fmt.Sprintf("display_name must be between 2 and %d characters", maxDisplayNameLen))
