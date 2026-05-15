@@ -153,26 +153,6 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, currentUser(r))
 }
 
-func (s *Server) registerPushToken(w http.ResponseWriter, r *http.Request) {
-	var input struct {
-		Token    string `json:"token"`
-		Platform string `json:"platform"`
-	}
-	if !readJSON(w, r, &input) {
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "registered"})
-}
-
-func (s *Server) deletePushToken(w http.ResponseWriter, r *http.Request) {
-	var input struct {
-		Token    string `json:"token"`
-		Platform string `json:"platform"`
-	}
-	_ = readJSON(w, r, &input)
-	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
-}
-
 func (s *Server) listGroups(w http.ResponseWriter, r *http.Request) {
 	groups, err := s.svc.ListUserGroups(r.Context(), currentUser(r).ID)
 	if err != nil {
@@ -436,10 +416,6 @@ func (s *Server) updatePublicRequestStatus(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }
 
-func (s *Server) hidePublicRequest(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusForbidden, map[string]string{"error": "hiding publications is disabled"})
-}
-
 func (s *Server) groupWebSocket(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
 	groupID := chi.URLParam(r, "groupID")
@@ -600,16 +576,6 @@ func parseOrigins(raw string) map[string]bool {
 		result["*"] = true
 	}
 	return result
-}
-
-func clientIP(r *http.Request) string {
-	if value := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); value != "" {
-		return strings.TrimSpace(strings.Split(value, ",")[0])
-	}
-	if value := strings.TrimSpace(r.Header.Get("X-Real-IP")); value != "" {
-		return value
-	}
-	return r.RemoteAddr
 }
 
 type statusRecorder struct {
