@@ -107,6 +107,9 @@ func (s *PhoneAuthService) VerifyCode(ctx context.Context, input VerifyPhoneCode
 		return domain.PhoneSession{}, err
 	}
 	_ = s.repo.MarkPhoneVerified(ctx, user.ID)
+	if err := s.repo.UpsertUserRoleFromAllowlist(ctx, user.ID, mobile); err != nil {
+		return domain.PhoneSession{}, err
+	}
 	return s.issuePhoneSession(ctx, user)
 }
 
