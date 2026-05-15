@@ -187,9 +187,7 @@ func (s *Service) CreateGroup(ctx context.Context, ownerID string, input CreateG
 		Description: description,
 		Visibility:  input.Visibility,
 		OwnerID:     ownerID,
-	}
-	if input.Visibility == domain.VisibilityPrivate {
-		group.InviteCode = strings.ToUpper(randomHex(5))
+		InviteCode:  strings.ToUpper(randomHex(5)),
 	}
 	return s.repo.CreateGroup(ctx, group)
 }
