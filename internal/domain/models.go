@@ -17,10 +17,20 @@ const (
 	RoleMember GroupRole = "member"
 )
 
+type UserRole string
+
+const (
+	UserRoleUser          UserRole = "user"
+	UserRolePlatformAdmin UserRole = "platform_admin"
+	UserRoleSuperAdmin    UserRole = "super_admin"
+)
+
 type User struct {
 	ID          string    `json:"id"`
 	Email       string    `json:"email"`
+	Phone       string    `json:"phone,omitempty"`
 	DisplayName string    `json:"display_name"`
+	Role        UserRole  `json:"role"`
 	CreatedAt   time.Time `json:"created_at"`
 }
 
@@ -61,14 +71,14 @@ type Message struct {
 }
 
 type InviteRequest struct {
-	ID           string    `json:"id"`
-	GroupID      string    `json:"group_id"`
-	GroupTitle   string    `json:"group_title,omitempty"`
-	InviterID    string    `json:"inviter_id"`
-	InviterName  string    `json:"inviter_name,omitempty"`
-	TargetUserID string    `json:"target_user_id"`
-	Status       string    `json:"status"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID           string     `json:"id"`
+	GroupID      string     `json:"group_id"`
+	GroupTitle   string     `json:"group_title,omitempty"`
+	InviterID    string     `json:"inviter_id"`
+	InviterName  string     `json:"inviter_name,omitempty"`
+	TargetUserID string     `json:"target_user_id"`
+	Status       string     `json:"status"`
+	CreatedAt    time.Time  `json:"created_at"`
 	RespondedAt  *time.Time `json:"responded_at,omitempty"`
 }
 
