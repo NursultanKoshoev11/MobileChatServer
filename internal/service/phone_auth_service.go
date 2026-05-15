@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	phoneCodeTTL         = 5 * time.Minute
+	phoneCodeTTL          = 5 * time.Minute
 	phoneCodeMaxAttempts = 5
 )
 
@@ -39,6 +39,11 @@ func (s *PhoneAuthService) RequestCode(ctx context.Context, input RequestPhoneCo
 	if err != nil {
 		return RequestPhoneCodeOutput{}, err
 	}
+
+	if s.isDevelopmentMode() {
+		return RequestPhoneCodeOutput{Status: "dev_code_not_sent", DevCode: "any_non_empty_code"}, nil
+	}
+
 	code, err := newNumericCode(6)
 	if err != nil {
 		return RequestPhoneCodeOutput{}, err
@@ -53,11 +58,7 @@ func (s *PhoneAuthService) RequestCode(ctx context.Context, input RequestPhoneCo
 	if err := s.sender.SendVerificationCode(ctx, mobile, code); err != nil {
 		return RequestPhoneCodeOutput{}, err
 	}
-	out := RequestPhoneCodeOutput{Status: "code_sent"}
-	if s.cfg.Environment != "production" {
-		out.DevCode = code
-	}
-	return out, nil
+	return RequestPhoneCodeOutput{Status: "code_sent"}, nil
 }
 
 func (s *PhoneAuthService) VerifyCode(ctx context.Context, input VerifyPhoneCodeInput) (domain.PhoneSession, error) {
@@ -66,6 +67,22 @@ func (s *PhoneAuthService) VerifyCode(ctx context.Context, input VerifyPhoneCode
 		return domain.PhoneSession{}, err
 	}
 	code := strings.TrimSpace(input.Code)
+	if code == "" {
+		return domain.PhoneSession{}, NewValidationError("code is required")
+	}
+
+	if s.isDevelopmentMode() {
+		user, err := s.getOrCreatePhoneUser(ctx, mobile, input.DisplayName)
+		if err != nil {
+			return domain.PhoneSession{}, err
+		}
+		_ = s.repo.MarkPhoneVerified(ctx, user.ID)
+		if err := s.repo.UpsertUserRoleFromAllowlist(ctx, user.ID, mobile); err != nil {
+			return domain.PhoneSession{}, err
+		}
+		return s.issuePhoneSession(ctx, user)
+	}
+
 	if len(code) != 6 {
 		return domain.PhoneSession{}, NewValidationError("code must contain 6 digits")
 	}
@@ -87,22 +104,7 @@ func (s *PhoneAuthService) VerifyCode(ctx context.Context, input VerifyPhoneCode
 		return domain.PhoneSession{}, err
 	}
 
-	user, err := s.repo.GetPhoneUserByMobile(ctx, mobile)
-	if errors.Is(err, storage.ErrNotFound) {
-		displayName := strings.TrimSpace(input.DisplayName)
-		if displayName == "" {
-			displayName = "User " + mobile[len(mobile)-4:]
-		}
-		if len(displayName) < 2 || len(displayName) > maxDisplayNameLen {
-			return domain.PhoneSession{}, NewValidationError(fmt.Sprintf("display_name must be between 2 and %d characters", maxDisplayNameLen))
-		}
-		user, err = s.repo.CreatePhoneUser(ctx, domain.PhoneAuthUser{
-			ID:          "U-" + strings.ToUpper(randomHex(8)),
-			Mobile:      mobile,
-			DisplayName: displayName,
-			Role:        domain.UserRoleUser,
-		})
-	}
+	user, err := s.getOrCreatePhoneUser(ctx, mobile, input.DisplayName)
 	if err != nil {
 		return domain.PhoneSession{}, err
 	}
@@ -138,6 +140,29 @@ func (s *PhoneAuthService) Refresh(ctx context.Context, input RefreshInput) (dom
 	return s.issuePhoneSession(ctx, user)
 }
 
+func (s *PhoneAuthService) getOrCreatePhoneUser(ctx context.Context, mobile string, displayNameInput string) (domain.PhoneAuthUser, error) {
+	user, err := s.repo.GetPhoneUserByMobile(ctx, mobile)
+	if errors.Is(err, storage.ErrNotFound) {
+		displayName := strings.TrimSpace(displayNameInput)
+		if displayName == "" {
+			displayName = "User " + mobile[len(mobile)-4:]
+		}
+		if len(displayName) < 2 || len(displayName) > maxDisplayNameLen {
+			return domain.PhoneAuthUser{}, NewValidationError(fmt.Sprintf("display_name must be between 2 and %d characters", maxDisplayNameLen))
+		}
+		return s.repo.CreatePhoneUser(ctx, domain.PhoneAuthUser{
+			ID:          "U-" + strings.ToUpper(randomHex(8)),
+			Mobile:      mobile,
+			DisplayName: displayName,
+			Role:        domain.UserRoleUser,
+		})
+	}
+	if err != nil {
+		return domain.PhoneAuthUser{}, err
+	}
+	return user, nil
+}
+
 func (s *PhoneAuthService) issuePhoneSession(ctx context.Context, user domain.PhoneAuthUser) (domain.PhoneSession, error) {
 	if storedUser, err := s.repo.GetUserByID(ctx, user.ID); err == nil {
 		user.Role = storedUser.Role
@@ -164,4 +189,8 @@ func (s *PhoneAuthService) issuePhoneSession(ctx context.Context, user domain.Ph
 		return domain.PhoneSession{}, err
 	}
 	return domain.PhoneSession{AccessToken: accessToken, RefreshToken: refreshToken, User: user}, nil
+}
+
+func (s *PhoneAuthService) isDevelopmentMode() bool {
+	return strings.ToLower(strings.TrimSpace(s.cfg.Environment)) != "production"
 }
