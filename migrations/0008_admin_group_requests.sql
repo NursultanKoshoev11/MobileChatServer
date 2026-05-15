@@ -1,6 +1,11 @@
 ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user';
 
+UPDATE users
+SET phone = phone_number
+WHERE (phone IS NULL OR phone = '')
+  AND phone_number IS NOT NULL;
+
 DO $$
 BEGIN
     IF NOT EXISTS (
