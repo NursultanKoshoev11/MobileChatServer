@@ -58,6 +58,23 @@ func (r *Repository) GetUserByEmail(ctx context.Context, email string) (UserWith
 	return result, nil
 }
 
+func (r *Repository) GetUserByPhone(ctx context.Context, phone string) (domain.User, error) {
+	phone = strings.ReplaceAll(strings.TrimSpace(phone), " ", "")
+	phone = strings.ReplaceAll(phone, "-", "")
+	phone = strings.ReplaceAll(phone, "(", "")
+	phone = strings.ReplaceAll(phone, ")", "")
+	query := `SELECT id, COALESCE(email, ''), COALESCE(phone, ''), display_name, COALESCE(role, 'user'), created_at FROM users WHERE phone = $1`
+	var user domain.User
+	err := r.db.QueryRow(ctx, query, phone).Scan(&user.ID, &user.Email, &user.Phone, &user.DisplayName, &user.Role, &user.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.User{}, ErrNotFound
+	}
+	if err != nil {
+		return domain.User{}, fmt.Errorf("get user by phone: %w", err)
+	}
+	return user, nil
+}
+
 func (r *Repository) GetUserByID(ctx context.Context, userID string) (domain.User, error) {
 	query := `SELECT id, COALESCE(email, ''), COALESCE(phone, ''), display_name, COALESCE(role, 'user'), created_at FROM users WHERE id = $1`
 	var user domain.User
@@ -102,7 +119,7 @@ func (r *Repository) ListUserGroups(ctx context.Context, userID string) ([]domai
 func (r *Repository) SearchPublicGroups(ctx context.Context, queryText string) ([]domain.Group, error) {
 	queryText = strings.TrimSpace(queryText)
 	query := `
-		SELECT g.id, g.title, g.description, g.visibility, g.owner_id, '' AS invite_code, g.created_at,
+		SELECT g.id, g.title, g.description, g.visibility, g.owner_id, COALESCE(g.invite_code, '') AS invite_code, g.created_at,
 		       COUNT(gm.user_id)::int AS member_count
 		FROM groups g
 		LEFT JOIN group_members gm ON gm.group_id = g.id
@@ -170,7 +187,7 @@ func (r *Repository) JoinPublicGroup(ctx context.Context, groupID, userID string
 }
 
 func (r *Repository) JoinByInviteCode(ctx context.Context, userID, inviteCode string) (domain.Group, error) {
-	query := `SELECT id, title, description, visibility, owner_id, COALESCE(invite_code, '') AS invite_code, created_at FROM groups WHERE invite_code = $1 AND visibility = 'private'`
+	query := `SELECT id, title, description, visibility, owner_id, COALESCE(invite_code, '') AS invite_code, created_at FROM groups WHERE invite_code = $1`
 	var group domain.Group
 	if err := r.db.QueryRow(ctx, query, strings.ToUpper(inviteCode)).Scan(&group.ID, &group.Title, &group.Description, &group.Visibility, &group.OwnerID, &group.InviteCode, &group.CreatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -294,7 +311,7 @@ func (r *Repository) GetMemberRole(ctx context.Context, groupID, userID string) 
 }
 
 func nullableInviteCode(group domain.Group) any {
-	if group.Visibility == domain.VisibilityPrivate && group.InviteCode != "" {
+	if group.InviteCode != "" {
 		return group.InviteCode
 	}
 	return nil
