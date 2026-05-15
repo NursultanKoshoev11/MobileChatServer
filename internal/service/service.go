@@ -207,6 +207,14 @@ func (s *Service) JoinByInviteCode(ctx context.Context, userID, inviteCode strin
 	return s.repo.JoinByInviteCode(ctx, userID, inviteCode)
 }
 
+func (s *Service) FindUserByPhone(ctx context.Context, mobile string) (domain.User, error) {
+	mobile = normalizePhone(mobile)
+	if mobile == "" {
+		return domain.User{}, NewValidationError("mobile is required")
+	}
+	return s.repo.GetUserByPhone(ctx, mobile)
+}
+
 func (s *Service) InviteUserByID(ctx context.Context, adminID, groupID, targetUserID string) error {
 	if groupID == "" || targetUserID == "" {
 		return NewValidationError("group_id and target_user_id are required")
@@ -266,6 +274,15 @@ func (s *Service) issueSession(ctx context.Context, user domain.User) (domain.Se
 
 func normalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
+}
+
+func normalizePhone(phone string) string {
+	phone = strings.TrimSpace(phone)
+	phone = strings.ReplaceAll(phone, " ", "")
+	phone = strings.ReplaceAll(phone, "-", "")
+	phone = strings.ReplaceAll(phone, "(", "")
+	phone = strings.ReplaceAll(phone, ")", "")
+	return phone
 }
 
 func randomHex(bytesCount int) string {
