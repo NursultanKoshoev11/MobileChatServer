@@ -20,7 +20,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-const maxJSONBodyBytes = 1 << 20
+const maxJSONBodyBytes = 12 << 20
 
 type userContextKey struct{}
 
@@ -279,9 +279,7 @@ func (s *Server) listMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	var before time.Time
 	if raw := r.URL.Query().Get("before"); raw != "" {
-		if parsed, err := time.Parse(time.RFC3339Nano, raw); err == nil {
-			before = parsed
-		}
+		before, _ = time.Parse(time.RFC3339, raw)
 	}
 	messages, err := s.svc.ListMessages(r.Context(), currentUser(r).ID, chi.URLParam(r, "groupID"), limit, before)
 	if err != nil {
@@ -296,305 +294,32 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &input) {
 		return
 	}
-	groupID := chi.URLParam(r, "groupID")
-	message, err := s.svc.SendMessage(r.Context(), currentUser(r).ID, groupID, input)
+	message, err := s.svc.SendMessage(r.Context(), currentUser(r).ID, chi.URLParam(r, "groupID"), input)
 	if err != nil {
 		s.writeError(w, err)
 		return
 	}
-	s.hub.BroadcastGroup(groupID, realtime.Event{Type: "message.created", GroupID: groupID, Payload: message})
+	s.hub.Broadcast(chi.URLParam(r, "groupID"), message)
 	writeJSON(w, http.StatusCreated, message)
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value != "" {
-			return value
-		}
-	}
-	return ""
-}
-
-func (s *Server) createPublicRequest(w http.ResponseWriter, r *http.Request) {
-	var input service.CreatePublicRequestInput
-	if !readJSON(w, r, &input) {
-		return
-	}
-	request, err := s.svc.CreatePublicRequest(r.Context(), currentUser(r).ID, chi.URLParam(r, "groupID"), input)
-	if err != nil {
-		s.writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, request)
-}
-
-func (s *Server) listPublicRequests(w http.ResponseWriter, r *http.Request) {
-	limit := 50
-	if raw := r.URL.Query().Get("limit"); raw != "" {
-		if parsed, err := strconv.Atoi(raw); err == nil {
-			limit = parsed
-		}
-	}
-	var before time.Time
-	if raw := r.URL.Query().Get("before"); raw != "" {
-		if parsed, err := time.Parse(time.RFC3339Nano, raw); err == nil {
-			before = parsed
-		}
-	}
-	mineOnly := r.URL.Query().Get("mine") == "true"
-	requests, err := s.svc.ListPublicRequests(r.Context(), currentUser(r).ID, chi.URLParam(r, "groupID"), limit, before, mineOnly)
-	if err != nil {
-		s.writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, requests)
-}
-
-func (s *Server) supportPublicRequest(w http.ResponseWriter, r *http.Request) {
-	if err := s.svc.VotePublicRequest(r.Context(), currentUser(r).ID, chi.URLParam(r, "requestID"), "support"); err != nil {
-		s.writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "supported"})
-}
-
-func (s *Server) opposePublicRequest(w http.ResponseWriter, r *http.Request) {
-	if err := s.svc.VotePublicRequest(r.Context(), currentUser(r).ID, chi.URLParam(r, "requestID"), "oppose"); err != nil {
-		s.writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "opposed"})
-}
-
-func (s *Server) clearPublicRequestVote(w http.ResponseWriter, r *http.Request) {
-	if err := s.svc.ClearPublicRequestVote(r.Context(), currentUser(r).ID, chi.URLParam(r, "requestID")); err != nil {
-		s.writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "cleared"})
-}
-
-func (s *Server) createPublicRequestComment(w http.ResponseWriter, r *http.Request) {
-	var input service.CreatePublicRequestCommentInput
-	if !readJSON(w, r, &input) {
-		return
-	}
-	comment, err := s.svc.CreatePublicRequestComment(r.Context(), currentUser(r).ID, chi.URLParam(r, "requestID"), input)
-	if err != nil {
-		s.writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, comment)
-}
-
-func (s *Server) listPublicRequestComments(w http.ResponseWriter, r *http.Request) {
-	comments, err := s.svc.ListPublicRequestComments(r.Context(), currentUser(r).ID, chi.URLParam(r, "requestID"))
-	if err != nil {
-		s.writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, comments)
-}
-
-func (s *Server) deletePublicRequestComment(w http.ResponseWriter, r *http.Request) {
-	if err := s.svc.DeletePublicRequestComment(r.Context(), currentUser(r).ID, chi.URLParam(r, "commentID")); err != nil {
-		s.writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
-}
-
-func (s *Server) updatePublicRequestStatus(w http.ResponseWriter, r *http.Request) {
-	var input service.UpdatePublicRequestStatusInput
-	if !readJSON(w, r, &input) {
-		return
-	}
-	if err := s.svc.UpdatePublicRequestStatus(r.Context(), currentUser(r).ID, chi.URLParam(r, "requestID"), input.Status); err != nil {
-		s.writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
-}
-
-func (s *Server) groupWebSocket(w http.ResponseWriter, r *http.Request) {
-	user := currentUser(r)
-	groupID := chi.URLParam(r, "groupID")
-	if _, err := s.svc.ListMessages(r.Context(), user.ID, groupID, 1, time.Time{}); err != nil {
-		s.writeError(w, err)
-		return
-	}
-	conn, err := s.upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		s.logger.Printf("websocket upgrade failed: %v", err)
-		return
-	}
-	client := realtime.NewClient(s.hub, conn, user, groupID)
-	s.hub.Register(client)
-	client.Send <- realtime.Event{Type: "connection.ready", GroupID: groupID, Payload: map[string]string{"user_id": user.ID}}
-	go client.WritePump()
-	go client.ReadPump()
-}
-
-func (s *Server) auth(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token := bearerTokenFromRequest(r)
-		if token == "" {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "missing bearer token"})
-			return
-		}
-		user, err := s.svc.Authenticate(r.Context(), token)
-		if err != nil {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
-			return
-		}
-		ctx := context.WithValue(r.Context(), userContextKey{}, user)
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
-}
-
-func bearerTokenFromRequest(r *http.Request) string {
-	header := r.Header.Get("Authorization")
-	if strings.HasPrefix(header, "Bearer ") {
-		return strings.TrimSpace(strings.TrimPrefix(header, "Bearer "))
-	}
-	if token := strings.TrimSpace(r.URL.Query().Get("token")); token != "" && strings.HasSuffix(r.URL.Path, "/ws") {
-		return token
-	}
-	return ""
-}
-
-func (s *Server) rateLimit(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		key := clientIP(r)
-		if user := currentUser(r); user.ID != "" {
-			key = user.ID
-		}
-		if !s.limiter.Allow(key) {
-			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "rate limit exceeded"})
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-func (s *Server) cors(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
-		if origin != "" && (s.allowedOrigins["*"] || s.allowedOrigins[origin]) {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Vary", "Origin")
-		}
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID")
-		w.Header().Set("Access-Control-Expose-Headers", "X-Request-ID")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-func (s *Server) requestLogger(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		started := time.Now()
-		recorder := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
-		next.ServeHTTP(recorder, r)
-		s.logger.Printf("request_id=%s method=%s path=%s status=%d bytes=%d duration_ms=%d remote=%s", middleware.GetReqID(r.Context()), r.Method, r.URL.Path, recorder.status, recorder.bytes, time.Since(started).Milliseconds(), r.RemoteAddr)
-	})
-}
-
-func (s *Server) recoverer(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
-			if recovered := recover(); recovered != nil {
-				s.logger.Printf("panic request_id=%s method=%s path=%s error=%v", middleware.GetReqID(r.Context()), r.Method, r.URL.Path, recovered)
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
-			}
-		}()
-		next.ServeHTTP(w, r)
-	})
-}
-
-func currentUser(r *http.Request) domain.User {
-	user, _ := r.Context().Value(userContextKey{}).(domain.User)
-	return user
-}
-
-func readJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
-	defer r.Body.Close()
-	decoder := json.NewDecoder(io.LimitReader(r.Body, maxJSONBodyBytes))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(dst); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body"})
-		return false
-	}
-	return true
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	if payload == nil {
-		return
-	}
 	_ = json.NewEncoder(w).Encode(payload)
 }
 
-func (s *Server) writeError(w http.ResponseWriter, err error) {
-	if err == nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
-		return
+func readJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(dst); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return false
 	}
-	var validation service.ValidationError
-	switch {
-	case errors.As(err, &validation):
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": validation.Error()})
-	case errors.Is(err, service.ErrUnauthorized):
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
-	case errors.Is(err, service.ErrInvalidCredentials):
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
-	case errors.Is(err, storage.ErrNotFound):
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
-	case errors.Is(err, storage.ErrForbidden):
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
-	default:
-		s.logger.Printf("http error: %v", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
-	}
+	return true
 }
 
-func parseOrigins(raw string) map[string]bool {
-	result := map[string]bool{}
-	for _, item := range strings.Split(raw, ",") {
-		item = strings.TrimSpace(item)
-		if item != "" {
-			result[item] = true
-		}
-	}
-	if len(result) == 0 {
-		result["*"] = true
-	}
-	return result
-}
-
-type statusRecorder struct {
-	http.ResponseWriter
-	status int
-	bytes  int
-}
-
-func (r *statusRecorder) WriteHeader(status int) {
-	r.status = status
-	r.ResponseWriter.WriteHeader(status)
-}
-
-func (r *statusRecorder) Write(data []byte) (int, error) {
-	if r.status == 0 {
-		r.status = http.StatusOK
-	}
-	n, err := r.ResponseWriter.Write(data)
-	r.bytes += n
-	return n, err
+func currentUser(r *http.Request) domain.User {
+	user, _ := r.Context().Value(userContextKey{}).(domain.User)
+	return user
 }
