@@ -22,21 +22,25 @@ type Config struct {
 	FCMClientEmail       string
 	FCMPrivateKey        string
 	RunMigrationsOnStart bool
+	SuperAdminPhones     []string
+	PlatformAdminPhones  []string
 }
 
 func Load() (Config, error) {
 	cfg := Config{
-		Port:           getEnv("PORT", "8080"),
-		DatabaseURL:    os.Getenv("DATABASE_URL"),
-		JWTSecret:      os.Getenv("JWT_SECRET"),
-		AllowedOrigins: getEnv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:8080"),
-		Environment:    getEnv("APP_ENV", "development"),
-		BCryptCost:     getEnvInt("BCRYPT_COST", 12),
-		SMSProvider:    getEnv("SMS_PROVIDER", "dev"),
-		SMSFrom:        getEnv("SMS_FROM", "MobileChat"),
-		FCMProjectID:   os.Getenv("FCM_PROJECT_ID"),
-		FCMClientEmail: os.Getenv("FCM_CLIENT_EMAIL"),
-		FCMPrivateKey:  os.Getenv("FCM_PRIVATE_KEY"),
+		Port:                getEnv("PORT", "8080"),
+		DatabaseURL:         os.Getenv("DATABASE_URL"),
+		JWTSecret:           os.Getenv("JWT_SECRET"),
+		AllowedOrigins:      getEnv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:8080"),
+		Environment:         getEnv("APP_ENV", "development"),
+		BCryptCost:          getEnvInt("BCRYPT_COST", 12),
+		SMSProvider:         getEnv("SMS_PROVIDER", "dev"),
+		SMSFrom:             getEnv("SMS_FROM", "MobileChat"),
+		FCMProjectID:        os.Getenv("FCM_PROJECT_ID"),
+		FCMClientEmail:      os.Getenv("FCM_CLIENT_EMAIL"),
+		FCMPrivateKey:       os.Getenv("FCM_PRIVATE_KEY"),
+		SuperAdminPhones:    getEnvList("SUPER_ADMIN_PHONES"),
+		PlatformAdminPhones: getEnvList("PLATFORM_ADMIN_PHONES"),
 	}
 
 	cfg.RunMigrationsOnStart = getEnvBool("RUN_MIGRATIONS_ON_START", cfg.Environment != "production")
@@ -93,4 +97,23 @@ func getEnvBool(key string, fallback bool) bool {
 	default:
 		return fallback
 	}
+}
+
+func getEnvList(key string) []string {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	values := make([]string, 0, len(parts))
+	seen := map[string]bool{}
+	for _, part := range parts {
+		value := strings.TrimSpace(part)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		values = append(values, value)
+	}
+	return values
 }
