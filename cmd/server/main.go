@@ -44,6 +44,13 @@ func main() {
 	}
 
 	repo := storage.NewRepository(db.Pool)
+	if err := repo.SyncAdminPhoneAllowlist(ctx, cfg.SuperAdminPhones, cfg.PlatformAdminPhones); err != nil {
+		logger.Fatalf("admin allowlist sync error: %v", err)
+	}
+	if len(cfg.SuperAdminPhones) > 0 || len(cfg.PlatformAdminPhones) > 0 {
+		logger.Printf("admin allowlist synced: super_admin=%d platform_admin=%d", len(cfg.SuperAdminPhones), len(cfg.PlatformAdminPhones))
+	}
+
 	notifier := &push.FCMNotifier{
 		ProjectID:   cfg.FCMProjectID,
 		ClientEmail: cfg.FCMClientEmail,
