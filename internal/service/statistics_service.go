@@ -8,6 +8,8 @@ import (
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/domain"
 )
 
+const maxStatisticsCustomRange = 370 * 24 * time.Hour
+
 type PublicRequestStatisticsInput struct {
 	Period      string
 	Granularity string
@@ -22,8 +24,11 @@ func (s *Service) GetPublicRequestStatistics(ctx context.Context, viewerID, grou
 	}
 
 	period := normalizeStatisticsPeriod(input.Period)
-	granularity := normalizeStatisticsGranularity(input.Granularity)
-	from, to := statisticsRange(period, input.From, input.To)
+	granularity := normalizeStatisticsGranularity(input.Granularity, period)
+	from, to, err := statisticsRange(period, input.From, input.To)
+	if err != nil {
+		return domain.PublicRequestStatistics{}, err
+	}
 
 	return s.repo.GetPublicRequestStatistics(ctx, groupID, viewerID, period, granularity, from, to)
 }
@@ -38,17 +43,19 @@ func normalizeStatisticsPeriod(period string) string {
 	}
 }
 
-func normalizeStatisticsGranularity(granularity string) string {
+func normalizeStatisticsGranularity(granularity, period string) string {
 	granularity = strings.ToLower(strings.TrimSpace(granularity))
 	switch granularity {
 	case "day", "week", "month", "year":
 		return granularity
-	default:
-		return "day"
 	}
+	if period == "year" || period == "all" {
+		return "month"
+	}
+	return "day"
 }
 
-func statisticsRange(period string, customFrom, customTo time.Time) (time.Time, time.Time) {
+func statisticsRange(period string, customFrom, customTo time.Time) (time.Time, time.Time, error) {
 	now := time.Now().UTC()
 	to := now.Add(time.Second)
 	var from time.Time
@@ -61,20 +68,23 @@ func statisticsRange(period string, customFrom, customTo time.Time) (time.Time, 
 	case "all":
 		from = time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
 	case "custom":
-		if !customFrom.IsZero() {
-			from = customFrom.UTC()
-		} else {
-			from = now.AddDate(0, -1, 0)
+		if customFrom.IsZero() || customTo.IsZero() {
+			return time.Time{}, time.Time{}, NewValidationError("custom statistics period requires from and to")
 		}
-		if !customTo.IsZero() {
-			to = customTo.UTC()
+		from = customFrom.UTC()
+		to = customTo.UTC()
+		if !from.Before(to) {
+			return time.Time{}, time.Time{}, NewValidationError("from must be before to")
+		}
+		if to.Sub(from) > maxStatisticsCustomRange {
+			return time.Time{}, time.Time{}, NewValidationError("custom statistics period cannot be longer than 370 days")
 		}
 	default:
 		from = now.AddDate(0, -1, 0)
 	}
 
 	if !from.Before(to) {
-		from = to.AddDate(0, -1, 0)
+		return time.Time{}, time.Time{}, NewValidationError("statistics period is invalid")
 	}
-	return from, to
+	return from, to, nil
 }
