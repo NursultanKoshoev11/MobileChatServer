@@ -119,7 +119,8 @@ services:
       - -c
       - |
         while true; do
-          sh /scripts/backup-postgres.sh
+          tr -d '\r' < /scripts/backup-postgres.sh > /tmp/backup-postgres.sh
+          sh /tmp/backup-postgres.sh
           sleep 86400
         done
     networks:
