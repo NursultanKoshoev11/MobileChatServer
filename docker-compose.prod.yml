@@ -46,7 +46,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    command: ["/app/mobilechat-migrate"]
+    entrypoint: ["/app/mobilechat-migrate"]
     environment:
       APP_ENV: production
       RUN_MIGRATIONS_ON_START: "false"
@@ -114,7 +114,7 @@ services:
       - ./backups:/backups
       - ./scripts:/scripts:ro
     entrypoint: ["/bin/sh", "-c"]
-    command: "while true; do /scripts/backup-postgres.sh; sleep 86400; done"
+    command: "while true; do sh /scripts/backup-postgres.sh; sleep 86400; done"
     networks:
       - mobilechat
 
