@@ -109,3 +109,11 @@ func (s *Server) updatePublicRequestStatus(w http.ResponseWriter, r *http.Reques
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }
+
+func (s *Server) hidePublicRequest(w http.ResponseWriter, r *http.Request) {
+	if err := s.svc.HidePublicRequest(r.Context(), currentUser(r).ID, chi.URLParam(r, "requestID")); err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "hidden"})
+}
