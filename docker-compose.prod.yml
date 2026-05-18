@@ -113,8 +113,15 @@ services:
     volumes:
       - ./backups:/backups
       - ./scripts:/scripts:ro
-    entrypoint: ["/bin/sh", "-c"]
-    command: "while true; do sh /scripts/backup-postgres.sh; sleep 86400; done"
+    entrypoint:
+      - /bin/sh
+    command:
+      - -c
+      - |
+        while true; do
+          sh /scripts/backup-postgres.sh
+          sleep 86400
+        done
     networks:
       - mobilechat
 
