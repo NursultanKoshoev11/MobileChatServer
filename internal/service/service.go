@@ -201,7 +201,7 @@ func (s *Service) JoinPublicGroup(ctx context.Context, userID, groupID string) e
 }
 
 func (s *Service) JoinByInviteCode(ctx context.Context, userID, inviteCode string) (domain.Group, error) {
-	inviteCode = strings.ToUpper(strings.TrimSpace(inviteCode))
+	inviteCode = normalizeInviteCode(inviteCode)
 	if inviteCode == "" {
 		return domain.Group{}, NewValidationError("invite_code is required")
 	}
@@ -284,6 +284,22 @@ func normalizePhone(phone string) string {
 	phone = strings.ReplaceAll(phone, "(", "")
 	phone = strings.ReplaceAll(phone, ")", "")
 	return phone
+}
+
+func normalizeInviteCode(code string) string {
+	code = strings.ToUpper(strings.TrimSpace(code))
+	var compact strings.Builder
+	compact.Grow(6)
+	for _, char := range code {
+		if (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') {
+			compact.WriteRune(char)
+		}
+	}
+	value := compact.String()
+	if len(value) == 6 {
+		return value[:3] + "-" + value[3:]
+	}
+	return code
 }
 
 func randomHex(bytesCount int) string {
