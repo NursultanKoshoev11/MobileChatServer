@@ -23,7 +23,6 @@ const (
 	maxMessageLen     = 2000
 	minPasswordLen    = 8
 	refreshTokenTTL   = 30 * 24 * time.Hour
-	inviteCodeLength  = 6
 )
 
 var emailPattern = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
@@ -189,7 +188,7 @@ func (s *Service) CreateGroup(ctx context.Context, ownerID string, input CreateG
 		Description: description,
 		Visibility:  input.Visibility,
 		OwnerID:     ownerID,
-		InviteCode:  randomInviteCode(inviteCodeLength),
+		InviteCode:  randomInviteCode(),
 	}
 	return s.repo.CreateGroup(ctx, group)
 }
@@ -295,22 +294,32 @@ func randomHex(bytesCount int) string {
 	return hex.EncodeToString(buf)
 }
 
-func randomInviteCode(length int) string {
-	const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-	if length <= 0 {
-		length = inviteCodeLength
+func randomInviteCode() string {
+	const letters = "ABCDEFGHJKLMNPQRSTUVWXYZ"
+	const digits = "23456789"
+	return randomChars(letters, 3) + "-" + randomChars(digits, 3)
+}
+
+func randomChars(alphabet string, count int) string {
+	if count <= 0 || alphabet == "" {
+		return ""
 	}
 	var builder strings.Builder
-	builder.Grow(length)
+	builder.Grow(count)
 	max := big.NewInt(int64(len(alphabet)))
-	for builder.Len() < length {
+	for builder.Len() < count {
 		index, err := rand.Int(rand.Reader, max)
 		if err != nil {
-			fallback := strings.ToUpper(randomHex(4))
-			if len(fallback) >= length {
-				return fallback[:length]
+			fallback := strings.ToUpper(randomHex(8))
+			for _, char := range fallback {
+				if strings.ContainsRune(alphabet, char) {
+					builder.WriteRune(char)
+					if builder.Len() == count {
+						break
+					}
+				}
 			}
-			return fallback
+			continue
 		}
 		builder.WriteByte(alphabet[index.Int64()])
 	}
