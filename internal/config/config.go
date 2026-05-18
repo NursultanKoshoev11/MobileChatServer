@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -20,6 +21,7 @@ type Config struct {
 	FCMProjectID         string
 	FCMClientEmail       string
 	FCMPrivateKey        string
+	RunMigrationsOnStart bool
 }
 
 func Load() (Config, error) {
@@ -36,6 +38,8 @@ func Load() (Config, error) {
 		FCMClientEmail: os.Getenv("FCM_CLIENT_EMAIL"),
 		FCMPrivateKey:  os.Getenv("FCM_PRIVATE_KEY"),
 	}
+
+	cfg.RunMigrationsOnStart = getEnvBool("RUN_MIGRATIONS_ON_START", cfg.Environment != "production")
 
 	accessTokenTTLMinutes := getEnvInt("ACCESS_TOKEN_TTL_MINUTES", 60)
 	cfg.AccessTokenTTL = time.Duration(accessTokenTTLMinutes) * time.Minute
@@ -74,4 +78,19 @@ func getEnvInt(key string, fallback int) int {
 		return fallback
 	}
 	return parsed
+}
+
+func getEnvBool(key string, fallback bool) bool {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+	if value == "" {
+		return fallback
+	}
+	switch value {
+	case "1", "true", "yes", "y", "on":
+		return true
+	case "0", "false", "no", "n", "off":
+		return false
+	default:
+		return fallback
+	}
 }
