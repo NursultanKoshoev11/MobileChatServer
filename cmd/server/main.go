@@ -35,8 +35,12 @@ func main() {
 	}
 	defer db.Close()
 
-	if err := db.RunMigrations(ctx, "migrations"); err != nil {
-		logger.Fatalf("migration error: %v", err)
+	if cfg.RunMigrationsOnStart {
+		if err := db.RunMigrations(ctx, "migrations"); err != nil {
+			logger.Fatalf("migration error: %v", err)
+		}
+	} else {
+		logger.Println("startup migrations disabled; run the migration job before starting/updating production")
 	}
 
 	repo := storage.NewRepository(db.Pool)
