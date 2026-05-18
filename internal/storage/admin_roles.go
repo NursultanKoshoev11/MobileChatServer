@@ -36,3 +36,32 @@ func (r *Repository) UpsertUserRoleFromAllowlist(ctx context.Context, userID, ph
 	}
 	return nil
 }
+
+func (r *Repository) SyncAdminPhoneAllowlist(ctx context.Context, superAdminPhones, platformAdminPhones []string) error {
+	for _, phone := range superAdminPhones {
+		if err := r.upsertAdminPhone(ctx, phone, domain.UserRoleSuperAdmin); err != nil {
+			return err
+		}
+	}
+	for _, phone := range platformAdminPhones {
+		if err := r.upsertAdminPhone(ctx, phone, domain.UserRolePlatformAdmin); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *Repository) upsertAdminPhone(ctx context.Context, phone string, role domain.UserRole) error {
+	phone = strings.TrimSpace(phone)
+	if phone == "" {
+		return nil
+	}
+	if _, err := r.db.Exec(ctx, `
+		INSERT INTO admin_phone_allowlist (phone, role, enabled)
+		VALUES ($1, $2, true)
+		ON CONFLICT (phone)
+		DO UPDATE SET role = EXCLUDED.role, enabled = true`, phone, role); err != nil {
+		return fmt.Errorf("sync admin phone allowlist: %w", err)
+	}
+	return nil
+}
