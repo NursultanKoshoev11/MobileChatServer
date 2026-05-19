@@ -5,6 +5,8 @@ import (
 	"log"
 	"strings"
 	"time"
+
+	"github.com/NursultanKoshoev11/MobileChatServer/internal/storage"
 )
 
 const pushNotificationTimeout = 10 * time.Second
@@ -70,11 +72,7 @@ func (s *Service) notifyGroupAboutNewPublicRequestComment(ctx context.Context, a
 	}
 }
 
-func collectPushTokenValues(tokens []struct {
-	UserID   string
-	Token    string
-	Platform string
-}) []string {
+func collectPushTokenValues(tokens []storage.PushToken) []string {
 	values := make([]string, 0, len(tokens))
 	seen := map[string]bool{}
 	for _, item := range tokens {
