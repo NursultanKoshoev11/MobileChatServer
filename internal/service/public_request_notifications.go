@@ -11,6 +11,19 @@ import (
 
 const pushNotificationTimeout = 10 * time.Second
 
+type PublicRequestRealtimeContext struct {
+	GroupID string
+	Title   string
+}
+
+func (s *Service) GetPublicRequestRealtimeContext(ctx context.Context, requestID string) (PublicRequestRealtimeContext, error) {
+	request, err := s.repo.GetPublicRequestPushContext(ctx, requestID)
+	if err != nil {
+		return PublicRequestRealtimeContext{}, err
+	}
+	return PublicRequestRealtimeContext{GroupID: request.GroupID, Title: request.Title}, nil
+}
+
 func (s *Service) notifyGroupAboutNewPublicRequest(ctx context.Context, authorID string, groupID string, requestID string, title string, body string) {
 	ctx, cancel := context.WithTimeout(ctx, pushNotificationTimeout)
 	defer cancel()
