@@ -296,8 +296,8 @@ func normalizeInviteCode(code string) string {
 		}
 	}
 	value := compact.String()
-	if len(value) > 6 {
-		return value[:6]
+	if len(value) >= 6 {
+		return value[:3] + "-" + value[3:6]
 	}
 	return value
 }
@@ -311,8 +311,9 @@ func randomHex(bytesCount int) string {
 }
 
 func randomInviteCode() string {
-	const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-	return randomChars(alphabet, 6)
+	const letters = "ABCDEFGHJKLMNPQRSTUVWXYZ"
+	const digits = "23456789"
+	return randomChars(letters, 3) + "-" + randomChars(digits, 3)
 }
 
 func randomChars(alphabet string, count int) string {
