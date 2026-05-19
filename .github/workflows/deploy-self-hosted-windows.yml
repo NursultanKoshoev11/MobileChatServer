@@ -23,9 +23,30 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          $DeployPath = "C:\Users\Али\Desktop\test\MobileChatServer"
-          if (-not (Test-Path $DeployPath)) {
-            throw "Deploy path not found: $DeployPath"
+          $candidates = @()
+          if ($env:MOBILECHAT_SERVER_DEPLOY_PATH) {
+            $candidates += $env:MOBILECHAT_SERVER_DEPLOY_PATH
+          }
+          if ($env:USERPROFILE) {
+            $candidates += (Join-Path $env:USERPROFILE "Desktop\test\MobileChatServer")
+          }
+          $candidates += "C:\deploy\MobileChatServer"
+          $candidates += "C:\MobileChatServer"
+
+          $DeployPath = $null
+          foreach ($candidate in $candidates) {
+            if ($candidate -and (Test-Path $candidate)) {
+              $DeployPath = $candidate
+              break
+            }
+          }
+
+          if (-not $DeployPath) {
+            Write-Host "Deploy path was not found. Checked candidates:"
+            $candidates | ForEach-Object { Write-Host " - $_" }
+            Write-Host "USERPROFILE=$env:USERPROFILE"
+            Write-Host "USERNAME=$env:USERNAME"
+            throw "Deploy path not found. Set MOBILECHAT_SERVER_DEPLOY_PATH or move the project to C:\deploy\MobileChatServer."
           }
 
           Set-Location $DeployPath
