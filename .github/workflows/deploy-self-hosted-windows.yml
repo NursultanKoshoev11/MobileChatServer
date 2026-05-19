@@ -16,8 +16,17 @@ jobs:
   deploy:
     name: Rebuild and restart Docker containers
     runs-on: [self-hosted, Windows, X64]
+    env:
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
 
     steps:
+      - name: Notify deploy started
+        if: env.DISCORD_WEBHOOK_URL != ''
+        uses: tsickert/discord-webhook@v6.0.0
+        with:
+          webhook-url: ${{ env.DISCORD_WEBHOOK_URL }}
+          content: "🚀 MobileChatServer deploy started. Commit: ${{ github.sha }}"
+
       - name: Deploy from local server folder
         shell: powershell
         run: |
@@ -106,3 +115,17 @@ jobs:
 
           Write-Host "API is healthy. Last API logs:"
           docker logs mobilechat-api --tail=80
+
+      - name: Notify deploy succeeded
+        if: success() && env.DISCORD_WEBHOOK_URL != ''
+        uses: tsickert/discord-webhook@v6.0.0
+        with:
+          webhook-url: ${{ env.DISCORD_WEBHOOK_URL }}
+          content: "✅ MobileChatServer deploy succeeded. API is healthy."
+
+      - name: Notify deploy failed
+        if: failure() && env.DISCORD_WEBHOOK_URL != ''
+        uses: tsickert/discord-webhook@v6.0.0
+        with:
+          webhook-url: ${{ env.DISCORD_WEBHOOK_URL }}
+          content: "❌ MobileChatServer deploy failed. Check GitHub Actions logs."
