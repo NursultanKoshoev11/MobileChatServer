@@ -74,6 +74,13 @@ func (n *FCMNotifier) SendToTokens(ctx context.Context, tokens []string, message
 }
 
 func (n *FCMNotifier) sendOne(ctx context.Context, client *http.Client, accessToken, token string, message service.PushMessage) error {
+	data := map[string]string{}
+	for key, value := range message.Data {
+		data[key] = value
+	}
+	data["title"] = message.Title
+	data["body"] = message.Body
+
 	payload := map[string]any{
 		"message": map[string]any{
 			"token": token,
@@ -81,7 +88,14 @@ func (n *FCMNotifier) sendOne(ctx context.Context, client *http.Client, accessTo
 				"title": message.Title,
 				"body":  message.Body,
 			},
-			"data": message.Data,
+			"data": data,
+			"android": map[string]any{
+				"priority": "HIGH",
+				"notification": map[string]any{
+					"channel_id": "koom_default",
+					"sound":      "default",
+				},
+			},
 		},
 	}
 	body, err := json.Marshal(payload)
