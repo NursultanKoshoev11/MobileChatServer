@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/NursultanKoshoev11/MobileChatServer/internal/realtime"
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/service"
 	"github.com/go-chi/chi/v5"
 )
@@ -18,6 +19,8 @@ func (s *Server) createGroupCreationRequest(w http.ResponseWriter, r *http.Reque
 		s.writeError(w, err)
 		return
 	}
+	s.notifyAdminsRealtime(r, "group_creation_request.created", request)
+	go s.svc.NotifyAdminsAboutGroupCreationRequest(r.Context(), request)
 	writeJSON(w, http.StatusCreated, request)
 }
 
@@ -55,6 +58,9 @@ func (s *Server) approveGroupCreationRequest(w http.ResponseWriter, r *http.Requ
 		s.writeError(w, err)
 		return
 	}
+	s.notifyAdminsRealtime(r, "group_creation_request.reviewed", request)
+	s.hub.NotifyUser(request.RequesterID, realtime.Event{Type: "group_creation_request.reviewed", Payload: request})
+	go s.svc.NotifyUserAboutGroupCreationReview(r.Context(), request.RequesterID, request)
 	writeJSON(w, http.StatusOK, request)
 }
 
@@ -68,6 +74,9 @@ func (s *Server) rejectGroupCreationRequest(w http.ResponseWriter, r *http.Reque
 		s.writeError(w, err)
 		return
 	}
+	s.notifyAdminsRealtime(r, "group_creation_request.reviewed", request)
+	s.hub.NotifyUser(request.RequesterID, realtime.Event{Type: "group_creation_request.reviewed", Payload: request})
+	go s.svc.NotifyUserAboutGroupCreationReview(r.Context(), request.RequesterID, request)
 	writeJSON(w, http.StatusOK, request)
 }
 
@@ -81,5 +90,19 @@ func (s *Server) needMoreInfoForGroupCreationRequest(w http.ResponseWriter, r *h
 		s.writeError(w, err)
 		return
 	}
+	s.notifyAdminsRealtime(r, "group_creation_request.reviewed", request)
+	s.hub.NotifyUser(request.RequesterID, realtime.Event{Type: "group_creation_request.reviewed", Payload: request})
+	go s.svc.NotifyUserAboutGroupCreationReview(r.Context(), request.RequesterID, request)
 	writeJSON(w, http.StatusOK, request)
+}
+
+func (s *Server) notifyAdminsRealtime(r *http.Request, eventType string, payload any) {
+	adminIDs, err := s.svc.ListPlatformAdminUserIDs(r.Context())
+	if err != nil {
+		s.logger.Printf("admin realtime notification skipped: %v", err)
+		return
+	}
+	for _, adminID := range adminIDs {
+		s.hub.NotifyUser(adminID, realtime.Event{Type: eventType, Payload: payload})
+	}
 }
