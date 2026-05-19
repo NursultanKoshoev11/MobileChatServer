@@ -31,40 +31,47 @@ type Hub struct {
 }
 
 func NewHub(logger *log.Logger) *Hub {
-	return &Hub{
-		logger: logger,
-		groups: make(map[string]map[*Client]bool),
-		users:  make(map[string]map[*Client]bool),
-	}
+	return &Hub{logger: logger, groups: make(map[string]map[*Client]bool), users: make(map[string]map[*Client]bool)}
 }
 
 func (h *Hub) Register(client *Client) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.groups[client.GroupID] == nil {
-		h.groups[client.GroupID] = make(map[*Client]bool)
+	if client.GroupID != "" {
+		if h.groups[client.GroupID] == nil {
+			h.groups[client.GroupID] = make(map[*Client]bool)
+		}
+		h.groups[client.GroupID][client] = true
 	}
 	if h.users[client.UserID] == nil {
 		h.users[client.UserID] = make(map[*Client]bool)
 	}
-	h.groups[client.GroupID][client] = true
 	h.users[client.UserID][client] = true
 }
 
 func (h *Hub) Unregister(client *Client) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if clients := h.groups[client.GroupID]; clients != nil {
-		if clients[client] {
-			delete(clients, client)
-			close(client.Send)
-		}
-		if len(clients) == 0 {
-			delete(h.groups, client.GroupID)
+	closed := false
+	if client.GroupID != "" {
+		if clients := h.groups[client.GroupID]; clients != nil {
+			if clients[client] {
+				delete(clients, client)
+				close(client.Send)
+				closed = true
+			}
+			if len(clients) == 0 {
+				delete(h.groups, client.GroupID)
+			}
 		}
 	}
 	if clients := h.users[client.UserID]; clients != nil {
-		delete(clients, client)
+		if clients[client] {
+			delete(clients, client)
+			if !closed {
+				close(client.Send)
+			}
+		}
 		if len(clients) == 0 {
 			delete(h.users, client.UserID)
 		}
@@ -78,7 +85,6 @@ func (h *Hub) BroadcastGroup(groupID string, event Event) {
 		clients = append(clients, client)
 	}
 	h.mu.RUnlock()
-
 	for _, client := range clients {
 		select {
 		case client.Send <- event:
@@ -95,7 +101,6 @@ func (h *Hub) NotifyUser(userID string, event Event) {
 		clients = append(clients, client)
 	}
 	h.mu.RUnlock()
-
 	for _, client := range clients {
 		select {
 		case client.Send <- event:
@@ -114,26 +119,14 @@ type Client struct {
 }
 
 func NewClient(hub *Hub, conn *websocket.Conn, user domain.User, groupID string) *Client {
-	return &Client{
-		Hub:     hub,
-		Conn:    conn,
-		Send:    make(chan Event, 32),
-		UserID:  user.ID,
-		GroupID: groupID,
-	}
+	return &Client{Hub: hub, Conn: conn, Send: make(chan Event, 32), UserID: user.ID, GroupID: groupID}
 }
 
 func (c *Client) ReadPump() {
-	defer func() {
-		c.Hub.Unregister(c)
-		_ = c.Conn.Close()
-	}()
+	defer func() { c.Hub.Unregister(c); _ = c.Conn.Close() }()
 	c.Conn.SetReadLimit(maxMessageSize)
 	_ = c.Conn.SetReadDeadline(time.Now().Add(pongWait))
-	c.Conn.SetPongHandler(func(string) error {
-		_ = c.Conn.SetReadDeadline(time.Now().Add(pongWait))
-		return nil
-	})
+	c.Conn.SetPongHandler(func(string) error { _ = c.Conn.SetReadDeadline(time.Now().Add(pongWait)); return nil })
 	for {
 		_, _, err := c.Conn.ReadMessage()
 		if err != nil {
@@ -144,10 +137,7 @@ func (c *Client) ReadPump() {
 
 func (c *Client) WritePump() {
 	ticker := time.NewTicker(pingPeriod)
-	defer func() {
-		ticker.Stop()
-		_ = c.Conn.Close()
-	}()
+	defer func() { ticker.Stop(); _ = c.Conn.Close() }()
 	for {
 		select {
 		case event, ok := <-c.Send:
