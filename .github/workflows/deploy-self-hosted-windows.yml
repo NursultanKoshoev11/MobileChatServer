@@ -28,7 +28,7 @@ jobs:
         timeout-minutes: 1
         run: |
           $payload = @{ content = "MobileChatServer deploy started. Commit: $env:GITHUB_SHA" } | ConvertTo-Json -Compress
-          curl.exe --fail --silent --show-error --max-time 10 -H "Content-Type: application/json" -d $payload $env:DISCORD_WEBHOOK_URL
+          Invoke-RestMethod -Method Post -Uri $env:DISCORD_WEBHOOK_URL -ContentType "application/json; charset=utf-8" -Body $payload -TimeoutSec 10 | Out-Null
 
       - name: Deploy from local server folder
         shell: powershell
@@ -127,7 +127,7 @@ jobs:
         timeout-minutes: 1
         run: |
           $payload = @{ content = "MobileChatServer deploy succeeded. API is healthy." } | ConvertTo-Json -Compress
-          curl.exe --fail --silent --show-error --max-time 10 -H "Content-Type: application/json" -d $payload $env:DISCORD_WEBHOOK_URL
+          Invoke-RestMethod -Method Post -Uri $env:DISCORD_WEBHOOK_URL -ContentType "application/json; charset=utf-8" -Body $payload -TimeoutSec 10 | Out-Null
 
       - name: Notify deploy failed
         if: failure() && env.DISCORD_WEBHOOK_URL != ''
@@ -136,4 +136,4 @@ jobs:
         timeout-minutes: 1
         run: |
           $payload = @{ content = "MobileChatServer deploy failed. Check GitHub Actions logs." } | ConvertTo-Json -Compress
-          curl.exe --fail --silent --show-error --max-time 10 -H "Content-Type: application/json" -d $payload $env:DISCORD_WEBHOOK_URL
+          Invoke-RestMethod -Method Post -Uri $env:DISCORD_WEBHOOK_URL -ContentType "application/json; charset=utf-8" -Body $payload -TimeoutSec 10 | Out-Null
