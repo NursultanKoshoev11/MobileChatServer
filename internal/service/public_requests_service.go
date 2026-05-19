@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/domain"
-	"github.com/NursultanKoshoev11/MobileChatServer/internal/storage"
 )
 
 const (
@@ -41,14 +40,8 @@ func (s *Service) CreatePublicRequest(ctx context.Context, authorID, groupID str
 	if !validPublicRequestType(input.RequestType) {
 		return domain.PublicRequest{}, NewValidationError("request_type is invalid")
 	}
-	if input.RequestType == domain.PublicRequestAnnouncement {
-		role, err := s.repo.GetMemberRole(ctx, groupID, authorID)
-		if err != nil {
-			return domain.PublicRequest{}, err
-		}
-		if role != domain.RoleOwner && role != domain.RoleAdmin {
-			return domain.PublicRequest{}, storage.ErrForbidden
-		}
+	if _, err := s.repo.GetMemberRole(ctx, groupID, authorID); err != nil {
+		return domain.PublicRequest{}, err
 	}
 	mode := input.InteractionMode
 	if mode == "" {
