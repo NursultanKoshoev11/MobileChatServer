@@ -71,6 +71,7 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 	r.Group(func(r chi.Router) {
 		r.Use(server.auth)
 		r.Get("/api/me", server.me)
+		r.Get("/api/ws", server.userWebSocket)
 		r.Post("/api/push/register", server.registerPushToken)
 		r.Delete("/api/push/token", server.deletePushToken)
 		r.Get("/api/groups", server.listGroups)
@@ -251,6 +252,8 @@ func (s *Server) inviteUser(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, err)
 		return
 	}
+	s.hub.NotifyUser(target, realtime.Event{Type: "invite.created", GroupID: invite.GroupID, Payload: invite})
+	go s.svc.NotifyUserAboutInvite(r.Context(), target, invite)
 	writeJSON(w, http.StatusCreated, invite)
 }
 
@@ -268,6 +271,7 @@ func (s *Server) acceptInvite(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, err)
 		return
 	}
+	s.hub.NotifyUser(currentUser(r).ID, realtime.Event{Type: "invite.reviewed", Payload: map[string]string{"invite_id": chi.URLParam(r, "inviteID"), "status": "accepted"}})
 	writeJSON(w, http.StatusOK, map[string]string{"status": "accepted"})
 }
 
@@ -276,6 +280,7 @@ func (s *Server) declineInvite(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, err)
 		return
 	}
+	s.hub.NotifyUser(currentUser(r).ID, realtime.Event{Type: "invite.reviewed", Payload: map[string]string{"invite_id": chi.URLParam(r, "inviteID"), "status": "declined"}})
 	writeJSON(w, http.StatusOK, map[string]string{"status": "declined"})
 }
 
@@ -340,6 +345,20 @@ func (s *Server) groupWebSocket(w http.ResponseWriter, r *http.Request) {
 	client := realtime.NewClient(s.hub, conn, user, groupID)
 	s.hub.Register(client)
 	client.Send <- realtime.Event{Type: "connection.ready", GroupID: groupID, Payload: map[string]string{"user_id": user.ID}}
+	go client.WritePump()
+	go client.ReadPump()
+}
+
+func (s *Server) userWebSocket(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r)
+	conn, err := s.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		s.logger.Printf("user websocket upgrade failed: %v", err)
+		return
+	}
+	client := realtime.NewClient(s.hub, conn, user, "")
+	s.hub.Register(client)
+	client.Send <- realtime.Event{Type: "connection.ready", Payload: map[string]string{"user_id": user.ID}}
 	go client.WritePump()
 	go client.ReadPump()
 }
