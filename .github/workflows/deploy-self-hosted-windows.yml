@@ -22,10 +22,11 @@ jobs:
     steps:
       - name: Notify deploy started
         if: env.DISCORD_WEBHOOK_URL != ''
-        uses: tsickert/discord-webhook@v6.0.0
-        with:
-          webhook-url: ${{ env.DISCORD_WEBHOOK_URL }}
-          content: "🚀 MobileChatServer deploy started. Commit: ${{ github.sha }}"
+        shell: powershell
+        continue-on-error: true
+        run: |
+          $payload = @{ content = "MobileChatServer deploy started. Commit: $env:GITHUB_SHA" } | ConvertTo-Json -Compress
+          curl.exe --fail --silent --show-error --max-time 10 -H "Content-Type: application/json" -d $payload $env:DISCORD_WEBHOOK_URL
 
       - name: Deploy from local server folder
         shell: powershell
@@ -118,14 +119,16 @@ jobs:
 
       - name: Notify deploy succeeded
         if: success() && env.DISCORD_WEBHOOK_URL != ''
-        uses: tsickert/discord-webhook@v6.0.0
-        with:
-          webhook-url: ${{ env.DISCORD_WEBHOOK_URL }}
-          content: "✅ MobileChatServer deploy succeeded. API is healthy."
+        shell: powershell
+        continue-on-error: true
+        run: |
+          $payload = @{ content = "MobileChatServer deploy succeeded. API is healthy." } | ConvertTo-Json -Compress
+          curl.exe --fail --silent --show-error --max-time 10 -H "Content-Type: application/json" -d $payload $env:DISCORD_WEBHOOK_URL
 
       - name: Notify deploy failed
         if: failure() && env.DISCORD_WEBHOOK_URL != ''
-        uses: tsickert/discord-webhook@v6.0.0
-        with:
-          webhook-url: ${{ env.DISCORD_WEBHOOK_URL }}
-          content: "❌ MobileChatServer deploy failed. Check GitHub Actions logs."
+        shell: powershell
+        continue-on-error: true
+        run: |
+          $payload = @{ content = "MobileChatServer deploy failed. Check GitHub Actions logs." } | ConvertTo-Json -Compress
+          curl.exe --fail --silent --show-error --max-time 10 -H "Content-Type: application/json" -d $payload $env:DISCORD_WEBHOOK_URL
