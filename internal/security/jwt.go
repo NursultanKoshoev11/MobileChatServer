@@ -7,6 +7,11 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+const (
+	accessTokenIssuer   = "koom-api"
+	accessTokenAudience = "koom-mobile"
+)
+
 type Claims struct {
 	UserID string `json:"user_id"`
 	jwt.RegisteredClaims
@@ -18,6 +23,8 @@ func SignAccessToken(userID, secret string, ttl time.Duration) (string, error) {
 		UserID: userID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   userID,
+			Issuer:    accessTokenIssuer,
+			Audience:  jwt.ClaimStrings{accessTokenAudience},
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
 		},
@@ -43,5 +50,20 @@ func ParseAccessToken(tokenString, secret string) (Claims, error) {
 	if claims.UserID == "" {
 		return Claims{}, fmt.Errorf("missing user id")
 	}
+	if claims.Issuer != accessTokenIssuer {
+		return Claims{}, fmt.Errorf("invalid token issuer")
+	}
+	if !hasAudience(claims.Audience, accessTokenAudience) {
+		return Claims{}, fmt.Errorf("invalid token audience")
+	}
 	return claims, nil
+}
+
+func hasAudience(audiences jwt.ClaimStrings, expected string) bool {
+	for _, audience := range audiences {
+		if audience == expected {
+			return true
+		}
+	}
+	return false
 }
