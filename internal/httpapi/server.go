@@ -66,6 +66,7 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 		r.Post("/request-code", server.requestPhoneCode)
 		r.Post("/verify-code", server.verifyPhoneCode)
 		r.Post("/refresh", server.refreshPhoneSession)
+		r.Post("/logout", server.logoutPhoneSession)
 	})
 
 	r.Group(func(r chi.Router) {
@@ -150,6 +151,18 @@ func (s *Server) refreshPhoneSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, session)
+}
+
+func (s *Server) logoutPhoneSession(w http.ResponseWriter, r *http.Request) {
+	var input service.RefreshInput
+	if !readJSON(w, r, &input) {
+		return
+	}
+	if err := s.phoneAuth.Logout(r.Context(), input); err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "logged_out"})
 }
 
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {
