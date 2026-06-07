@@ -8,8 +8,10 @@ import (
 )
 
 const (
-	accessTokenIssuer   = "koom-api"
-	accessTokenAudience = "koom-mobile"
+	accessTokenIssuer    = "koom-api"
+	accessTokenAudience  = "koom-mobile"
+	webSocketTokenIssuer = "koom-api"
+	webSocketAudience    = "koom-websocket"
 )
 
 type Claims struct {
@@ -18,13 +20,29 @@ type Claims struct {
 }
 
 func SignAccessToken(userID, secret string, ttl time.Duration) (string, error) {
+	return signToken(userID, secret, ttl, accessTokenIssuer, accessTokenAudience)
+}
+
+func ParseAccessToken(tokenString, secret string) (Claims, error) {
+	return parseToken(tokenString, secret, accessTokenIssuer, accessTokenAudience)
+}
+
+func SignWebSocketToken(userID, secret string, ttl time.Duration) (string, error) {
+	return signToken(userID, secret, ttl, webSocketTokenIssuer, webSocketAudience)
+}
+
+func ParseWebSocketToken(tokenString, secret string) (Claims, error) {
+	return parseToken(tokenString, secret, webSocketTokenIssuer, webSocketAudience)
+}
+
+func signToken(userID, secret string, ttl time.Duration, issuer string, audience string) (string, error) {
 	now := time.Now().UTC()
 	claims := Claims{
 		UserID: userID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   userID,
-			Issuer:    accessTokenIssuer,
-			Audience:  jwt.ClaimStrings{accessTokenAudience},
+			Issuer:    issuer,
+			Audience:  jwt.ClaimStrings{audience},
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
 		},
@@ -33,7 +51,7 @@ func SignAccessToken(userID, secret string, ttl time.Duration) (string, error) {
 	return token.SignedString([]byte(secret))
 }
 
-func ParseAccessToken(tokenString, secret string) (Claims, error) {
+func parseToken(tokenString, secret string, issuer string, audience string) (Claims, error) {
 	claims := Claims{}
 	token, err := jwt.ParseWithClaims(tokenString, &claims, func(token *jwt.Token) (any, error) {
 		if token.Method != jwt.SigningMethodHS256 {
@@ -50,10 +68,10 @@ func ParseAccessToken(tokenString, secret string) (Claims, error) {
 	if claims.UserID == "" {
 		return Claims{}, fmt.Errorf("missing user id")
 	}
-	if claims.Issuer != accessTokenIssuer {
+	if claims.Issuer != issuer {
 		return Claims{}, fmt.Errorf("invalid token issuer")
 	}
-	if !hasAudience(claims.Audience, accessTokenAudience) {
+	if !hasAudience(claims.Audience, audience) {
 		return Claims{}, fmt.Errorf("invalid token audience")
 	}
 	return claims, nil
