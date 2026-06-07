@@ -67,8 +67,19 @@ jobs:
           git fetch origin main
           git checkout main
           git pull --ff-only origin main
+
+          if ! free | awk '/Swap:/ { exit !($2 > 0) }'; then
+            echo "No swap detected. Creating temporary 2G swapfile for Docker build."
+            sudo fallocate -l 2G /swapfile-github-actions || sudo dd if=/dev/zero of=/swapfile-github-actions bs=1M count=2048
+            sudo chmod 600 /swapfile-github-actions
+            sudo mkswap /swapfile-github-actions
+            sudo swapon /swapfile-github-actions
+          else
+            echo "Swap is already available."
+          fi
+
           docker compose --env-file .env.prod -f docker-compose.prod.yml run --rm migrate
-          docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build api postgres backup
+          COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=1 docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build api postgres backup
           for i in {1..30}; do
             if curl -fsS http://127.0.0.1:8080/api/health >/dev/null; then
               echo "Health check OK"
