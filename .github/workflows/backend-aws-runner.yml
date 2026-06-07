@@ -1,0 +1,74 @@
+name: Backend Check and Deploy on AWS Runner
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobilechatserver-backend-aws-runner
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: self-hosted
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+
+      - name: Go mod tidy check
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+      - name: Go test
+        run: go test ./...
+
+      - name: Go vet
+        run: go vet ./...
+
+      - name: Build server
+        run: go build ./cmd/server
+
+      - name: Build migrate
+        run: go build ./cmd/migrate
+
+  deploy:
+    needs: backend
+    runs-on: self-hosted
+    timeout-minutes: 25
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Deploy from server working copy
+        run: |
+          set -euo pipefail
+          cd /opt/projects/MobileChatServer
+          git fetch origin main
+          git checkout main
+          git pull --ff-only origin main
+          docker compose --env-file .env.prod -f docker-compose.prod.yml run --rm migrate
+          docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build api postgres backup
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:8080/api/health >/dev/null; then
+              echo "Health check OK"
+              docker ps
+              exit 0
+            fi
+            echo "Waiting for API... $i"
+            sleep 2
+          done
+          echo "Health check failed"
+          docker logs --tail 120 mobilechat-api || true
+          exit 20
