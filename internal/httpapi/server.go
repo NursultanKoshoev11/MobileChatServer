@@ -72,6 +72,7 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 	r.Group(func(r chi.Router) {
 		r.Use(server.auth)
 		r.Get("/api/me", server.me)
+		r.Post("/api/ws-token", server.issueWebSocketToken)
 		r.Get("/api/ws", server.userWebSocket)
 		r.Post("/api/push/register", server.registerPushToken)
 		r.Delete("/api/push/token", server.deletePushToken)
@@ -167,6 +168,15 @@ func (s *Server) logoutPhoneSession(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, currentUser(r))
+}
+
+func (s *Server) issueWebSocketToken(w http.ResponseWriter, r *http.Request) {
+	token, err := s.svc.IssueWebSocketToken(currentUser(r).ID)
+	if err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"token": token})
 }
 
 func (s *Server) listGroups(w http.ResponseWriter, r *http.Request) {
@@ -378,12 +388,19 @@ func (s *Server) userWebSocket(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token := bearerTokenFromRequest(r)
+		token, fromQuery := bearerTokenFromRequest(r)
 		if token == "" {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "missing bearer token"})
 			return
 		}
-		user, err := s.svc.Authenticate(r.Context(), token)
+
+		var user domain.User
+		var err error
+		if fromQuery && strings.HasSuffix(r.URL.Path, "/ws") {
+			user, err = s.svc.AuthenticateWebSocket(r.Context(), token)
+		} else {
+			user, err = s.svc.Authenticate(r.Context(), token)
+		}
 		if err != nil {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 			return
@@ -393,15 +410,15 @@ func (s *Server) auth(next http.Handler) http.Handler {
 	})
 }
 
-func bearerTokenFromRequest(r *http.Request) string {
+func bearerTokenFromRequest(r *http.Request) (string, bool) {
 	header := r.Header.Get("Authorization")
 	if strings.HasPrefix(header, "Bearer ") {
-		return strings.TrimSpace(strings.TrimPrefix(header, "Bearer "))
+		return strings.TrimSpace(strings.TrimPrefix(header, "Bearer ")), false
 	}
 	if token := strings.TrimSpace(r.URL.Query().Get("token")); token != "" && strings.HasSuffix(r.URL.Path, "/ws") {
-		return token
+		return token, true
 	}
-	return ""
+	return "", false
 }
 
 func (s *Server) rateLimit(next http.Handler) http.Handler {
