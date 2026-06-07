@@ -8,11 +8,11 @@ on:
       deploy:
         description: "Deploy to AWS self-hosted runner"
         required: true
-        default: "false"
+        default: "true"
         type: choice
         options:
-          - "false"
           - "true"
+          - "false"
 
 permissions:
   contents: read
@@ -57,7 +57,7 @@ jobs:
     needs: backend
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 25
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.deploy == 'true' && github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy == 'true'))
 
     steps:
       - name: Deploy from server working copy
