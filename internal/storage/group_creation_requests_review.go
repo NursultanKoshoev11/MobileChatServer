@@ -52,7 +52,7 @@ func (r *Repository) ApproveGroupCreationRequest(ctx context.Context, requestID,
 	if group.Visibility == "" {
 		group.Visibility = domain.VisibilityPublic
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO groups (id, title, description, visibility, owner_id, invite_code, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,now(),now())`, group.ID, group.Title, group.Description, group.Visibility, group.OwnerID, nullableInviteCode(group))
+	_, err = tx.Exec(ctx, `INSERT INTO groups (id, title, description, visibility, owner_id, invite_code, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,now(),now())`, group.ID, group.Title, group.Description, group.Visibility, group.OwnerID, nullableInviteCode(group.InviteCode))
 	if err != nil {
 		return domain.GroupCreationRequest{}, fmt.Errorf("create approved group: %w", err)
 	}
