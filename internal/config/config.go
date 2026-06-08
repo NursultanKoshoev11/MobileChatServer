@@ -24,6 +24,10 @@ type Config struct {
 	RunMigrationsOnStart bool
 	SuperAdminPhones     []string
 	PlatformAdminPhones  []string
+	TestAuthEnabled     bool
+	TestAuthPhone       string
+	TestAuthCode        string
+	TestAuthDisplayName string
 }
 
 func Load() (Config, error) {
@@ -40,7 +44,11 @@ func Load() (Config, error) {
 		FCMClientEmail:      os.Getenv("FCM_CLIENT_EMAIL"),
 		FCMPrivateKey:       os.Getenv("FCM_PRIVATE_KEY"),
 		SuperAdminPhones:    getEnvList("SUPER_ADMIN_PHONES"),
-		PlatformAdminPhones: getEnvList("PLATFORM_ADMIN_PHONES"),
+		PlatformAdminPhones:  getEnvList("PLATFORM_ADMIN_PHONES"),
+		TestAuthEnabled:     getEnvBool("TEST_AUTH_ENABLED", false),
+		TestAuthPhone:       getEnv("TEST_AUTH_PHONE", "+996700000001"),
+		TestAuthCode:        getEnv("TEST_AUTH_CODE", "111111"),
+		TestAuthDisplayName: getEnv("TEST_AUTH_DISPLAY_NAME", "Firebase Test User"),
 	}
 
 	cfg.RunMigrationsOnStart = getEnvBool("RUN_MIGRATIONS_ON_START", cfg.Environment != "production")

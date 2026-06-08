@@ -1,0 +1,24 @@
+name: Backend Test Lab CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+      - name: Go test
+        run: go test ./...
+      - name: Build server
+        run: go build ./cmd/server
+      - name: Build migrate
+        run: go build ./cmd/migrate

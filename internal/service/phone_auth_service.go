@@ -19,9 +19,13 @@ const (
 )
 
 type PhoneAuthConfig struct {
-	JWTSecret      string
-	AccessTokenTTL time.Duration
-	Environment    string
+	JWTSecret           string
+	AccessTokenTTL      time.Duration
+	Environment         string
+	TestAuthEnabled     bool
+	TestAuthPhone       string
+	TestAuthCode        string
+	TestAuthDisplayName string
 }
 
 type PhoneAuthService struct {
@@ -47,6 +51,10 @@ func (s *PhoneAuthService) RequestCode(ctx context.Context, input RequestPhoneCo
 		} else {
 			return RequestPhoneCodeOutput{}, err
 		}
+	}
+
+	if s.isTestAuthMobile(mobile) {
+		return RequestPhoneCodeOutput{Status: "test_code_not_sent", DevCode: s.cfg.TestAuthCode, AccountExists: accountExists}, nil
 	}
 
 	if s.isDevelopmentMode() {
@@ -78,6 +86,25 @@ func (s *PhoneAuthService) VerifyCode(ctx context.Context, input VerifyPhoneCode
 	code := strings.TrimSpace(input.Code)
 	if code == "" {
 		return domain.PhoneSession{}, NewValidationError("code is required")
+	}
+
+	if s.isTestAuthMobile(mobile) {
+		if code != s.cfg.TestAuthCode {
+			return domain.PhoneSession{}, ErrInvalidCredentials
+		}
+		displayName := strings.TrimSpace(input.DisplayName)
+		if displayName == "" {
+			displayName = s.cfg.TestAuthDisplayName
+		}
+		user, err := s.getOrCreatePhoneUser(ctx, mobile, displayName)
+		if err != nil {
+			return domain.PhoneSession{}, err
+		}
+		_ = s.repo.MarkPhoneVerified(ctx, user.ID)
+		if err := s.repo.UpsertUserRoleFromAllowlist(ctx, user.ID, mobile); err != nil {
+			return domain.PhoneSession{}, err
+		}
+		return s.issuePhoneSession(ctx, user)
 	}
 
 	if s.isDevelopmentMode() {
@@ -216,6 +243,22 @@ func (s *PhoneAuthService) issuePhoneSession(ctx context.Context, user domain.Ph
 		return domain.PhoneSession{}, err
 	}
 	return domain.PhoneSession{AccessToken: accessToken, RefreshToken: refreshToken, User: user}, nil
+}
+
+func (s *PhoneAuthService) isTestAuthMobile(mobile string) bool {
+	if !s.cfg.TestAuthEnabled {
+		return false
+	}
+	return normalizeTestValue(mobile) == normalizeTestValue(s.cfg.TestAuthPhone)
+}
+
+func normalizeTestValue(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.ReplaceAll(value, " ", "")
+	value = strings.ReplaceAll(value, "-", "")
+	value = strings.ReplaceAll(value, "(", "")
+	value = strings.ReplaceAll(value, ")", "")
+	return value
 }
 
 func (s *PhoneAuthService) isDevelopmentMode() bool {

@@ -71,9 +71,13 @@ func main() {
 		smsSender = sms.DisabledSender{}
 	}
 	phoneAuth := service.NewPhoneAuth(repo, service.PhoneAuthConfig{
-		JWTSecret:      cfg.JWTSecret,
-		AccessTokenTTL: cfg.AccessTokenTTL,
-		Environment:    cfg.Environment,
+		JWTSecret:           cfg.JWTSecret,
+		AccessTokenTTL:      cfg.AccessTokenTTL,
+		Environment:         cfg.Environment,
+		TestAuthEnabled:     cfg.TestAuthEnabled,
+		TestAuthPhone:       cfg.TestAuthPhone,
+		TestAuthCode:        cfg.TestAuthCode,
+		TestAuthDisplayName: cfg.TestAuthDisplayName,
 	}, smsSender)
 
 	handler := httpapi.New(svc, phoneAuth, logger, cfg.AllowedOrigins)
