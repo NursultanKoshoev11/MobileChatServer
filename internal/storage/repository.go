@@ -187,9 +187,13 @@ func (r *Repository) JoinPublicGroup(ctx context.Context, groupID, userID string
 }
 
 func (r *Repository) JoinByInviteCode(ctx context.Context, userID, inviteCode string) (domain.Group, error) {
-	query := `SELECT id, title, description, visibility, owner_id, COALESCE(invite_code, '') AS invite_code, created_at FROM groups WHERE UPPER(invite_code) = $1`
+	normalizedCode := normalizeStoredInviteCode(inviteCode)
+	query := `
+		SELECT id, title, description, visibility, owner_id, COALESCE(invite_code, '') AS invite_code, created_at
+		FROM groups
+		WHERE REPLACE(UPPER(COALESCE(invite_code, '')), '-', '') = $1`
 	var group domain.Group
-	if err := r.db.QueryRow(ctx, query, strings.ToUpper(strings.TrimSpace(inviteCode))).Scan(&group.ID, &group.Title, &group.Description, &group.Visibility, &group.OwnerID, &group.InviteCode, &group.CreatedAt); err != nil {
+	if err := r.db.QueryRow(ctx, query, normalizedCode).Scan(&group.ID, &group.Title, &group.Description, &group.Visibility, &group.OwnerID, &group.InviteCode, &group.CreatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.Group{}, ErrNotFound
 		}
@@ -316,6 +320,12 @@ func nullableInviteCode(inviteCode string) any {
 		return nil
 	}
 	return strings.ToUpper(value)
+}
+
+func normalizeStoredInviteCode(inviteCode string) string {
+	value := strings.ToUpper(strings.TrimSpace(inviteCode))
+	value = strings.ReplaceAll(value, "-", "")
+	return value
 }
 
 func nullableString(value string) any {

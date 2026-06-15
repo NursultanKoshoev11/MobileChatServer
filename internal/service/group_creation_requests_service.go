@@ -98,6 +98,7 @@ func (s *Service) ApproveGroupCreationRequest(ctx context.Context, admin domain.
 		Description: request.GroupDescription,
 		Visibility:  domain.VisibilityPublic,
 		OwnerID:     request.RequesterID,
+		InviteCode:  randomInviteCode(),
 	}
 	approved, err := s.repo.ApproveGroupCreationRequest(ctx, requestID, admin.ID, strings.TrimSpace(input.AdminComment), group)
 	if err != nil {
