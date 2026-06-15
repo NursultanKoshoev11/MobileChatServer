@@ -84,6 +84,15 @@ jobs:
           sudo journalctl --vacuum-size=100M || true
 
           docker compose --env-file .env.prod -f docker-compose.prod.yml --profile caddy run --rm migrate
+
+          if docker ps -a --format '{{.Names}}' | grep -qx mobilechat-caddy; then
+            caddy_service_label="$(docker inspect mobilechat-caddy --format '{{ index .Config.Labels "com.docker.compose.service" }}' 2>/dev/null || true)"
+            if [ "$caddy_service_label" != "caddy" ]; then
+              echo "Replacing manually-created Caddy container with compose-managed Caddy."
+              docker rm -f mobilechat-caddy
+            fi
+          fi
+
           COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=1 docker compose --env-file .env.prod -f docker-compose.prod.yml --profile caddy up -d --build api postgres backup caddy
           for i in {1..30}; do
             if curl -fsS http://127.0.0.1:8080/api/health >/dev/null && curl -fsS --resolve koom.servemp3.com:443:127.0.0.1 https://koom.servemp3.com/api/health >/dev/null; then
