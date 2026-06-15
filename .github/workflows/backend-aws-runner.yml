@@ -83,7 +83,8 @@ jobs:
           sudo apt-get clean || true
           sudo journalctl --vacuum-size=100M || true
 
-          docker compose --env-file .env.prod -f docker-compose.prod.yml --profile caddy run --rm migrate
+          migrate_name="mobilechat-migrate-$(date +%s)"
+          docker compose --env-file .env.prod -f docker-compose.prod.yml --profile caddy run --rm --name "$migrate_name" migrate
 
           if docker ps -a --format '{{.Names}}' | grep -qx mobilechat-caddy; then
             caddy_service_label="$(docker inspect mobilechat-caddy --format '{{ index .Config.Labels "com.docker.compose.service" }}' 2>/dev/null || true)"
