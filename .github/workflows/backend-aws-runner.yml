@@ -78,10 +78,15 @@ jobs:
             echo "Swap is already available."
           fi
 
-          docker compose --env-file .env.prod -f docker-compose.prod.yml run --rm migrate
-          COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=1 docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build api postgres backup
+          echo "Cleaning build cache to prevent disk-full runner failures."
+          docker builder prune -af || true
+          sudo apt-get clean || true
+          sudo journalctl --vacuum-size=100M || true
+
+          docker compose --env-file .env.prod -f docker-compose.prod.yml --profile caddy run --rm migrate
+          COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=1 docker compose --env-file .env.prod -f docker-compose.prod.yml --profile caddy up -d --build api postgres backup caddy
           for i in {1..30}; do
-            if curl -fsS http://127.0.0.1:8080/api/health >/dev/null; then
+            if curl -fsS http://127.0.0.1:8080/api/health >/dev/null && curl -fsS --resolve koom.servemp3.com:443:127.0.0.1 https://koom.servemp3.com/api/health >/dev/null; then
               echo "Health check OK"
               docker ps
               exit 0
