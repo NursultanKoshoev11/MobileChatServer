@@ -63,7 +63,10 @@ func (r *Repository) GetUserByPhone(ctx context.Context, phone string) (domain.U
 	phone = strings.ReplaceAll(phone, "-", "")
 	phone = strings.ReplaceAll(phone, "(", "")
 	phone = strings.ReplaceAll(phone, ")", "")
-	query := `SELECT id, COALESCE(email, ''), COALESCE(phone, ''), display_name, COALESCE(role, 'user'), created_at FROM users WHERE phone = $1`
+	query := `
+		SELECT id, COALESCE(email, ''), COALESCE(NULLIF(phone, ''), phone_number, '') AS phone, display_name, COALESCE(role, 'user'), created_at
+		FROM users
+		WHERE phone = $1 OR phone_number = $1`
 	var user domain.User
 	err := r.db.QueryRow(ctx, query, phone).Scan(&user.ID, &user.Email, &user.Phone, &user.DisplayName, &user.Role, &user.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -339,7 +342,7 @@ func (r *Repository) ListGroupMembers(ctx context.Context, groupID, userID strin
 	}
 
 	query := `
-		SELECT gm.user_id, u.display_name, COALESCE(u.phone, '') AS phone, gm.role
+		SELECT gm.user_id, u.display_name, COALESCE(NULLIF(u.phone, ''), u.phone_number, '') AS phone, gm.role
 		FROM group_members gm
 		JOIN users u ON u.id = gm.user_id
 		WHERE gm.group_id = $1
@@ -368,14 +371,14 @@ func (r *Repository) UpdateGroupMemberRole(ctx context.Context, groupID, actorID
 	}
 	defer tx.Rollback(ctx)
 
-	var actorRole domain.GroupRole
-	if err := tx.QueryRow(ctx, `SELECT role FROM group_members WHERE group_id=$1 AND user_id=$2`, groupID, actorID).Scan(&actorRole); err != nil {
+	var ownerID string
+	if err := tx.QueryRow(ctx, `SELECT owner_id FROM groups WHERE id=$1`, groupID).Scan(&ownerID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return domain.GroupMember{}, ErrForbidden
+			return domain.GroupMember{}, ErrNotFound
 		}
-		return domain.GroupMember{}, fmt.Errorf("load actor group role: %w", err)
+		return domain.GroupMember{}, fmt.Errorf("load group owner: %w", err)
 	}
-	if actorRole != domain.RoleOwner {
+	if ownerID != actorID {
 		return domain.GroupMember{}, ErrForbidden
 	}
 
@@ -396,7 +399,7 @@ func (r *Repository) UpdateGroupMemberRole(ctx context.Context, groupID, actorID
 
 	var member domain.GroupMember
 	query := `
-		SELECT gm.user_id, u.display_name, COALESCE(u.phone, '') AS phone, gm.role
+		SELECT gm.user_id, u.display_name, COALESCE(NULLIF(u.phone, ''), u.phone_number, '') AS phone, gm.role
 		FROM group_members gm
 		JOIN users u ON u.id = gm.user_id
 		WHERE gm.group_id=$1 AND gm.user_id=$2`
