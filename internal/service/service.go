@@ -233,6 +233,18 @@ func (s *Service) UpdateGroupMemberRole(ctx context.Context, actorID, groupID, t
 	return s.repo.UpdateGroupMemberRole(ctx, groupID, actorID, targetUserID, role)
 }
 
+func (s *Service) UpdateGroupMemberRoleByPhone(ctx context.Context, actorID, groupID, phone string, role domain.GroupRole) (domain.GroupMember, error) {
+	phone = normalizePhone(phone)
+	if phone == "" {
+		return domain.GroupMember{}, NewValidationError("phone is required")
+	}
+	user, err := s.FindUserByPhone(ctx, phone)
+	if err != nil {
+		return domain.GroupMember{}, err
+	}
+	return s.UpdateGroupMemberRole(ctx, actorID, groupID, user.ID, role)
+}
+
 func (s *Service) EnsureGroupInviteCode(ctx context.Context, userID, groupID string) (domain.Group, error) {
 	if groupID == "" {
 		return domain.Group{}, NewValidationError("group_id is required")
