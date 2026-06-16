@@ -81,6 +81,7 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 		r.Get("/api/groups/search", server.searchGroups)
 		r.Post("/api/groups/join-by-code", server.joinByCode)
 		r.Post("/api/groups/{groupID}/join", server.joinPublicGroup)
+		r.Post("/api/groups/{groupID}/invite-code", server.ensureGroupInviteCode)
 		r.Delete("/api/groups/{groupID}/leave", server.leaveGroup)
 		r.Post("/api/groups/{groupID}/invite-user", server.inviteUser)
 		r.Get("/api/groups/{groupID}/messages", server.listMessages)
@@ -221,6 +222,15 @@ func (s *Server) joinPublicGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "joined"})
+}
+
+func (s *Server) ensureGroupInviteCode(w http.ResponseWriter, r *http.Request) {
+	group, err := s.svc.EnsureGroupInviteCode(r.Context(), currentUser(r).ID, chi.URLParam(r, "groupID"))
+	if err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, group)
 }
 
 func (s *Server) leaveGroup(w http.ResponseWriter, r *http.Request) {

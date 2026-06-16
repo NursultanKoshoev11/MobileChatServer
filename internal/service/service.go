@@ -163,7 +163,23 @@ func (s *Service) Authenticate(ctx context.Context, token string) (domain.User, 
 }
 
 func (s *Service) ListUserGroups(ctx context.Context, userID string) ([]domain.Group, error) {
-	return s.repo.ListUserGroups(ctx, userID)
+	groups, err := s.repo.ListUserGroups(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	for index := range groups {
+		if strings.TrimSpace(groups[index].InviteCode) != "" {
+			continue
+		}
+		group, err := s.EnsureGroupInviteCode(ctx, userID, groups[index].ID)
+		if err != nil {
+			return nil, err
+		}
+		groups[index].InviteCode = group.InviteCode
+		groups[index].MemberCount = group.MemberCount
+		groups[index].MyRole = group.MyRole
+	}
+	return groups, nil
 }
 
 func (s *Service) SearchPublicGroups(ctx context.Context, query string) ([]domain.Group, error) {
@@ -198,6 +214,24 @@ func (s *Service) JoinPublicGroup(ctx context.Context, userID, groupID string) e
 		return NewValidationError("group_id is required")
 	}
 	return s.repo.JoinPublicGroup(ctx, groupID, userID)
+}
+
+func (s *Service) EnsureGroupInviteCode(ctx context.Context, userID, groupID string) (domain.Group, error) {
+	if groupID == "" {
+		return domain.Group{}, NewValidationError("group_id is required")
+	}
+	var lastErr error
+	for attempt := 0; attempt < 8; attempt++ {
+		group, err := s.repo.EnsureGroupInviteCode(ctx, groupID, userID, randomInviteCode())
+		if err == nil {
+			return group, nil
+		}
+		lastErr = err
+		if !strings.Contains(strings.ToLower(err.Error()), "duplicate") {
+			return domain.Group{}, err
+		}
+	}
+	return domain.Group{}, fmt.Errorf("generate group invite code: %w", lastErr)
 }
 
 func (s *Service) JoinByInviteCode(ctx context.Context, userID, inviteCode string) (domain.Group, error) {

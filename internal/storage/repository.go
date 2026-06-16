@@ -168,6 +168,48 @@ func (r *Repository) CreateGroup(ctx context.Context, group domain.Group) (domai
 	return group, nil
 }
 
+func (r *Repository) EnsureGroupInviteCode(ctx context.Context, groupID, userID, generatedCode string) (domain.Group, error) {
+	generatedCode = strings.ToUpper(strings.TrimSpace(generatedCode))
+	if generatedCode == "" {
+		return domain.Group{}, fmt.Errorf("generated invite code is empty")
+	}
+
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return domain.Group{}, fmt.Errorf("begin ensure group invite code: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	query := `
+		SELECT g.id, g.title, g.description, g.visibility, g.owner_id, COALESCE(g.invite_code, '') AS invite_code, g.created_at,
+		       gm.role,
+		       (SELECT COUNT(*)::int FROM group_members WHERE group_id = g.id) AS member_count
+		FROM groups g
+		JOIN group_members gm ON gm.group_id = g.id AND gm.user_id = $2
+		WHERE g.id = $1
+		FOR UPDATE OF g`
+	var group domain.Group
+	var role domain.GroupRole
+	if err := tx.QueryRow(ctx, query, groupID, userID).Scan(&group.ID, &group.Title, &group.Description, &group.Visibility, &group.OwnerID, &group.InviteCode, &group.CreatedAt, &role, &group.MemberCount); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.Group{}, ErrForbidden
+		}
+		return domain.Group{}, fmt.Errorf("load group for invite code: %w", err)
+	}
+
+	if strings.TrimSpace(group.InviteCode) == "" {
+		if err := tx.QueryRow(ctx, `UPDATE groups SET invite_code=$2, updated_at=now() WHERE id=$1 RETURNING invite_code`, group.ID, generatedCode).Scan(&group.InviteCode); err != nil {
+			return domain.Group{}, fmt.Errorf("set group invite code: %w", err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return domain.Group{}, fmt.Errorf("commit ensure group invite code: %w", err)
+	}
+	group.MyRole = &role
+	return group, nil
+}
+
 func (r *Repository) JoinPublicGroup(ctx context.Context, groupID, userID string) error {
 	var visibility domain.GroupVisibility
 	if err := r.db.QueryRow(ctx, `SELECT visibility FROM groups WHERE id = $1`, groupID).Scan(&visibility); err != nil {
