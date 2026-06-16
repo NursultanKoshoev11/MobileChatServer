@@ -46,6 +46,13 @@ type Group struct {
 	MyRole      *GroupRole      `json:"my_role,omitempty"`
 }
 
+type GroupMember struct {
+	UserID      string    `json:"user_id"`
+	DisplayName string    `json:"display_name"`
+	Phone       string    `json:"phone,omitempty"`
+	Role        GroupRole `json:"role"`
+}
+
 type MediaType string
 
 const (
@@ -55,19 +62,19 @@ const (
 )
 
 type Message struct {
-	ID              string     `json:"id"`
-	GroupID         string     `json:"group_id"`
-	SenderID        string     `json:"sender_id"`
-	SenderName      string     `json:"sender_name"`
-	Text            string     `json:"text"`
-	CreatedAt       time.Time  `json:"created_at"`
-	EditedAt        *time.Time `json:"edited_at,omitempty"`
-	DeletedAt       *time.Time `json:"deleted_at,omitempty"`
+	ID               string     `json:"id"`
+	GroupID          string     `json:"group_id"`
+	SenderID         string     `json:"sender_id"`
+	SenderName       string     `json:"sender_name"`
+	Text             string     `json:"text"`
+	CreatedAt        time.Time  `json:"created_at"`
+	EditedAt         *time.Time `json:"edited_at,omitempty"`
+	DeletedAt        *time.Time `json:"deleted_at,omitempty"`
 	ReplyToMessageID *string    `json:"reply_to_message_id,omitempty"`
-	MediaType       *MediaType  `json:"media_type,omitempty"`
-	MediaURL        *string     `json:"media_url,omitempty"`
-	MediaName       *string     `json:"media_name,omitempty"`
-	MediaSizeBytes  *int64      `json:"media_size_bytes,omitempty"`
+	MediaType        *MediaType `json:"media_type,omitempty"`
+	MediaURL         *string    `json:"media_url,omitempty"`
+	MediaName        *string    `json:"media_name,omitempty"`
+	MediaSizeBytes   *int64     `json:"media_size_bytes,omitempty"`
 }
 
 type InviteRequest struct {

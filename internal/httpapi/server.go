@@ -82,6 +82,8 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 		r.Post("/api/groups/join-by-code", server.joinByCode)
 		r.Post("/api/groups/{groupID}/join", server.joinPublicGroup)
 		r.Post("/api/groups/{groupID}/invite-code", server.ensureGroupInviteCode)
+		r.Get("/api/groups/{groupID}/members", server.listGroupMembers)
+		r.Post("/api/groups/{groupID}/members/{userID}/role", server.updateGroupMemberRole)
 		r.Delete("/api/groups/{groupID}/leave", server.leaveGroup)
 		r.Post("/api/groups/{groupID}/invite-user", server.inviteUser)
 		r.Get("/api/groups/{groupID}/messages", server.listMessages)
@@ -231,6 +233,30 @@ func (s *Server) ensureGroupInviteCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, group)
+}
+
+func (s *Server) listGroupMembers(w http.ResponseWriter, r *http.Request) {
+	members, err := s.svc.ListGroupMembers(r.Context(), currentUser(r).ID, chi.URLParam(r, "groupID"))
+	if err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, members)
+}
+
+func (s *Server) updateGroupMemberRole(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Role domain.GroupRole `json:"role"`
+	}
+	if !readJSON(w, r, &input) {
+		return
+	}
+	member, err := s.svc.UpdateGroupMemberRole(r.Context(), currentUser(r).ID, chi.URLParam(r, "groupID"), chi.URLParam(r, "userID"), input.Role)
+	if err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, member)
 }
 
 func (s *Server) leaveGroup(w http.ResponseWriter, r *http.Request) {

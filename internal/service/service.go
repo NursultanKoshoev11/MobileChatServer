@@ -216,6 +216,23 @@ func (s *Service) JoinPublicGroup(ctx context.Context, userID, groupID string) e
 	return s.repo.JoinPublicGroup(ctx, groupID, userID)
 }
 
+func (s *Service) ListGroupMembers(ctx context.Context, userID, groupID string) ([]domain.GroupMember, error) {
+	if groupID == "" {
+		return nil, NewValidationError("group_id is required")
+	}
+	return s.repo.ListGroupMembers(ctx, groupID, userID)
+}
+
+func (s *Service) UpdateGroupMemberRole(ctx context.Context, actorID, groupID, targetUserID string, role domain.GroupRole) (domain.GroupMember, error) {
+	if groupID == "" || targetUserID == "" {
+		return domain.GroupMember{}, NewValidationError("group_id and user_id are required")
+	}
+	if role != domain.RoleAdmin && role != domain.RoleMember {
+		return domain.GroupMember{}, NewValidationError("role must be admin or member")
+	}
+	return s.repo.UpdateGroupMemberRole(ctx, groupID, actorID, targetUserID, role)
+}
+
 func (s *Service) EnsureGroupInviteCode(ctx context.Context, userID, groupID string) (domain.Group, error) {
 	if groupID == "" {
 		return domain.Group{}, NewValidationError("group_id is required")
