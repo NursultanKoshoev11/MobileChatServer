@@ -118,6 +118,9 @@ func (s *Service) CreatePublicRequestComment(ctx context.Context, authorID, requ
 	if len(body) < 1 || len(body) > maxPublicCommentLen {
 		return domain.PublicRequestComment{}, NewValidationError(fmt.Sprintf("comment must be between 1 and %d characters", maxPublicCommentLen))
 	}
+	if err := s.ensureCanCommentPublicRequest(ctx, authorID, requestID); err != nil {
+		return domain.PublicRequestComment{}, err
+	}
 	comment, err := s.repo.CreatePublicRequestComment(ctx, domain.PublicRequestComment{
 		ID:        "COM-" + strings.ToUpper(randomHex(12)),
 		RequestID: requestID,
