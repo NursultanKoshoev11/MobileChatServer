@@ -216,13 +216,6 @@ func (s *Service) JoinPublicGroup(ctx context.Context, userID, groupID string) e
 	return s.repo.JoinPublicGroup(ctx, groupID, userID)
 }
 
-func (s *Service) ListGroupMembers(ctx context.Context, userID, groupID string) ([]domain.GroupMember, error) {
-	if groupID == "" {
-		return nil, NewValidationError("group_id is required")
-	}
-	return s.repo.ListGroupMembers(ctx, groupID, userID)
-}
-
 func (s *Service) UpdateGroupMemberRole(ctx context.Context, actorID, groupID, targetUserID string, role domain.GroupRole) (domain.GroupMember, error) {
 	if groupID == "" || targetUserID == "" {
 		return domain.GroupMember{}, NewValidationError("group_id and user_id are required")
@@ -230,7 +223,19 @@ func (s *Service) UpdateGroupMemberRole(ctx context.Context, actorID, groupID, t
 	if role != domain.RoleAdmin && role != domain.RoleMember {
 		return domain.GroupMember{}, NewValidationError("role must be admin or member")
 	}
-	return s.repo.UpdateGroupMemberRole(ctx, groupID, actorID, targetUserID, role)
+	if err := s.repo.SetMemberRole(ctx, groupID, actorID, targetUserID, role); err != nil {
+		return domain.GroupMember{}, err
+	}
+	members, err := s.repo.ListGroupMembers(ctx, groupID, actorID)
+	if err != nil {
+		return domain.GroupMember{}, err
+	}
+	for _, member := range members {
+		if member.UserID == targetUserID {
+			return member, nil
+		}
+	}
+	return domain.GroupMember{}, storage.ErrNotFound
 }
 
 func (s *Service) UpdateGroupMemberRoleByPhone(ctx context.Context, actorID, groupID, phone string, role domain.GroupRole) (domain.GroupMember, error) {

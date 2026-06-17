@@ -46,13 +46,6 @@ type Group struct {
 	MyRole      *GroupRole      `json:"my_role,omitempty"`
 }
 
-type GroupMember struct {
-	UserID      string    `json:"user_id"`
-	DisplayName string    `json:"display_name"`
-	Phone       string    `json:"phone,omitempty"`
-	Role        GroupRole `json:"role"`
-}
-
 type MediaType string
 
 const (
