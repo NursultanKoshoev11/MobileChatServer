@@ -118,13 +118,16 @@ func (r *Repository) ensureGroupCommentMutesTable(ctx context.Context) error {
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 			unmuted_at TIMESTAMPTZ,
 			PRIMARY KEY (group_id, user_id)
-		);
-		CREATE INDEX IF NOT EXISTS idx_group_comment_mutes_active
-			ON group_comment_mutes (group_id, user_id, muted_until)
-			WHERE unmuted_at IS NULL;
-	`)
+		)`)
 	if err != nil {
 		return fmt.Errorf("ensure group comment mutes table: %w", err)
+	}
+	_, err = r.db.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_group_comment_mutes_active
+		ON group_comment_mutes (group_id, user_id, muted_until)
+		WHERE unmuted_at IS NULL`)
+	if err != nil {
+		return fmt.Errorf("ensure group comment mutes index: %w", err)
 	}
 	return nil
 }
