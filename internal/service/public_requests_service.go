@@ -31,6 +31,10 @@ type UpdatePublicRequestStatusInput struct {
 }
 
 func (s *Service) CreatePublicRequest(ctx context.Context, authorID, groupID string, input CreatePublicRequestInput) (domain.PublicRequest, error) {
+	return s.createPublicRequest(ctx, authorID, groupID, input, true)
+}
+
+func (s *Service) createPublicRequest(ctx context.Context, authorID, groupID string, input CreatePublicRequestInput, runModeration bool) (domain.PublicRequest, error) {
 	groupID = strings.TrimSpace(groupID)
 	title := strings.TrimSpace(input.Title)
 	body := strings.TrimSpace(input.Body)
@@ -55,6 +59,19 @@ func (s *Service) CreatePublicRequest(ctx context.Context, authorID, groupID str
 	}
 	if len(body) < 5 || len(body) > maxPublicRequestBodyLen {
 		return domain.PublicRequest{}, NewValidationError(fmt.Sprintf("body must be between 5 and %d characters", maxPublicRequestBodyLen))
+	}
+	if runModeration {
+		if err := s.moderateContent(ctx, domain.ContentModerationItem{
+			GroupID:         groupID,
+			ContentType:     domain.ContentTypePublicRequest,
+			AuthorID:        authorID,
+			Title:           title,
+			Body:            body,
+			RequestType:     input.RequestType,
+			InteractionMode: mode,
+		}); err != nil {
+			return domain.PublicRequest{}, err
+		}
 	}
 	request, err := s.repo.CreatePublicRequest(ctx, domain.PublicRequest{
 		ID:              "REQ-" + strings.ToUpper(randomHex(12)),
@@ -110,6 +127,10 @@ func (s *Service) ClearPublicRequestVote(ctx context.Context, userID, requestID 
 }
 
 func (s *Service) CreatePublicRequestComment(ctx context.Context, authorID, requestID string, input CreatePublicRequestCommentInput) (domain.PublicRequestComment, error) {
+	return s.createPublicRequestComment(ctx, authorID, requestID, input, true)
+}
+
+func (s *Service) createPublicRequestComment(ctx context.Context, authorID, requestID string, input CreatePublicRequestCommentInput, runModeration bool) (domain.PublicRequestComment, error) {
 	requestID = strings.TrimSpace(requestID)
 	body := strings.TrimSpace(input.Body)
 	if requestID == "" {
@@ -120,6 +141,21 @@ func (s *Service) CreatePublicRequestComment(ctx context.Context, authorID, requ
 	}
 	if err := s.ensureCanCommentPublicRequest(ctx, authorID, requestID); err != nil {
 		return domain.PublicRequestComment{}, err
+	}
+	if runModeration {
+		requestContext, err := s.GetPublicRequestRealtimeContext(ctx, requestID)
+		if err != nil {
+			return domain.PublicRequestComment{}, err
+		}
+		if err := s.moderateContent(ctx, domain.ContentModerationItem{
+			GroupID:     requestContext.GroupID,
+			ContentType: domain.ContentTypePublicRequestComment,
+			AuthorID:    authorID,
+			TargetID:    requestID,
+			Body:        body,
+		}); err != nil {
+			return domain.PublicRequestComment{}, err
+		}
 	}
 	comment, err := s.repo.CreatePublicRequestComment(ctx, domain.PublicRequestComment{
 		ID:        "COM-" + strings.ToUpper(randomHex(12)),

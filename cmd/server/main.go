@@ -12,6 +12,7 @@ import (
 
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/config"
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/httpapi"
+	"github.com/NursultanKoshoev11/MobileChatServer/internal/moderation"
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/push"
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/service"
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/sms"
@@ -65,6 +66,24 @@ func main() {
 		AccessTokenTTL: cfg.AccessTokenTTL,
 		BCryptCost:     cfg.BCryptCost,
 	}, notifier)
+	svc.SetContentModerator(moderation.NewCompositeModerator(moderation.Config{
+		Enabled:    cfg.ContentModerationEnabled,
+		Provider:   cfg.ContentModerationProvider,
+		FailClosed: cfg.ModerationFailClosed,
+		Timeout:    5 * time.Second,
+		HuggingFace: moderation.HuggingFaceConfig{
+			Token:     cfg.HuggingFaceModerationToken,
+			Model:     cfg.HuggingFaceModerationModel,
+			Endpoint:  cfg.HuggingFaceModerationEndpoint,
+			Threshold: cfg.HuggingFaceModerationThreshold,
+		},
+		OpenAI: moderation.OpenAIConfig{
+			APIKey:   cfg.OpenAIModerationAPIKey,
+			Model:    cfg.OpenAIModerationModel,
+			Endpoint: cfg.OpenAIModerationEndpoint,
+		},
+	}))
+	logModerationConfig(logger, cfg)
 
 	var smsSender sms.Sender = sms.DevSender{Logger: logger}
 	if cfg.SMSProvider != "dev" {
@@ -111,4 +130,27 @@ func main() {
 		}
 	}
 	logger.Println("shutdown completed")
+}
+
+func logModerationConfig(logger *log.Logger, cfg config.Config) {
+	if !cfg.ContentModerationEnabled {
+		logger.Println("content moderation disabled")
+		return
+	}
+	switch cfg.ContentModerationProvider {
+	case moderation.ProviderOpenAI:
+		if cfg.OpenAIModerationAPIKey != "" {
+			logger.Printf("content moderation enabled with OpenAI model %s", cfg.OpenAIModerationModel)
+			return
+		}
+		logger.Println("content moderation provider is openai, but OPENAI_API_KEY is not configured; local rules remain active")
+	case moderation.ProviderLocal:
+		logger.Println("content moderation enabled with free local Kyrgyz/Russian/English rules")
+	default:
+		if cfg.HuggingFaceModerationToken != "" {
+			logger.Printf("content moderation enabled with Hugging Face model %s", cfg.HuggingFaceModerationModel)
+			return
+		}
+		logger.Println("content moderation provider is huggingface, but HF_TOKEN is not configured; free local Kyrgyz/Russian/English rules remain active")
+	}
 }
