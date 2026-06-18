@@ -12,34 +12,63 @@ import (
 
 const defaultOpenAIEndpoint = "https://api.openai.com/v1/moderations"
 
+const (
+	ProviderLocal       = "local"
+	ProviderHuggingFace = "huggingface"
+	ProviderOpenAI      = "openai"
+)
+
+type Config struct {
+	Enabled     bool
+	Provider    string
+	FailClosed  bool
+	Timeout     time.Duration
+	OpenAI      OpenAIConfig
+	HuggingFace HuggingFaceConfig
+}
+
 type OpenAIConfig struct {
-	Enabled    bool
-	APIKey     string
-	Model      string
-	Endpoint   string
-	FailClosed bool
-	Timeout    time.Duration
+	APIKey   string
+	Model    string
+	Endpoint string
 }
 
 type CompositeModerator struct {
-	rules  RuleChecker
-	openai *OpenAIClient
-	cfg    OpenAIConfig
+	rules       RuleChecker
+	openai      *OpenAIClient
+	huggingFace *HuggingFaceClient
+	cfg         Config
 }
 
-func NewCompositeModerator(cfg OpenAIConfig) *CompositeModerator {
-	if cfg.Model == "" {
-		cfg.Model = "omni-moderation-latest"
+func NewCompositeModerator(cfg Config) *CompositeModerator {
+	if cfg.Provider == "" {
+		cfg.Provider = ProviderHuggingFace
 	}
-	if cfg.Endpoint == "" {
-		cfg.Endpoint = defaultOpenAIEndpoint
+	cfg.Provider = strings.ToLower(strings.TrimSpace(cfg.Provider))
+	if cfg.OpenAI.Model == "" {
+		cfg.OpenAI.Model = "omni-moderation-latest"
+	}
+	if cfg.OpenAI.Endpoint == "" {
+		cfg.OpenAI.Endpoint = defaultOpenAIEndpoint
+	}
+	if cfg.HuggingFace.Model == "" {
+		cfg.HuggingFace.Model = "unitary/multilingual-toxic-xlm-roberta"
+	}
+	if cfg.HuggingFace.Endpoint == "" {
+		cfg.HuggingFace.Endpoint = defaultHuggingFaceEndpoint
+	}
+	if cfg.HuggingFace.Threshold <= 0 {
+		cfg.HuggingFace.Threshold = 0.72
 	}
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 5 * time.Second
 	}
 	moderator := &CompositeModerator{rules: NewRuleChecker(), cfg: cfg}
-	if cfg.Enabled && strings.TrimSpace(cfg.APIKey) != "" {
-		moderator.openai = &OpenAIClient{cfg: cfg, httpClient: &http.Client{Timeout: cfg.Timeout}}
+	if cfg.Enabled && strings.TrimSpace(cfg.OpenAI.APIKey) != "" {
+		moderator.openai = &OpenAIClient{cfg: cfg.OpenAI, httpClient: &http.Client{Timeout: cfg.Timeout}}
+	}
+	if cfg.Enabled && strings.TrimSpace(cfg.HuggingFace.Token) != "" {
+		moderator.huggingFace = &HuggingFaceClient{cfg: cfg.HuggingFace, httpClient: &http.Client{Timeout: cfg.Timeout}}
 	}
 	return moderator
 }
@@ -52,15 +81,43 @@ func (m *CompositeModerator) Moderate(ctx context.Context, input Input) (Decisio
 	if ruleDecision.Action != ActionAllow {
 		return ruleDecision, nil
 	}
-	if m.openai == nil {
+
+	switch m.cfg.Provider {
+	case ProviderLocal:
 		return ruleDecision, nil
+	case ProviderOpenAI:
+		return m.moderateWithOpenAI(ctx, input, ruleDecision)
+	case ProviderHuggingFace:
+		return m.moderateWithHuggingFace(ctx, input, ruleDecision)
+	default:
+		return m.moderateWithHuggingFace(ctx, input, ruleDecision)
+	}
+}
+
+func (m *CompositeModerator) moderateWithOpenAI(ctx context.Context, input Input, fallback Decision) (Decision, error) {
+	if m.openai == nil {
+		return fallback, nil
 	}
 	decision, err := m.openai.Moderate(ctx, input)
 	if err != nil {
 		if m.cfg.FailClosed {
 			return NewDecision(ActionReview, "openai", "moderation_provider_error"), nil
 		}
-		return ruleDecision, nil
+		return fallback, nil
+	}
+	return decision, nil
+}
+
+func (m *CompositeModerator) moderateWithHuggingFace(ctx context.Context, input Input, fallback Decision) (Decision, error) {
+	if m.huggingFace == nil {
+		return fallback, nil
+	}
+	decision, err := m.huggingFace.Moderate(ctx, input)
+	if err != nil {
+		if m.cfg.FailClosed {
+			return NewDecision(ActionReview, "huggingface", "moderation_provider_error"), nil
+		}
+		return fallback, nil
 	}
 	return decision, nil
 }
