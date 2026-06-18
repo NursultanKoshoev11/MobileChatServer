@@ -21,6 +21,47 @@ type ClearGroupCommentMuteInput struct {
 	Mobile string `json:"mobile"`
 }
 
+func (s *Service) SetGroupCommentMute(ctx context.Context, actorID, groupID, targetUserID string, input SetGroupCommentMuteInput) (domain.GroupCommentMute, error) {
+	groupID = strings.TrimSpace(groupID)
+	targetUserID = strings.TrimSpace(targetUserID)
+	if groupID == "" {
+		return domain.GroupCommentMute{}, NewValidationError("group_id is required")
+	}
+	if targetUserID == "" {
+		return domain.GroupCommentMute{}, NewValidationError("user_id is required")
+	}
+	if input.DurationMinutes < 0 {
+		return domain.GroupCommentMute{}, NewValidationError("duration_minutes must be zero or positive")
+	}
+	var mutedUntil *time.Time
+	if input.DurationMinutes > 0 {
+		until := time.Now().UTC().Add(time.Duration(input.DurationMinutes) * time.Minute)
+		mutedUntil = &until
+	}
+	mute, err := s.repo.SetGroupCommentMute(ctx, groupID, actorID, targetUserID, mutedUntil, strings.TrimSpace(input.Reason))
+	if err != nil {
+		return domain.GroupCommentMute{}, err
+	}
+	s.RecordEvent(ctx, actorID, "group_comment_muted", "group", groupID)
+	return mute, nil
+}
+
+func (s *Service) ClearGroupCommentMute(ctx context.Context, actorID, groupID, targetUserID string) error {
+	groupID = strings.TrimSpace(groupID)
+	targetUserID = strings.TrimSpace(targetUserID)
+	if groupID == "" {
+		return NewValidationError("group_id is required")
+	}
+	if targetUserID == "" {
+		return NewValidationError("user_id is required")
+	}
+	if err := s.repo.ClearGroupCommentMute(ctx, groupID, actorID, targetUserID); err != nil {
+		return err
+	}
+	s.RecordEvent(ctx, actorID, "group_comment_unmuted", "group", groupID)
+	return nil
+}
+
 func (s *Service) SetGroupCommentMuteByPhone(ctx context.Context, actorID, groupID string, input SetGroupCommentMuteInput) (domain.GroupCommentMute, error) {
 	groupID = strings.TrimSpace(groupID)
 	phone := firstNonEmptyService(input.Phone, input.Mobile)

@@ -88,6 +88,8 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 		r.Post("/api/groups/{groupID}/comment-mutes/by-phone", server.setGroupCommentMuteByPhone)
 		r.Post("/api/groups/{groupID}/comment-mutes/unmute-by-phone", server.clearGroupCommentMuteByPhone)
 		r.Delete("/api/groups/{groupID}/comment-mutes/by-phone", server.clearGroupCommentMuteByPhone)
+		r.Post("/api/groups/{groupID}/comment-mutes/{userID}", server.setGroupCommentMute)
+		r.Post("/api/groups/{groupID}/comment-mutes/{userID}/clear", server.clearGroupCommentMute)
 		r.Delete("/api/groups/{groupID}/leave", server.leaveGroup)
 		r.Post("/api/groups/{groupID}/invite-user", server.inviteUser)
 		r.Get("/api/groups/{groupID}/messages", server.listMessages)
