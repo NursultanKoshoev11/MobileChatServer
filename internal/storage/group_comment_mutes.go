@@ -13,6 +13,9 @@ import (
 )
 
 func (r *Repository) SetGroupCommentMute(ctx context.Context, groupID, actorID, targetUserID string, mutedUntil *time.Time, reason string) (domain.GroupCommentMute, error) {
+	if err := r.ensureGroupCommentMutesTable(ctx); err != nil {
+		return domain.GroupCommentMute{}, err
+	}
 	actorRole, err := r.GetMemberRole(ctx, groupID, actorID)
 	if err != nil {
 		return domain.GroupCommentMute{}, err
@@ -49,6 +52,9 @@ func (r *Repository) SetGroupCommentMute(ctx context.Context, groupID, actorID, 
 }
 
 func (r *Repository) ClearGroupCommentMute(ctx context.Context, groupID, actorID, targetUserID string) error {
+	if err := r.ensureGroupCommentMutesTable(ctx); err != nil {
+		return err
+	}
 	actorRole, err := r.GetMemberRole(ctx, groupID, actorID)
 	if err != nil {
 		return err
@@ -74,6 +80,9 @@ func (r *Repository) ClearGroupCommentMute(ctx context.Context, groupID, actorID
 }
 
 func (r *Repository) GetActiveCommentMuteForRequest(ctx context.Context, requestID, userID string) (domain.GroupCommentMute, bool, error) {
+	if err := r.ensureGroupCommentMutesTable(ctx); err != nil {
+		return domain.GroupCommentMute{}, false, err
+	}
 	query := `
 		SELECT m.group_id, m.user_id, COALESCE(m.muted_by, ''), m.muted_until, m.reason, m.created_at, m.updated_at
 		FROM public_requests pr
@@ -95,4 +104,27 @@ func (r *Repository) GetActiveCommentMuteForRequest(ctx context.Context, request
 		mute.MutedUntil = &until.Time
 	}
 	return mute, true, nil
+}
+
+func (r *Repository) ensureGroupCommentMutesTable(ctx context.Context) error {
+	_, err := r.db.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS group_comment_mutes (
+			group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			muted_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+			muted_until TIMESTAMPTZ,
+			reason TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			unmuted_at TIMESTAMPTZ,
+			PRIMARY KEY (group_id, user_id)
+		);
+		CREATE INDEX IF NOT EXISTS idx_group_comment_mutes_active
+			ON group_comment_mutes (group_id, user_id, muted_until)
+			WHERE unmuted_at IS NULL;
+	`)
+	if err != nil {
+		return fmt.Errorf("ensure group comment mutes table: %w", err)
+	}
+	return nil
 }
