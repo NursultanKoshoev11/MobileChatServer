@@ -45,6 +45,9 @@ func main() {
 	}
 
 	repo := storage.NewRepository(db.Pool)
+	if err := repo.EnsureContentModerationSchema(ctx); err != nil {
+		logger.Fatalf("content moderation schema error: %v", err)
+	}
 	if err := repo.SyncAdminPhoneAllowlist(ctx, cfg.SuperAdminPhones, cfg.PlatformAdminPhones); err != nil {
 		logger.Fatalf("admin allowlist sync error: %v", err)
 	}
