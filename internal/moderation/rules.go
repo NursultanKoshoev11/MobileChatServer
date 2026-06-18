@@ -14,9 +14,12 @@ var (
 
 var profanityFragments = decodeHexFragments("d0b1d0bbd18f", "d181d183d0bad0b0", "d185d183d0b9", "d0bfd0b8d0b7d0b4", "d0b5d0b1d0b0", "d191d0b1d0b0", "d0bdd0b0d185", "d0bcd180d0b0d0b7", "d181d0b2d0bed0bbd0bed187", "d0b4d0bed0bbd0b1d0be", "6675636b", "73686974", "6269746368", "617373686f6c65")
 
+var abuseFragments = decodeHexFragments("d0b0d0bad0bcd0b0d0ba", "d0bad0b5d0bbd0b5d181d0bed0be", "d0bdd0b0d0b0d0b4d0b0d0bd", "d182d0b0d180d182d0b8d0bfd181d0b8d0b7", "d188d0b0d0bad0b0d0bb")
+
 var adFragments = []string{
 	"купите", "продам", "продаю", "скидка", "акция", "дешево", "арзан", "заказ", "доставка",
 	"whatsapp", "ватсап", "телеграм канал", "подписывай", "заработок", "кредит",
+	"сатам", "сатылат", "сатуу", "баасы", "жеткируу", "жеткирүү", "жазылыныз", "жазылыңыз", "киреше", "номерим",
 }
 
 type RuleChecker struct{}
@@ -34,6 +37,12 @@ func (RuleChecker) Check(input Input) Decision {
 		if strings.Contains(text, fragment) {
 			reasons = append(reasons, "profanity")
 			return NewDecision(ActionBlock, "rules", uniqueReasons(reasons)...)
+		}
+	}
+	for _, fragment := range abuseFragments {
+		if strings.Contains(text, fragment) {
+			reasons = append(reasons, "abusive_language")
+			break
 		}
 	}
 
@@ -103,6 +112,9 @@ func fromHex(value byte) int {
 func normalizeText(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
 	value = strings.ReplaceAll(value, "ё", "е")
+	value = strings.ReplaceAll(value, "ү", "у")
+	value = strings.ReplaceAll(value, "ң", "н")
+	value = strings.ReplaceAll(value, "ө", "о")
 	value = whitespaceRegexp.ReplaceAllString(value, " ")
 	return value
 }
