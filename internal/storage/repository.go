@@ -59,10 +59,7 @@ func (r *Repository) GetUserByEmail(ctx context.Context, email string) (UserWith
 }
 
 func (r *Repository) GetUserByPhone(ctx context.Context, phone string) (domain.User, error) {
-	phone = strings.ReplaceAll(strings.TrimSpace(phone), " ", "")
-	phone = strings.ReplaceAll(phone, "-", "")
-	phone = strings.ReplaceAll(phone, "(", "")
-	phone = strings.ReplaceAll(phone, ")", "")
+	phone = normalizeSearchPhone(phone)
 	query := `
 		SELECT id, COALESCE(email, ''), COALESCE(NULLIF(phone, ''), phone_number, '') AS phone, display_name, COALESCE(role, 'user'), created_at
 		FROM users
@@ -371,6 +368,33 @@ func normalizeStoredInviteCode(inviteCode string) string {
 	value := strings.ToUpper(strings.TrimSpace(inviteCode))
 	value = strings.ReplaceAll(value, "-", "")
 	return value
+}
+
+func normalizeSearchPhone(phone string) string {
+	phone = strings.TrimSpace(phone)
+	phone = strings.ReplaceAll(phone, " ", "")
+	phone = strings.ReplaceAll(phone, "-", "")
+	phone = strings.ReplaceAll(phone, "(", "")
+	phone = strings.ReplaceAll(phone, ")", "")
+	if phone == "" {
+		return ""
+	}
+	if strings.HasPrefix(phone, "00") && len(phone) > 2 {
+		phone = "+" + strings.TrimPrefix(phone, "00")
+	}
+	if strings.HasPrefix(phone, "+") {
+		return phone
+	}
+	if strings.HasPrefix(phone, "996") {
+		return "+" + phone
+	}
+	if strings.HasPrefix(phone, "0") && len(phone) == 10 {
+		return "+996" + strings.TrimPrefix(phone, "0")
+	}
+	if len(phone) == 9 {
+		return "+996" + phone
+	}
+	return phone
 }
 
 func nullableString(value string) any {

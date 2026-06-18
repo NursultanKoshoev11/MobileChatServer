@@ -351,6 +351,24 @@ func normalizePhone(phone string) string {
 	phone = strings.ReplaceAll(phone, "-", "")
 	phone = strings.ReplaceAll(phone, "(", "")
 	phone = strings.ReplaceAll(phone, ")", "")
+	if phone == "" {
+		return ""
+	}
+	if strings.HasPrefix(phone, "00") && len(phone) > 2 {
+		phone = "+" + strings.TrimPrefix(phone, "00")
+	}
+	if strings.HasPrefix(phone, "+") {
+		return phone
+	}
+	if strings.HasPrefix(phone, "996") {
+		return "+" + phone
+	}
+	if strings.HasPrefix(phone, "0") && len(phone) == 10 {
+		return "+996" + strings.TrimPrefix(phone, "0")
+	}
+	if len(phone) == 9 {
+		return "+996" + phone
+	}
 	return phone
 }
 
