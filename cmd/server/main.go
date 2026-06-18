@@ -12,6 +12,7 @@ import (
 
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/config"
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/httpapi"
+	"github.com/NursultanKoshoev11/MobileChatServer/internal/moderation"
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/push"
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/service"
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/sms"
@@ -65,6 +66,21 @@ func main() {
 		AccessTokenTTL: cfg.AccessTokenTTL,
 		BCryptCost:     cfg.BCryptCost,
 	}, notifier)
+	svc.SetContentModerator(moderation.NewCompositeModerator(moderation.OpenAIConfig{
+		Enabled:    cfg.ContentModerationEnabled,
+		APIKey:     cfg.OpenAIModerationAPIKey,
+		Model:      cfg.OpenAIModerationModel,
+		Endpoint:   cfg.OpenAIModerationEndpoint,
+		FailClosed: cfg.ModerationFailClosed,
+		Timeout:    5 * time.Second,
+	}))
+	if cfg.ContentModerationEnabled && cfg.OpenAIModerationAPIKey != "" {
+		logger.Printf("content moderation enabled with OpenAI model %s", cfg.OpenAIModerationModel)
+	} else if cfg.ContentModerationEnabled {
+		logger.Println("content moderation enabled with local rules only: OPENAI_API_KEY is not configured")
+	} else {
+		logger.Println("content moderation disabled")
+	}
 
 	var smsSender sms.Sender = sms.DevSender{Logger: logger}
 	if cfg.SMSProvider != "dev" {

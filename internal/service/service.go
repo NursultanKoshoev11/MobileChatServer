@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/domain"
+	"github.com/NursultanKoshoev11/MobileChatServer/internal/moderation"
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/security"
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/storage"
 )
@@ -34,9 +35,10 @@ type Config struct {
 }
 
 type Service struct {
-	repo     *storage.Repository
-	cfg      Config
-	notifier Notifier
+	repo             *storage.Repository
+	cfg              Config
+	notifier         Notifier
+	contentModerator moderation.Moderator
 }
 
 func New(repo *storage.Repository, cfg Config, notifier ...Notifier) *Service {
@@ -299,6 +301,10 @@ func (s *Service) ListMessages(ctx context.Context, userID, groupID string, limi
 }
 
 func (s *Service) SendMessage(ctx context.Context, senderID, groupID string, input SendMessageInput) (domain.Message, error) {
+	return s.createMessage(ctx, senderID, groupID, input, true)
+}
+
+func (s *Service) createMessage(ctx context.Context, senderID, groupID string, input SendMessageInput, runModeration bool) (domain.Message, error) {
 	text := strings.TrimSpace(input.Text)
 	if groupID == "" {
 		return domain.Message{}, NewValidationError("group_id is required")
@@ -315,6 +321,16 @@ func (s *Service) SendMessage(ctx context.Context, senderID, groupID string, inp
 	}
 	if len(text) > maxMessageLen {
 		return domain.Message{}, NewValidationError(fmt.Sprintf("text must be at most %d characters", maxMessageLen))
+	}
+	if runModeration {
+		if err := s.moderateContent(ctx, domain.ContentModerationItem{
+			GroupID:     groupID,
+			ContentType: domain.ContentTypeGroupMessage,
+			AuthorID:    senderID,
+			Body:        text,
+		}); err != nil {
+			return domain.Message{}, err
+		}
 	}
 	message := domain.Message{
 		ID:       "M-" + strings.ToUpper(randomHex(12)),

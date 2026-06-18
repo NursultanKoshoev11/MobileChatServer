@@ -9,46 +9,56 @@ import (
 )
 
 type Config struct {
-	Port                 string
-	DatabaseURL          string
-	JWTSecret            string
-	AccessTokenTTL       time.Duration
-	AllowedOrigins       string
-	BCryptCost           int
-	Environment          string
-	SMSProvider          string
-	SMSFrom              string
-	FCMProjectID         string
-	FCMClientEmail       string
-	FCMPrivateKey        string
-	RunMigrationsOnStart bool
-	SuperAdminPhones     []string
-	PlatformAdminPhones  []string
-	TestAuthEnabled     bool
-	TestAuthPhone       string
-	TestAuthCode        string
-	TestAuthDisplayName string
+	Port                     string
+	DatabaseURL              string
+	JWTSecret                string
+	AccessTokenTTL           time.Duration
+	AllowedOrigins           string
+	BCryptCost               int
+	Environment              string
+	SMSProvider              string
+	SMSFrom                  string
+	FCMProjectID             string
+	FCMClientEmail           string
+	FCMPrivateKey            string
+	RunMigrationsOnStart     bool
+	SuperAdminPhones         []string
+	PlatformAdminPhones      []string
+	TestAuthEnabled          bool
+	TestAuthPhone            string
+	TestAuthCode             string
+	TestAuthDisplayName      string
+	ContentModerationEnabled bool
+	OpenAIModerationAPIKey   string
+	OpenAIModerationModel    string
+	OpenAIModerationEndpoint string
+	ModerationFailClosed     bool
 }
 
 func Load() (Config, error) {
 	cfg := Config{
-		Port:                getEnv("PORT", "8080"),
-		DatabaseURL:         os.Getenv("DATABASE_URL"),
-		JWTSecret:           os.Getenv("JWT_SECRET"),
-		AllowedOrigins:      getEnv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:8080"),
-		Environment:         getEnv("APP_ENV", "development"),
-		BCryptCost:          getEnvInt("BCRYPT_COST", 12),
-		SMSProvider:         getEnv("SMS_PROVIDER", "dev"),
-		SMSFrom:             getEnv("SMS_FROM", "MobileChat"),
-		FCMProjectID:        os.Getenv("FCM_PROJECT_ID"),
-		FCMClientEmail:      os.Getenv("FCM_CLIENT_EMAIL"),
-		FCMPrivateKey:       os.Getenv("FCM_PRIVATE_KEY"),
-		SuperAdminPhones:    getEnvList("SUPER_ADMIN_PHONES"),
-		PlatformAdminPhones:  getEnvList("PLATFORM_ADMIN_PHONES"),
-		TestAuthEnabled:     getEnvBool("TEST_AUTH_ENABLED", false),
-		TestAuthPhone:       getEnv("TEST_AUTH_PHONE", "+996700000001"),
-		TestAuthCode:        getEnv("TEST_AUTH_CODE", "111111"),
-		TestAuthDisplayName: getEnv("TEST_AUTH_DISPLAY_NAME", "Firebase Test User"),
+		Port:                     getEnv("PORT", "8080"),
+		DatabaseURL:              os.Getenv("DATABASE_URL"),
+		JWTSecret:                os.Getenv("JWT_SECRET"),
+		AllowedOrigins:           getEnv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:8080"),
+		Environment:              getEnv("APP_ENV", "development"),
+		BCryptCost:               getEnvInt("BCRYPT_COST", 12),
+		SMSProvider:              getEnv("SMS_PROVIDER", "dev"),
+		SMSFrom:                  getEnv("SMS_FROM", "MobileChat"),
+		FCMProjectID:             os.Getenv("FCM_PROJECT_ID"),
+		FCMClientEmail:           os.Getenv("FCM_CLIENT_EMAIL"),
+		FCMPrivateKey:            os.Getenv("FCM_PRIVATE_KEY"),
+		SuperAdminPhones:         getEnvList("SUPER_ADMIN_PHONES"),
+		PlatformAdminPhones:      getEnvList("PLATFORM_ADMIN_PHONES"),
+		TestAuthEnabled:          getEnvBool("TEST_AUTH_ENABLED", false),
+		TestAuthPhone:            getEnv("TEST_AUTH_PHONE", "+996700000001"),
+		TestAuthCode:             getEnv("TEST_AUTH_CODE", "111111"),
+		TestAuthDisplayName:      getEnv("TEST_AUTH_DISPLAY_NAME", "Firebase Test User"),
+		ContentModerationEnabled: getEnvBool("CONTENT_MODERATION_ENABLED", true),
+		OpenAIModerationAPIKey:   os.Getenv("OPENAI_API_KEY"),
+		OpenAIModerationModel:    getEnv("OPENAI_MODERATION_MODEL", "omni-moderation-latest"),
+		OpenAIModerationEndpoint: getEnv("OPENAI_MODERATION_ENDPOINT", "https://api.openai.com/v1/moderations"),
+		ModerationFailClosed:     getEnvBool("MODERATION_FAIL_CLOSED", false),
 	}
 
 	cfg.RunMigrationsOnStart = getEnvBool("RUN_MIGRATIONS_ON_START", cfg.Environment != "production")

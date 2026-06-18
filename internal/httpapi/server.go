@@ -109,6 +109,9 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 		r.Delete("/api/requests/comments/{commentID}", server.deletePublicRequestComment)
 		r.Post("/api/requests/{requestID}/status", server.updatePublicRequestStatus)
 		r.Post("/api/requests/{requestID}/hide", server.hidePublicRequest)
+		r.Get("/api/groups/{groupID}/moderation/items", server.listContentModerationItems)
+		r.Post("/api/moderation/items/{itemID}/approve", server.approveContentModerationItem)
+		r.Post("/api/moderation/items/{itemID}/reject", server.rejectContentModerationItem)
 		r.Post("/api/group-creation-requests", server.createGroupCreationRequest)
 		r.Get("/api/group-creation-requests", server.listMyGroupCreationRequests)
 		r.Get("/api/admin/group-creation-requests", server.listGroupCreationRequestsForAdmin)
@@ -568,7 +571,10 @@ func (s *Server) writeError(w http.ResponseWriter, err error) {
 		return
 	}
 	var validation service.ValidationError
+	var pending service.ContentModerationPendingError
 	switch {
+	case errors.As(err, &pending):
+		writeJSON(w, http.StatusAccepted, map[string]any{"status": "pending_review", "moderation_item": pending.Item})
 	case errors.As(err, &validation):
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": validation.Error()})
 	case errors.Is(err, service.ErrUnauthorized):
