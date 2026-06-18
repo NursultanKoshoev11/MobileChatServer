@@ -16,11 +16,36 @@ var profanityFragments = decodeHexFragments("d0b1d0bbd18f", "d181d183d0bad0b0", 
 
 var abuseFragments = decodeHexFragments("d0b0d0bad0bcd0b0d0ba", "d0bad0b5d0bbd0b5d181d0bed0be", "d0bdd0b0d0b0d0b4d0b0d0bd", "d182d0b0d180d182d0b8d0bfd181d0b8d0b7", "d188d0b0d0bad0b0d0bb")
 
-var adFragments = []string{
-	"купите", "продам", "продаю", "скидка", "акция", "дешево", "арзан", "заказ", "доставка",
-	"whatsapp", "ватсап", "телеграм канал", "подписывай", "заработок", "кредит",
-	"сатам", "сатылат", "сатуу", "баасы", "жеткируу", "жеткирүү", "жазылыныз", "жазылыңыз", "киреше", "номерим",
-}
+var adFragments = append(decodeHexFragments(
+	"d0bad183d0bfd0b8d182d0b5",                         // buy
+	"d0bad183d0bfd0bbd18e",                             // buy / want to buy
+	"d0bfd180d0bed0b4d0b0d0bc",                         // sell
+	"d0bfd180d0bed0b4d0b0d18e",                         // selling
+	"d0bfd180d0bed0b4d0b0d0b5d182d181d18f",             // for sale
+	"d0bfd180d0bed0b4d0b0d191d182d181d18f",             // for sale with yo
+	"d181d0bad0b8d0b4d0bad0b0",                         // discount
+	"d0b0d0bad186d0b8d18f",                             // promo
+	"d0b4d0b5d188d0b5d0b2d0be",                         // cheap
+	"d0b4d191d188d0b5d0b2d0be",                         // cheap with yo
+	"d0b0d180d0b7d0b0d0bd",                             // cheap KG/RU
+	"d0b7d0b0d0bad0b0d0b7",                             // order
+	"d0b4d0bed181d182d0b0d0b2d0bad0b0",                 // delivery
+	"d0b2d0b0d182d181d0b0d0bf",                         // whatsapp Cyrillic
+	"d182d0b5d0bbd0b5d0b3d180d0b0d0bc20d0bad0b0d0bdd0b0d0bb", // telegram channel
+	"d0bfd0bed0b4d0bfd0b8d181d18bd0b2d0b0d0b9",         // subscribe
+	"d0b7d0b0d180d0b0d0b1d0bed182d0bed0ba",             // income
+	"d0bad180d0b5d0b4d0b8d182",                         // credit
+	"d181d0b0d182d0b0d0bc",                             // sell KG
+	"d181d0b0d182d18bd0bbd0b0d182",                     // for sale KG
+	"d181d0b0d182d183d183",                             // sale KG
+	"d0b1d0b0d0b0d181d18b",                             // price KG
+	"d0b6d0b5d182d0bad0b8d180d2afd2af",                 // delivery KG
+	"d0b6d0b5d182d0bad0b8d180d183d183",                 // delivery KG alt
+	"d0b6d0b0d0b7d18bd0bbd18bd2a3d18bd0b7",             // subscribe KG
+	"d0b6d0b0d0b7d18bd0bbd18bd0bdd18bd0b7",             // subscribe KG alt
+	"d0bdd0bed0bcd0b5d180d0b8",                         // number
+	"d0bdd0bed0bcd0b5d180d0b8d0bc",                     // my number
+), "whatsapp", "telegram", "instagram", "facebook", "wa.me", "t.me")
 
 type RuleChecker struct{}
 
@@ -58,11 +83,14 @@ func (RuleChecker) Check(input Input) Decision {
 	if linkCount >= 2 {
 		reasons = append(reasons, "too_many_links")
 	}
-	if linkCount > 0 && adHits > 0 {
+	if linkCount > 0 {
 		reasons = append(reasons, "advertising_link")
 	}
 	if hasPhone && adHits > 0 {
 		reasons = append(reasons, "advertising_contact")
+	}
+	if adHits > 0 {
+		reasons = append(reasons, "advertising_text")
 	}
 	if hasRepeatedRune(text, 7) {
 		reasons = append(reasons, "repeated_characters")
@@ -111,10 +139,10 @@ func fromHex(value byte) int {
 
 func normalizeText(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
-	value = strings.ReplaceAll(value, "ё", "е")
-	value = strings.ReplaceAll(value, "ү", "у")
-	value = strings.ReplaceAll(value, "ң", "н")
-	value = strings.ReplaceAll(value, "ө", "о")
+	value = strings.ReplaceAll(value, "\u0451", "\u0435")
+	value = strings.ReplaceAll(value, "\u04af", "\u0443")
+	value = strings.ReplaceAll(value, "\u04a3", "\u043d")
+	value = strings.ReplaceAll(value, "\u04e9", "\u043e")
 	value = whitespaceRegexp.ReplaceAllString(value, " ")
 	return value
 }
