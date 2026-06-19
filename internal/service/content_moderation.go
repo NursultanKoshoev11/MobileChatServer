@@ -4,10 +4,18 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/domain"
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/moderation"
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/storage"
+)
+
+const (
+	moderationRejectWindow       = 15 * time.Minute
+	moderationRejectThreshold    = 3
+	moderationAutoMuteDuration   = 60 * time.Minute
+	moderationTemporaryBlockText = "content is temporarily limited after repeated moderation rejects"
 )
 
 type ContentModerationPendingError struct {
@@ -25,6 +33,9 @@ func (s *Service) SetContentModerator(moderator moderation.Moderator) {
 func (s *Service) moderateContent(ctx context.Context, item domain.ContentModerationItem) error {
 	if s.contentModerator == nil {
 		return nil
+	}
+	if err := s.enforceModerationRateLimit(ctx, item); err != nil {
+		return err
 	}
 	body := moderationBodyForInput(item)
 	if matches, err := s.repo.MatchLearnedModerationRules(ctx, item.GroupID, normalizeAdaptiveModerationText(body), 5); err == nil {
@@ -71,10 +82,35 @@ func (s *Service) handleModerationDecision(ctx context.Context, item domain.Cont
 	}
 	if decision.Action == moderation.ActionBlock {
 		s.RecordEvent(ctx, item.AuthorID, "content_moderation_auto_rejected", string(item.ContentType), created.ID)
+		s.applyModerationAutoMute(ctx, created)
 		return NewValidationError("content is not allowed")
 	}
 	s.RecordEvent(ctx, item.AuthorID, "content_moderation_queued", string(item.ContentType), created.ID)
+	go s.NotifyAdminsAboutContentModerationPending(context.Background(), created)
 	return ContentModerationPendingError{Item: created}
+}
+
+func (s *Service) enforceModerationRateLimit(ctx context.Context, item domain.ContentModerationItem) error {
+	count, err := s.repo.CountRecentRejectedContentModerationItems(ctx, item.GroupID, item.AuthorID, time.Now().UTC().Add(-moderationRejectWindow))
+	if err != nil {
+		return nil
+	}
+	if count >= moderationRejectThreshold {
+		return NewValidationError(moderationTemporaryBlockText)
+	}
+	return nil
+}
+
+func (s *Service) applyModerationAutoMute(ctx context.Context, item domain.ContentModerationItem) {
+	count, err := s.repo.CountRecentRejectedContentModerationItems(ctx, item.GroupID, item.AuthorID, time.Now().UTC().Add(-moderationRejectWindow))
+	if err != nil || count < moderationRejectThreshold {
+		return
+	}
+	until := time.Now().UTC().Add(moderationAutoMuteDuration)
+	if err := s.repo.SetGroupCommentAutoMute(ctx, item.GroupID, item.AuthorID, &until, "Auto-muted after repeated moderation blocks/rejects"); err != nil {
+		return
+	}
+	s.RecordEvent(ctx, item.AuthorID, "content_moderation_auto_muted", string(item.ContentType), item.ID)
 }
 
 func (s *Service) ListContentModerationItems(ctx context.Context, reviewerID, groupID, status string, limit int) ([]domain.ContentModerationItem, error) {
@@ -90,6 +126,21 @@ func (s *Service) ListContentModerationItems(ctx context.Context, reviewerID, gr
 		return nil, NewValidationError("status is invalid")
 	}
 	return s.repo.ListContentModerationItems(ctx, groupID, moderationStatus, limit)
+}
+
+func (s *Service) CountContentModerationItems(ctx context.Context, reviewerID, groupID, status string) (int, error) {
+	groupID = strings.TrimSpace(groupID)
+	if groupID == "" {
+		return 0, NewValidationError("group_id is required")
+	}
+	if err := s.ensureGroupModerator(ctx, reviewerID, groupID); err != nil {
+		return 0, err
+	}
+	moderationStatus := domain.ContentModerationStatus(strings.TrimSpace(status))
+	if moderationStatus != "" && !validContentModerationStatus(moderationStatus) {
+		return 0, NewValidationError("status is invalid")
+	}
+	return s.repo.CountContentModerationItems(ctx, groupID, moderationStatus)
 }
 
 func (s *Service) ApproveContentModerationItem(ctx context.Context, reviewerID, itemID string) (domain.ContentModerationReviewResult, error) {
@@ -172,6 +223,7 @@ func (s *Service) RejectContentModerationItem(ctx context.Context, reviewerID, i
 	}
 	_ = s.storeAdaptiveModerationFeedback(ctx, item, "deny", itemID)
 	s.RecordEvent(ctx, reviewerID, "content_moderation_rejected", string(item.ContentType), itemID)
+	s.applyModerationAutoMute(ctx, reviewed)
 	return reviewed, nil
 }
 

@@ -23,6 +23,9 @@ func (m MediaAwareModerator) Moderate(ctx context.Context, input Input) (Decisio
 		return decision, nil
 	}
 	decision.Reasons = appendUniqueReason(decision.Reasons, "media_attachment_review")
+	if containsImageMarker(text) {
+		decision.Reasons = appendUniqueReason(decision.Reasons, "image_ocr_review_pending")
+	}
 	if decision.Action == ActionAllow {
 		decision.Action = ActionReview
 	}
@@ -41,6 +44,16 @@ func containsMediaMarker(text string) bool {
 		"photo file:",
 		"video file:",
 	}
+	for _, marker := range markers {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsImageMarker(text string) bool {
+	markers := []string{"[photo", "attached photos", "photo file:", "image file:"}
 	for _, marker := range markers {
 		if strings.Contains(text, marker) {
 			return true

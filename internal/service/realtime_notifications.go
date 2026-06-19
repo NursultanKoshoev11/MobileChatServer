@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"log"
+	"strconv"
 
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/domain"
 )
@@ -65,6 +66,32 @@ func (s *Service) NotifyUserAboutGroupCreationReview(ctx context.Context, userID
 			"type":       "group_creation_request.reviewed",
 			"request_id": request.ID,
 			"status":     string(request.Status),
+		},
+	})
+}
+
+func (s *Service) NotifyAdminsAboutContentModerationPending(ctx context.Context, item domain.ContentModerationItem) {
+	adminIDs, err := s.repo.ListContentModerationAdminUserIDs(ctx, item.GroupID)
+	if err != nil {
+		log.Printf("push content_moderation.pending_review skipped: list admins failed item_id=%s error=%v", item.ID, err)
+		return
+	}
+	count, err := s.repo.CountContentModerationItems(ctx, item.GroupID, domain.ContentModerationStatusPending)
+	if err != nil {
+		log.Printf("push content_moderation.pending_review count skipped item_id=%s error=%v", item.ID, err)
+	}
+	body := pushBody(item.Title, item.Body)
+	if body == "" {
+		body = string(item.ContentType)
+	}
+	s.NotifyUsers(ctx, adminIDs, PushMessage{
+		Title: "Контент ожидает проверки",
+		Body:  body,
+		Data: map[string]string{
+			"type":        "content_moderation.pending_review",
+			"group_id":    item.GroupID,
+			"item_id":     item.ID,
+			"queue_count": strconv.Itoa(count),
 		},
 	})
 }

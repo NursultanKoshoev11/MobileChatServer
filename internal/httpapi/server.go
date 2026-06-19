@@ -109,6 +109,7 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 		r.Delete("/api/requests/comments/{commentID}", server.deletePublicRequestComment)
 		r.Post("/api/requests/{requestID}/status", server.updatePublicRequestStatus)
 		r.Post("/api/requests/{requestID}/hide", server.hidePublicRequest)
+		r.Get("/api/groups/{groupID}/moderation/items/count", server.countContentModerationItems)
 		r.Get("/api/groups/{groupID}/moderation/items", server.listContentModerationItems)
 		r.Post("/api/moderation/items/{itemID}/approve", server.approveContentModerationItem)
 		r.Post("/api/moderation/items/{itemID}/reject", server.rejectContentModerationItem)

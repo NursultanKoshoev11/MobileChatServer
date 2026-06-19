@@ -23,6 +23,15 @@ func (s *Server) listContentModerationItems(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, items)
 }
 
+func (s *Server) countContentModerationItems(w http.ResponseWriter, r *http.Request) {
+	count, err := s.svc.CountContentModerationItems(r.Context(), currentUser(r).ID, chi.URLParam(r, "groupID"), r.URL.Query().Get("status"))
+	if err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"count": count})
+}
+
 func (s *Server) approveContentModerationItem(w http.ResponseWriter, r *http.Request) {
 	result, err := s.svc.ApproveContentModerationItem(r.Context(), currentUser(r).ID, chi.URLParam(r, "itemID"))
 	if err != nil {

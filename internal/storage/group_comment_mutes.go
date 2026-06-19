@@ -51,6 +51,28 @@ func (r *Repository) SetGroupCommentMute(ctx context.Context, groupID, actorID, 
 	return mute, nil
 }
 
+func (r *Repository) SetGroupCommentAutoMute(ctx context.Context, groupID, targetUserID string, mutedUntil *time.Time, reason string) error {
+	if err := r.ensureGroupCommentMutesTable(ctx); err != nil {
+		return err
+	}
+	targetRole, err := r.GetMemberRole(ctx, groupID, targetUserID)
+	if err != nil {
+		return err
+	}
+	if targetRole == domain.RoleOwner {
+		return nil
+	}
+	_, err = r.db.Exec(ctx, `
+		INSERT INTO group_comment_mutes (group_id, user_id, muted_by, muted_until, reason, created_at, updated_at, unmuted_at)
+		VALUES ($1, $2, NULL, $3, $4, now(), now(), NULL)
+		ON CONFLICT (group_id, user_id)
+		DO UPDATE SET muted_by = NULL, muted_until = EXCLUDED.muted_until, reason = EXCLUDED.reason, updated_at = now(), unmuted_at = NULL`, groupID, targetUserID, mutedUntil, strings.TrimSpace(reason))
+	if err != nil {
+		return fmt.Errorf("set group comment auto mute: %w", err)
+	}
+	return nil
+}
+
 func (r *Repository) ClearGroupCommentMute(ctx context.Context, groupID, actorID, targetUserID string) error {
 	if err := r.ensureGroupCommentMutesTable(ctx); err != nil {
 		return err

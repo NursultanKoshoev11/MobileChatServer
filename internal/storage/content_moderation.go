@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/domain"
 	"github.com/jackc/pgx/v5"
@@ -90,6 +91,55 @@ func (r *Repository) ListContentModerationItems(ctx context.Context, groupID str
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+func (r *Repository) CountContentModerationItems(ctx context.Context, groupID string, status domain.ContentModerationStatus) (int, error) {
+	var count int
+	if err := r.db.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM content_moderation_items
+		WHERE group_id = $1 AND ($2::text = '' OR status = $2)`, groupID, string(status)).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count content moderation items: %w", err)
+	}
+	return count, nil
+}
+
+func (r *Repository) CountRecentRejectedContentModerationItems(ctx context.Context, groupID, authorID string, since time.Time) (int, error) {
+	var count int
+	if err := r.db.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM content_moderation_items
+		WHERE group_id = $1
+		  AND author_id = $2
+		  AND status = 'rejected'
+		  AND COALESCE(reviewed_at, created_at) >= $3`, groupID, authorID, since).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count recent rejected moderation items: %w", err)
+	}
+	return count, nil
+}
+
+func (r *Repository) ListContentModerationAdminUserIDs(ctx context.Context, groupID string) ([]string, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT DISTINCT user_id
+		FROM group_members
+		WHERE group_id = $1 AND role IN ('owner', 'admin')
+		UNION
+		SELECT id
+		FROM users
+		WHERE role IN ('platform_admin', 'super_admin')`, groupID)
+	if err != nil {
+		return nil, fmt.Errorf("list content moderation admins: %w", err)
+	}
+	defer rows.Close()
+	ids := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 func (r *Repository) GetContentModerationItem(ctx context.Context, itemID string) (domain.ContentModerationItem, error) {
