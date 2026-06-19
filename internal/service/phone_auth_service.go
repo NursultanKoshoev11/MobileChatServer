@@ -166,14 +166,15 @@ func (s *PhoneAuthService) Refresh(ctx context.Context, input RefreshInput) (dom
 	if record.RevokedAt != nil || time.Now().UTC().After(record.ExpiresAt) {
 		return domain.PhoneSession{}, ErrUnauthorized
 	}
-	if err := s.repo.RevokeRefreshSession(ctx, record.ID); err != nil {
-		return domain.PhoneSession{}, err
-	}
 	user, err := s.repo.GetAuthPhoneUserByID(ctx, record.UserID)
 	if err != nil {
 		return domain.PhoneSession{}, err
 	}
-	return s.issuePhoneSession(ctx, user)
+	accessToken, err := security.SignAccessToken(user.ID, s.cfg.JWTSecret, s.cfg.AccessTokenTTL)
+	if err != nil {
+		return domain.PhoneSession{}, err
+	}
+	return domain.PhoneSession{AccessToken: accessToken, RefreshToken: refreshToken, User: user}, nil
 }
 
 func (s *PhoneAuthService) Logout(ctx context.Context, input RefreshInput) error {

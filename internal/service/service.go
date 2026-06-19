@@ -139,14 +139,15 @@ func (s *Service) RefreshSession(ctx context.Context, input RefreshInput) (domai
 	if record.RevokedAt != nil || time.Now().UTC().After(record.ExpiresAt) {
 		return domain.Session{}, ErrUnauthorized
 	}
-	if err := s.repo.RevokeRefreshSession(ctx, record.ID); err != nil {
-		return domain.Session{}, err
-	}
 	user, err := s.repo.GetUserByID(ctx, record.UserID)
 	if err != nil {
 		return domain.Session{}, err
 	}
-	return s.issueSession(ctx, user)
+	accessToken, err := security.SignAccessToken(user.ID, s.cfg.JWTSecret, s.cfg.AccessTokenTTL)
+	if err != nil {
+		return domain.Session{}, err
+	}
+	return domain.Session{AccessToken: accessToken, RefreshToken: refreshToken, User: user}, nil
 }
 
 func (s *Service) Authenticate(ctx context.Context, token string) (domain.User, error) {
