@@ -14,9 +14,11 @@ import (
 const (
 	maxPublicRequestTitleLen   = 120
 	maxPublicRequestTextLen    = 4000
-	maxPublicRequestPayloadLen = 2 * 1024 * 1024
-	maxPublicRequestPhotos     = 1
+	maxPublicRequestPayloadLen = 18 * 1024 * 1024
+	maxPublicRequestPhotos     = 3
 	maxPublicRequestPhotoBytes = 900 * 1024
+	maxPublicRequestVideos     = 1
+	maxPublicRequestVideoBytes = 12 * 1024 * 1024
 	maxPublicCommentLen        = 1500
 )
 
@@ -36,20 +38,31 @@ type UpdatePublicRequestStatusInput struct {
 }
 
 type publicRequestBodyMeta struct {
-	Text       string
-	PhotoCount int
+	Text           string
+	ModerationText string
+	PhotoCount     int
+	VideoCount     int
 }
 
 type publicRequestPayload struct {
-	Version int                         `json:"version"`
-	Text    string                      `json:"text"`
-	Photos  []publicRequestPayloadPhoto `json:"photos"`
+	Version        int                         `json:"version"`
+	Text           string                      `json:"text"`
+	ModerationText string                      `json:"moderation_text"`
+	Photos         []publicRequestPayloadPhoto `json:"photos"`
+	Videos         []publicRequestPayloadVideo `json:"videos"`
 }
 
 type publicRequestPayloadPhoto struct {
 	Name      string `json:"name"`
 	SizeBytes int    `json:"size_bytes"`
 	Base64    string `json:"base64"`
+}
+
+type publicRequestPayloadVideo struct {
+	Name      string `json:"name"`
+	SizeBytes int    `json:"size_bytes"`
+	Base64    string `json:"base64"`
+	MimeType  string `json:"mime_type"`
 }
 
 func (s *Service) CreatePublicRequest(ctx context.Context, authorID, groupID string, input CreatePublicRequestInput) (domain.PublicRequest, error) {
@@ -250,10 +263,10 @@ func validatePublicRequestBody(body string) (publicRequestBodyMeta, error) {
 		return publicRequestBodyMeta{}, err
 	}
 	if isPayload {
-		if strings.TrimSpace(meta.Text) == "" && meta.PhotoCount == 0 {
-			return publicRequestBodyMeta{}, NewValidationError("body text or photo is required")
+		if strings.TrimSpace(meta.Text) == "" && meta.PhotoCount == 0 && meta.VideoCount == 0 {
+			return publicRequestBodyMeta{}, NewValidationError("body text, photo or video is required")
 		}
-		if meta.PhotoCount == 0 && (len(meta.Text) < 5 || len(meta.Text) > maxPublicRequestTextLen) {
+		if meta.PhotoCount == 0 && meta.VideoCount == 0 && (len(meta.Text) < 5 || len(meta.Text) > maxPublicRequestTextLen) {
 			return publicRequestBodyMeta{}, NewValidationError(fmt.Sprintf("body text must be between 5 and %d characters", maxPublicRequestTextLen))
 		}
 		if len(meta.Text) > maxPublicRequestTextLen {
@@ -264,7 +277,7 @@ func validatePublicRequestBody(body string) (publicRequestBodyMeta, error) {
 	if len(body) < 5 || len(body) > maxPublicRequestTextLen {
 		return publicRequestBodyMeta{}, NewValidationError(fmt.Sprintf("body must be between 5 and %d characters", maxPublicRequestTextLen))
 	}
-	return publicRequestBodyMeta{Text: body}, nil
+	return publicRequestBodyMeta{Text: body, ModerationText: body}, nil
 }
 
 func parsePublicRequestBodyPayload(body string) (publicRequestBodyMeta, bool, error) {
@@ -277,15 +290,27 @@ func parsePublicRequestBodyPayload(body string) (publicRequestBodyMeta, bool, er
 		return publicRequestBodyMeta{}, false, nil
 	}
 	text := strings.TrimSpace(payload.Text)
+	moderationText := strings.TrimSpace(payload.ModerationText)
 	if len(payload.Photos) > maxPublicRequestPhotos {
-		return publicRequestBodyMeta{}, true, NewValidationError(fmt.Sprintf("only %d photo is allowed", maxPublicRequestPhotos))
+		return publicRequestBodyMeta{}, true, NewValidationError(fmt.Sprintf("only %d photos are allowed", maxPublicRequestPhotos))
+	}
+	if len(payload.Videos) > maxPublicRequestVideos {
+		return publicRequestBodyMeta{}, true, NewValidationError(fmt.Sprintf("only %d video is allowed", maxPublicRequestVideos))
 	}
 	for _, photo := range payload.Photos {
 		if err := validatePublicRequestPhotoPayload(photo); err != nil {
 			return publicRequestBodyMeta{}, true, err
 		}
 	}
-	return publicRequestBodyMeta{Text: text, PhotoCount: len(payload.Photos)}, true, nil
+	for _, video := range payload.Videos {
+		if err := validatePublicRequestVideoPayload(video); err != nil {
+			return publicRequestBodyMeta{}, true, err
+		}
+	}
+	if moderationText == "" {
+		moderationText = buildPublicRequestMediaModerationText(text, len(payload.Photos), len(payload.Videos))
+	}
+	return publicRequestBodyMeta{Text: text, ModerationText: moderationText, PhotoCount: len(payload.Photos), VideoCount: len(payload.Videos)}, true, nil
 }
 
 func validatePublicRequestPhotoPayload(photo publicRequestPayloadPhoto) error {
@@ -315,6 +340,47 @@ func validatePublicRequestPhotoPayload(photo publicRequestPayloadPhoto) error {
 	return nil
 }
 
+func validatePublicRequestVideoPayload(video publicRequestPayloadVideo) error {
+	data := strings.TrimSpace(video.Base64)
+	if data == "" {
+		return NewValidationError("video data is required")
+	}
+	if comma := strings.LastIndex(data, ","); comma >= 0 {
+		data = data[comma+1:]
+	}
+	if len(data) > ((maxPublicRequestVideoBytes+2)/3)*4+8 {
+		return NewValidationError(fmt.Sprintf("video must be less than %d bytes", maxPublicRequestVideoBytes))
+	}
+	decoded, err := base64.StdEncoding.DecodeString(data)
+	if err != nil {
+		return NewValidationError("video data is invalid")
+	}
+	if len(decoded) == 0 {
+		return NewValidationError("video data is required")
+	}
+	if len(decoded) > maxPublicRequestVideoBytes {
+		return NewValidationError(fmt.Sprintf("video must be less than %d bytes", maxPublicRequestVideoBytes))
+	}
+	if video.SizeBytes > 0 && video.SizeBytes > maxPublicRequestVideoBytes {
+		return NewValidationError(fmt.Sprintf("video must be less than %d bytes", maxPublicRequestVideoBytes))
+	}
+	return nil
+}
+
+func buildPublicRequestMediaModerationText(text string, photoCount, videoCount int) string {
+	parts := make([]string, 0, 3)
+	if strings.TrimSpace(text) != "" {
+		parts = append(parts, text)
+	}
+	if photoCount > 0 {
+		parts = append(parts, fmt.Sprintf("[photo attachments: %d]", photoCount))
+	}
+	if videoCount > 0 {
+		parts = append(parts, fmt.Sprintf("[video attachments: %d]", videoCount))
+	}
+	return strings.Join(parts, "\n")
+}
+
 func moderationBodyForInput(item domain.ContentModerationItem) string {
 	if item.ContentType != domain.ContentTypePublicRequest {
 		return item.Body
@@ -323,21 +389,24 @@ func moderationBodyForInput(item domain.ContentModerationItem) string {
 	if err != nil || !isPayload {
 		return item.Body
 	}
-	if strings.TrimSpace(meta.Text) != "" {
-		return meta.Text
+	if strings.TrimSpace(meta.ModerationText) != "" {
+		return meta.ModerationText
 	}
-	if meta.PhotoCount > 0 {
-		return "[photo]"
-	}
-	return ""
+	return buildPublicRequestMediaModerationText(meta.Text, meta.PhotoCount, meta.VideoCount)
 }
 
 func (m publicRequestBodyMeta) NotificationBody() string {
 	if strings.TrimSpace(m.Text) != "" {
 		return m.Text
 	}
+	if m.PhotoCount > 0 && m.VideoCount > 0 {
+		return "[photo/video]"
+	}
 	if m.PhotoCount > 0 {
 		return "[photo]"
+	}
+	if m.VideoCount > 0 {
+		return "[video]"
 	}
 	return ""
 }

@@ -69,7 +69,7 @@ func main() {
 		AccessTokenTTL: cfg.AccessTokenTTL,
 		BCryptCost:     cfg.BCryptCost,
 	}, notifier)
-	svc.SetContentModerator(moderation.NewCompositeModerator(moderation.Config{
+	baseModerator := moderation.NewCompositeModerator(moderation.Config{
 		Enabled:    cfg.ContentModerationEnabled,
 		Provider:   cfg.ContentModerationProvider,
 		FailClosed: cfg.ModerationFailClosed,
@@ -85,7 +85,8 @@ func main() {
 			Model:    cfg.OpenAIModerationModel,
 			Endpoint: cfg.OpenAIModerationEndpoint,
 		},
-	}))
+	})
+	svc.SetContentModerator(moderation.NewMediaAwareModerator(baseModerator))
 	logModerationConfig(logger, cfg)
 
 	var smsSender sms.Sender = sms.DevSender{Logger: logger}
