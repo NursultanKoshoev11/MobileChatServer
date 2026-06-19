@@ -69,8 +69,11 @@ func (r *Repository) MatchLearnedModerationRules(ctx context.Context, groupID, n
 	}
 	groupID = strings.TrimSpace(groupID)
 	normalizedText = strings.TrimSpace(strings.ToLower(normalizedText))
-	if groupID == "" || normalizedText == "" {
+	if normalizedText == "" {
 		return nil, nil
+	}
+	if groupID == "" {
+		groupID = "*"
 	}
 	if limit <= 0 || limit > 20 {
 		limit = 10
@@ -78,7 +81,7 @@ func (r *Repository) MatchLearnedModerationRules(ctx context.Context, groupID, n
 	rows, err := r.db.Query(ctx, `
 		SELECT group_id, pattern, action, weight, COALESCE(source_item_id, '')
 		FROM learned_moderation_rules
-		WHERE group_id = $1
+		WHERE group_id IN ($1, '*')
 		  AND length(pattern) >= 4
 		  AND $2 LIKE '%' || pattern || '%'
 		ORDER BY weight DESC, updated_at DESC

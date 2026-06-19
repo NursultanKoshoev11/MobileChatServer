@@ -16,6 +16,11 @@ var profanityFragments = decodeHexFragments("d0b1d0bbd18f", "d181d183d0bad0b0", 
 
 var abuseFragments = decodeHexFragments("d0b0d0bad0bcd0b0d0ba", "d0bad0b5d0bbd0b5d181d0bed0be", "d0bdd0b0d0b0d0b4d0b0d0bd", "d182d0b0d180d182d0b8d0bfd181d0b8d0b7", "d188d0b0d0bad0b0d0bb")
 
+var hardAdFragments = []string{
+	"продается", "продаётся", "продам", "продаю", "сатылат", "сатам", "сатуу",
+	"баасы", "доставка", "заказ", "скидка", "акция", "купите", "арзан",
+}
+
 var adFragments = append(decodeHexFragments(
 	"d0bad183d0bfd0b8d182d0b5",                         // buy
 	"d0bad183d0bfd0bbd18e",                             // buy / want to buy
@@ -79,6 +84,12 @@ func (RuleChecker) Check(input Input) Decision {
 			adHits++
 		}
 	}
+	hardAdHits := 0
+	for _, fragment := range hardAdFragments {
+		if strings.Contains(text, fragment) {
+			hardAdHits++
+		}
+	}
 
 	if linkCount >= 2 {
 		reasons = append(reasons, "too_many_links")
@@ -89,8 +100,11 @@ func (RuleChecker) Check(input Input) Decision {
 	if hasPhone && adHits > 0 {
 		reasons = append(reasons, "advertising_contact")
 	}
-	if adHits > 0 {
+	if adHits > 0 || hardAdHits > 0 {
 		reasons = append(reasons, "advertising_text")
+	}
+	if hardAdHits > 0 || (adHits > 0 && (linkCount > 0 || hasPhone)) {
+		return NewDecision(ActionBlock, "rules", uniqueReasons(reasons)...)
 	}
 	if hasRepeatedRune(text, 7) {
 		reasons = append(reasons, "repeated_characters")

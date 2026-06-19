@@ -26,23 +26,39 @@ func (s *Service) moderateContent(ctx context.Context, item domain.ContentModera
 	if s.contentModerator == nil {
 		return nil
 	}
+	body := moderationBodyForInput(item)
+	if matches, err := s.repo.MatchLearnedModerationRules(ctx, item.GroupID, normalizeAdaptiveModerationText(body), 5); err == nil {
+		for _, match := range matches {
+			if strings.EqualFold(match.Action, "deny") {
+				decision := moderation.NewDecision(moderation.ActionBlock, "learned_rules", "learned_admin_reject")
+				return s.handleModerationDecision(ctx, item, decision)
+			}
+		}
+	}
 	decision, err := s.contentModerator.Moderate(ctx, moderation.Input{
 		ContentType: moderation.ContentType(item.ContentType),
 		GroupID:     item.GroupID,
 		AuthorID:    item.AuthorID,
 		TargetID:    item.TargetID,
 		Title:       item.Title,
-		Body:        moderationBodyForInput(item),
+		Body:        body,
 	})
 	if err != nil {
 		return fmt.Errorf("moderate content: %w", err)
 	}
+	return s.handleModerationDecision(ctx, item, decision)
+}
+
+func (s *Service) handleModerationDecision(ctx context.Context, item domain.ContentModerationItem, decision moderation.Decision) error {
 	if decision.Action == moderation.ActionAllow {
 		return nil
 	}
 	queued := item
 	queued.ID = "MOD-" + strings.ToUpper(randomHex(12))
 	queued.Status = domain.ContentModerationStatusPending
+	if decision.Action == moderation.ActionBlock {
+		queued.Status = domain.ContentModerationStatusRejected
+	}
 	queued.Decision = string(decision.Action)
 	queued.Reasons = decision.Reasons
 	queued.Provider = firstNonEmpty(decision.Provider, "rules")
@@ -52,6 +68,10 @@ func (s *Service) moderateContent(ctx context.Context, item domain.ContentModera
 	created, err := s.repo.CreateContentModerationItem(ctx, queued)
 	if err != nil {
 		return err
+	}
+	if decision.Action == moderation.ActionBlock {
+		s.RecordEvent(ctx, item.AuthorID, "content_moderation_auto_rejected", string(item.ContentType), created.ID)
+		return NewValidationError("content is not allowed")
 	}
 	s.RecordEvent(ctx, item.AuthorID, "content_moderation_queued", string(item.ContentType), created.ID)
 	return ContentModerationPendingError{Item: created}
@@ -125,6 +145,7 @@ func (s *Service) ApproveContentModerationItem(ctx context.Context, reviewerID, 
 	if err != nil {
 		return domain.ContentModerationReviewResult{}, err
 	}
+	_ = s.storeAdaptiveModerationFeedback(ctx, item, "allow", itemID)
 	s.RecordEvent(ctx, reviewerID, "content_moderation_approved", string(item.ContentType), itemID)
 	result.Item = reviewed
 	return result, nil
@@ -149,6 +170,7 @@ func (s *Service) RejectContentModerationItem(ctx context.Context, reviewerID, i
 	if err != nil {
 		return domain.ContentModerationItem{}, err
 	}
+	_ = s.storeAdaptiveModerationFeedback(ctx, item, "deny", itemID)
 	s.RecordEvent(ctx, reviewerID, "content_moderation_rejected", string(item.ContentType), itemID)
 	return reviewed, nil
 }
