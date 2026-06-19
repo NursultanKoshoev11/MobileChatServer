@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -10,9 +12,12 @@ import (
 )
 
 const (
-	maxPublicRequestTitleLen = 120
-	maxPublicRequestBodyLen  = 4000
-	maxPublicCommentLen      = 1500
+	maxPublicRequestTitleLen   = 120
+	maxPublicRequestTextLen    = 4000
+	maxPublicRequestPayloadLen = 2 * 1024 * 1024
+	maxPublicRequestPhotos     = 1
+	maxPublicRequestPhotoBytes = 900 * 1024
+	maxPublicCommentLen        = 1500
 )
 
 type CreatePublicRequestInput struct {
@@ -28,6 +33,23 @@ type CreatePublicRequestCommentInput struct {
 
 type UpdatePublicRequestStatusInput struct {
 	Status domain.PublicRequestStatus `json:"status"`
+}
+
+type publicRequestBodyMeta struct {
+	Text       string
+	PhotoCount int
+}
+
+type publicRequestPayload struct {
+	Version int                         `json:"version"`
+	Text    string                      `json:"text"`
+	Photos  []publicRequestPayloadPhoto `json:"photos"`
+}
+
+type publicRequestPayloadPhoto struct {
+	Name      string `json:"name"`
+	SizeBytes int    `json:"size_bytes"`
+	Base64    string `json:"base64"`
 }
 
 func (s *Service) CreatePublicRequest(ctx context.Context, authorID, groupID string, input CreatePublicRequestInput) (domain.PublicRequest, error) {
@@ -57,8 +79,9 @@ func (s *Service) createPublicRequest(ctx context.Context, authorID, groupID str
 	if len(title) < 3 || len(title) > maxPublicRequestTitleLen {
 		return domain.PublicRequest{}, NewValidationError(fmt.Sprintf("title must be between 3 and %d characters", maxPublicRequestTitleLen))
 	}
-	if len(body) < 5 || len(body) > maxPublicRequestBodyLen {
-		return domain.PublicRequest{}, NewValidationError(fmt.Sprintf("body must be between 5 and %d characters", maxPublicRequestBodyLen))
+	bodyMeta, err := validatePublicRequestBody(body)
+	if err != nil {
+		return domain.PublicRequest{}, err
 	}
 	if runModeration {
 		if err := s.moderateContent(ctx, domain.ContentModerationItem{
@@ -86,7 +109,7 @@ func (s *Service) createPublicRequest(ctx context.Context, authorID, groupID str
 		return domain.PublicRequest{}, err
 	}
 	s.RecordEvent(ctx, authorID, "public_request_created", "group", groupID)
-	go s.notifyGroupAboutNewPublicRequest(context.Background(), authorID, groupID, request.ID, request.Title, request.Body)
+	go s.notifyGroupAboutNewPublicRequest(context.Background(), authorID, groupID, request.ID, request.Title, bodyMeta.NotificationBody())
 	return request, nil
 }
 
@@ -216,6 +239,107 @@ func (s *Service) UpdatePublicRequestStatus(ctx context.Context, adminID, reques
 	}
 	s.RecordEvent(ctx, adminID, "public_request_status_updated", "public_request", requestID)
 	return nil
+}
+
+func validatePublicRequestBody(body string) (publicRequestBodyMeta, error) {
+	if len(body) > maxPublicRequestPayloadLen {
+		return publicRequestBodyMeta{}, NewValidationError(fmt.Sprintf("body must be less than %d bytes", maxPublicRequestPayloadLen))
+	}
+	meta, isPayload, err := parsePublicRequestBodyPayload(body)
+	if err != nil {
+		return publicRequestBodyMeta{}, err
+	}
+	if isPayload {
+		if strings.TrimSpace(meta.Text) == "" && meta.PhotoCount == 0 {
+			return publicRequestBodyMeta{}, NewValidationError("body text or photo is required")
+		}
+		if meta.PhotoCount == 0 && (len(meta.Text) < 5 || len(meta.Text) > maxPublicRequestTextLen) {
+			return publicRequestBodyMeta{}, NewValidationError(fmt.Sprintf("body text must be between 5 and %d characters", maxPublicRequestTextLen))
+		}
+		if len(meta.Text) > maxPublicRequestTextLen {
+			return publicRequestBodyMeta{}, NewValidationError(fmt.Sprintf("body text must be less than %d characters", maxPublicRequestTextLen))
+		}
+		return meta, nil
+	}
+	if len(body) < 5 || len(body) > maxPublicRequestTextLen {
+		return publicRequestBodyMeta{}, NewValidationError(fmt.Sprintf("body must be between 5 and %d characters", maxPublicRequestTextLen))
+	}
+	return publicRequestBodyMeta{Text: body}, nil
+}
+
+func parsePublicRequestBodyPayload(body string) (publicRequestBodyMeta, bool, error) {
+	raw := strings.TrimSpace(body)
+	if raw == "" || !strings.HasPrefix(raw, "{") {
+		return publicRequestBodyMeta{}, false, nil
+	}
+	var payload publicRequestPayload
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return publicRequestBodyMeta{}, false, nil
+	}
+	text := strings.TrimSpace(payload.Text)
+	if len(payload.Photos) > maxPublicRequestPhotos {
+		return publicRequestBodyMeta{}, true, NewValidationError(fmt.Sprintf("only %d photo is allowed", maxPublicRequestPhotos))
+	}
+	for _, photo := range payload.Photos {
+		if err := validatePublicRequestPhotoPayload(photo); err != nil {
+			return publicRequestBodyMeta{}, true, err
+		}
+	}
+	return publicRequestBodyMeta{Text: text, PhotoCount: len(payload.Photos)}, true, nil
+}
+
+func validatePublicRequestPhotoPayload(photo publicRequestPayloadPhoto) error {
+	data := strings.TrimSpace(photo.Base64)
+	if data == "" {
+		return NewValidationError("photo data is required")
+	}
+	if comma := strings.LastIndex(data, ","); comma >= 0 {
+		data = data[comma+1:]
+	}
+	if len(data) > ((maxPublicRequestPhotoBytes+2)/3)*4+8 {
+		return NewValidationError(fmt.Sprintf("photo must be less than %d bytes", maxPublicRequestPhotoBytes))
+	}
+	decoded, err := base64.StdEncoding.DecodeString(data)
+	if err != nil {
+		return NewValidationError("photo data is invalid")
+	}
+	if len(decoded) == 0 {
+		return NewValidationError("photo data is required")
+	}
+	if len(decoded) > maxPublicRequestPhotoBytes {
+		return NewValidationError(fmt.Sprintf("photo must be less than %d bytes", maxPublicRequestPhotoBytes))
+	}
+	if photo.SizeBytes > 0 && photo.SizeBytes > maxPublicRequestPhotoBytes {
+		return NewValidationError(fmt.Sprintf("photo must be less than %d bytes", maxPublicRequestPhotoBytes))
+	}
+	return nil
+}
+
+func moderationBodyForInput(item domain.ContentModerationItem) string {
+	if item.ContentType != domain.ContentTypePublicRequest {
+		return item.Body
+	}
+	meta, isPayload, err := parsePublicRequestBodyPayload(item.Body)
+	if err != nil || !isPayload {
+		return item.Body
+	}
+	if strings.TrimSpace(meta.Text) != "" {
+		return meta.Text
+	}
+	if meta.PhotoCount > 0 {
+		return "[photo]"
+	}
+	return ""
+}
+
+func (m publicRequestBodyMeta) NotificationBody() string {
+	if strings.TrimSpace(m.Text) != "" {
+		return m.Text
+	}
+	if m.PhotoCount > 0 {
+		return "[photo]"
+	}
+	return ""
 }
 
 func validPublicRequestType(value domain.PublicRequestType) bool {

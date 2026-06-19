@@ -32,7 +32,7 @@ func (s *Service) moderateContent(ctx context.Context, item domain.ContentModera
 		AuthorID:    item.AuthorID,
 		TargetID:    item.TargetID,
 		Title:       item.Title,
-		Body:        item.Body,
+		Body:        moderationBodyForInput(item),
 	})
 	if err != nil {
 		return fmt.Errorf("moderate content: %w", err)
