@@ -15,7 +15,6 @@ import (
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/moderation"
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/push"
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/service"
-	"github.com/NursultanKoshoev11/MobileChatServer/internal/sms"
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/storage"
 )
 
@@ -89,10 +88,6 @@ func main() {
 	svc.SetContentModerator(moderation.NewMediaAwareModerator(baseModerator))
 	logModerationConfig(logger, cfg)
 
-	var smsSender sms.Sender = sms.DevSender{Logger: logger}
-	if cfg.SMSProvider != "dev" {
-		smsSender = sms.DisabledSender{}
-	}
 	phoneAuth := service.NewPhoneAuth(repo, service.PhoneAuthConfig{
 		JWTSecret:           cfg.JWTSecret,
 		AccessTokenTTL:      cfg.AccessTokenTTL,
@@ -101,7 +96,7 @@ func main() {
 		TestAuthPhone:       cfg.TestAuthPhone,
 		TestAuthCode:        cfg.TestAuthCode,
 		TestAuthDisplayName: cfg.TestAuthDisplayName,
-	}, smsSender)
+	}, newSMSSender(cfg, logger))
 
 	handler := httpapi.New(svc, phoneAuth, logger, cfg.AllowedOrigins)
 	server := &http.Server{
