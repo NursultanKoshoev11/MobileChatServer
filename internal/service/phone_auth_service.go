@@ -14,8 +14,11 @@ import (
 )
 
 const (
-	phoneCodeTTL         = 5 * time.Minute
-	phoneCodeMaxAttempts = 5
+	phoneCodeTTL              = 5 * time.Minute
+	phoneCodeMaxAttempts      = 5
+	phoneCodeRateLimitWindow  = 10 * time.Minute
+	phoneCodeRateLimitMax     = 3
+	phoneCodeMinRequestGap    = 30 * time.Second
 )
 
 type PhoneAuthConfig struct {
@@ -61,6 +64,10 @@ func (s *PhoneAuthService) RequestCode(ctx context.Context, input RequestPhoneCo
 		return RequestPhoneCodeOutput{Status: "dev_code_not_sent", DevCode: "any_non_empty_code", AccountExists: accountExists}, nil
 	}
 
+	if err := s.enforcePhoneCodeRateLimit(ctx, mobile); err != nil {
+		return RequestPhoneCodeOutput{}, err
+	}
+
 	code, err := newNumericCode(6)
 	if err != nil {
 		return RequestPhoneCodeOutput{}, err
@@ -76,6 +83,25 @@ func (s *PhoneAuthService) RequestCode(ctx context.Context, input RequestPhoneCo
 		return RequestPhoneCodeOutput{}, err
 	}
 	return RequestPhoneCodeOutput{Status: "code_sent", AccountExists: accountExists}, nil
+}
+
+func (s *PhoneAuthService) enforcePhoneCodeRateLimit(ctx context.Context, mobile string) error {
+	now := time.Now().UTC()
+	count, err := s.repo.CountPhoneCodesSince(ctx, mobile, now.Add(-phoneCodeRateLimitWindow))
+	if err != nil {
+		return err
+	}
+	if count >= phoneCodeRateLimitMax {
+		return NewValidationError("too many code requests; try again later")
+	}
+	latest, err := s.repo.LatestPhoneCodeCreatedAt(ctx, mobile)
+	if err != nil && !errors.Is(err, storage.ErrNotFound) {
+		return err
+	}
+	if err == nil && now.Sub(latest) < phoneCodeMinRequestGap {
+		return NewValidationError("please wait before requesting another code")
+	}
+	return nil
 }
 
 func (s *PhoneAuthService) VerifyCode(ctx context.Context, input VerifyPhoneCodeInput) (domain.PhoneSession, error) {
@@ -170,11 +196,14 @@ func (s *PhoneAuthService) Refresh(ctx context.Context, input RefreshInput) (dom
 	if err != nil {
 		return domain.PhoneSession{}, err
 	}
-	accessToken, err := security.SignAccessToken(user.ID, s.cfg.JWTSecret, s.cfg.AccessTokenTTL)
+	newSession, err := s.issuePhoneSession(ctx, user)
 	if err != nil {
 		return domain.PhoneSession{}, err
 	}
-	return domain.PhoneSession{AccessToken: accessToken, RefreshToken: refreshToken, User: user}, nil
+	if err := s.repo.RevokeRefreshSession(ctx, record.ID); err != nil {
+		return domain.PhoneSession{}, err
+	}
+	return newSession, nil
 }
 
 func (s *PhoneAuthService) Logout(ctx context.Context, input RefreshInput) error {
@@ -263,5 +292,5 @@ func normalizeTestValue(value string) string {
 }
 
 func (s *PhoneAuthService) isDevelopmentMode() bool {
-	return strings.ToLower(strings.TrimSpace(s.cfg.Environment)) != "production"
+	return strings.EqualFold(s.cfg.Environment, "development") || strings.EqualFold(s.cfg.Environment, "local")
 }
