@@ -89,18 +89,23 @@ func (r *Repository) GetUserByID(ctx context.Context, userID string) (domain.Use
 }
 
 func (r *Repository) ListUserGroups(ctx context.Context, userID string) ([]domain.Group, error) {
+	if err := r.ensurePublicRequestReadsTable(ctx); err != nil {
+		return nil, err
+	}
 	query := `
 		SELECT g.id, g.title, g.description, g.visibility, g.owner_id, COALESCE(g.invite_code, '') AS invite_code, g.created_at,
-		       COUNT(DISTINCT gm_all.user_id)::int AS member_count, gm.role,
-		       COUNT(DISTINCT pr.id)::int AS unread_public_request_count
+		       (SELECT COUNT(*)::int FROM group_members gm_all WHERE gm_all.group_id = g.id) AS member_count,
+		       gm.role,
+		       (
+		           SELECT COUNT(*)::int
+		           FROM public_requests pr
+		           LEFT JOIN public_request_reads prr ON prr.group_id = pr.group_id AND prr.user_id = $1
+		           WHERE pr.group_id = g.id
+		             AND pr.author_id <> $1
+		             AND pr.created_at > COALESCE(prr.last_read_at, 'epoch'::timestamptz)
+		       ) AS unread_public_request_count
 		FROM groups g
 		JOIN group_members gm ON gm.group_id = g.id AND gm.user_id = $1
-		LEFT JOIN group_members gm_all ON gm_all.group_id = g.id
-		LEFT JOIN public_request_reads prr ON prr.group_id = g.id AND prr.user_id = $1
-		LEFT JOIN public_requests pr ON pr.group_id = g.id
-		  AND pr.author_id <> $1
-		  AND pr.created_at > COALESCE(prr.last_read_at, 'epoch'::timestamptz)
-		GROUP BY g.id, gm.role
 		ORDER BY g.created_at DESC`
 	rows, err := r.db.Query(ctx, query, userID)
 	if err != nil {
@@ -414,3 +419,18 @@ var (
 	ErrNotFound  = errors.New("not found")
 	ErrForbidden = errors.New("forbidden")
 )
+
+func (r *Repository) ensurePublicRequestReadsTable(ctx context.Context) error {
+	_, err := r.db.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS public_request_reads (
+			group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			last_read_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			PRIMARY KEY (group_id, user_id)
+		);
+		CREATE INDEX IF NOT EXISTS idx_public_request_reads_user_group ON public_request_reads (user_id, group_id);`)
+	if err != nil {
+		return fmt.Errorf("ensure public request reads table: %w", err)
+	}
+	return nil
+}
