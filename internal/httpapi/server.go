@@ -41,7 +41,7 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 		logger:         logger,
 		allowedOrigins: parseOrigins(allowedOrigins),
 		hub:            realtime.NewHub(logger),
-		limiter:        NewRateLimiter(120, time.Minute),
+		limiter:        NewRateLimiter(600, time.Minute),
 	}
 	server.upgrader = websocket.Upgrader{
 		ReadBufferSize:  1024,
@@ -490,6 +490,10 @@ func bearerTokenFromRequest(r *http.Request) (string, bool) {
 
 func (s *Server) rateLimit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions {
+			next.ServeHTTP(w, r)
+			return
+		}
 		key := clientIP(r)
 		if user := currentUser(r); user.ID != "" {
 			key = user.ID

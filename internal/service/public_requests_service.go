@@ -308,6 +308,8 @@ func parsePublicRequestBodyPayload(body string) (publicRequestBodyMeta, bool, er
 	}
 	if moderationText == "" {
 		moderationText = buildPublicRequestMediaModerationText(text, len(payload.Photos), len(payload.Videos))
+	} else {
+		moderationText = cleanPublicRequestModerationText(moderationText, text)
 	}
 	return publicRequestBodyMeta{Text: text, ModerationText: moderationText, PhotoCount: len(payload.Photos), VideoCount: len(payload.Videos)}, true, nil
 }
@@ -367,17 +369,25 @@ func validatePublicRequestVideoPayload(video publicRequestPayloadVideo) error {
 }
 
 func buildPublicRequestMediaModerationText(text string, photoCount, videoCount int) string {
-	parts := make([]string, 0, 3)
-	if strings.TrimSpace(text) != "" {
-		parts = append(parts, text)
+	return strings.TrimSpace(text)
+}
+
+func cleanPublicRequestModerationText(moderationText, fallbackText string) string {
+	lines := strings.Split(moderationText, "\n")
+	cleaned := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		lower := strings.ToLower(trimmed)
+		if trimmed == "" || strings.HasPrefix(lower, "attached photos") || strings.HasPrefix(lower, "attached videos") || strings.HasPrefix(lower, "photo file:") || strings.HasPrefix(lower, "video file:") {
+			continue
+		}
+		cleaned = append(cleaned, trimmed)
 	}
-	if photoCount > 0 {
-		parts = append(parts, fmt.Sprintf("[photo attachments: %d]", photoCount))
+	result := strings.TrimSpace(strings.Join(cleaned, "\n"))
+	if result != "" {
+		return result
 	}
-	if videoCount > 0 {
-		parts = append(parts, fmt.Sprintf("[video attachments: %d]", videoCount))
-	}
-	return strings.Join(parts, "\n")
+	return strings.TrimSpace(fallbackText)
 }
 
 func moderationBodyForInput(item domain.ContentModerationItem) string {
