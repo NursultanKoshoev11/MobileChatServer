@@ -225,34 +225,35 @@ func (r *Repository) ListPublicRequestComments(ctx context.Context, requestID, v
 	return comments, rows.Err()
 }
 
-func (r *Repository) DeletePublicRequestComment(ctx context.Context, commentID, moderatorID string) error {
+func (r *Repository) DeletePublicRequestComment(ctx context.Context, commentID, moderatorID string) (string, error) {
 	var groupID string
+	var requestID string
 	err := r.db.QueryRow(ctx, `
-		SELECT pr.group_id
+		SELECT pr.group_id, c.request_id
 		FROM public_request_comments c
 		JOIN public_requests pr ON pr.id = c.request_id
-		WHERE c.id = $1 AND c.deleted_at IS NULL AND pr.hidden_at IS NULL`, commentID).Scan(&groupID)
+		WHERE c.id = $1 AND c.deleted_at IS NULL AND pr.hidden_at IS NULL`, commentID).Scan(&groupID, &requestID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrNotFound
+			return "", ErrNotFound
 		}
-		return fmt.Errorf("load comment group: %w", err)
+		return "", fmt.Errorf("load comment group: %w", err)
 	}
 	role, err := r.GetMemberRole(ctx, groupID, moderatorID)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if role != domain.RoleOwner && role != domain.RoleAdmin {
-		return ErrForbidden
+		return "", ErrForbidden
 	}
 	result, err := r.db.Exec(ctx, `UPDATE public_request_comments SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL`, commentID)
 	if err != nil {
-		return fmt.Errorf("delete public request comment: %w", err)
+		return "", fmt.Errorf("delete public request comment: %w", err)
 	}
 	if result.RowsAffected() == 0 {
-		return ErrNotFound
+		return "", ErrNotFound
 	}
-	return nil
+	return requestID, nil
 }
 
 func (r *Repository) HidePublicRequest(ctx context.Context, requestID, moderatorID string) error {

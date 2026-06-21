@@ -102,10 +102,13 @@ func (s *Server) listPublicRequestComments(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) deletePublicRequestComment(w http.ResponseWriter, r *http.Request) {
-	if err := s.svc.DeletePublicRequestComment(r.Context(), currentUser(r).ID, chi.URLParam(r, "commentID")); err != nil {
+	commentID := chi.URLParam(r, "commentID")
+	requestID, err := s.svc.DeletePublicRequestComment(r.Context(), currentUser(r).ID, commentID)
+	if err != nil {
 		s.writeError(w, err)
 		return
 	}
+	s.broadcastPublicRequestRefresh(r, requestID, "public_request.comment_deleted", map[string]string{"request_id": requestID, "comment_id": commentID})
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 

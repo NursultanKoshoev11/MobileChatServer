@@ -214,16 +214,17 @@ func (s *Service) ListPublicRequestComments(ctx context.Context, viewerID, reque
 	return s.repo.ListPublicRequestComments(ctx, requestID, viewerID)
 }
 
-func (s *Service) DeletePublicRequestComment(ctx context.Context, moderatorID, commentID string) error {
+func (s *Service) DeletePublicRequestComment(ctx context.Context, moderatorID, commentID string) (string, error) {
 	commentID = strings.TrimSpace(commentID)
 	if commentID == "" {
-		return NewValidationError("comment_id is required")
+		return "", NewValidationError("comment_id is required")
 	}
-	if err := s.repo.DeletePublicRequestComment(ctx, commentID, moderatorID); err != nil {
-		return err
+	requestID, err := s.repo.DeletePublicRequestComment(ctx, commentID, moderatorID)
+	if err != nil {
+		return "", err
 	}
 	s.RecordEvent(ctx, moderatorID, "public_request_comment_deleted", "comment", commentID)
-	return nil
+	return requestID, nil
 }
 
 func (s *Service) HidePublicRequest(ctx context.Context, moderatorID, requestID string) error {

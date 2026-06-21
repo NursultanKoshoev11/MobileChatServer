@@ -579,6 +579,9 @@ func (s *Server) writeError(w http.ResponseWriter, err error) {
 	var pending service.ContentModerationPendingError
 	switch {
 	case errors.As(err, &pending):
+		if pending.Item.GroupID != "" {
+			s.hub.BroadcastGroup(pending.Item.GroupID, realtime.Event{Type: "content_moderation.pending_review", GroupID: pending.Item.GroupID, Payload: pending.Item})
+		}
 		writeJSON(w, http.StatusAccepted, map[string]any{"status": "pending_review", "moderation_item": pending.Item})
 	case errors.As(err, &validation):
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": validation.Error()})
