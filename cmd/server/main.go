@@ -12,6 +12,7 @@ import (
 
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/config"
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/httpapi"
+	"github.com/NursultanKoshoev11/MobileChatServer/internal/jsonlog"
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/moderation"
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/push"
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/service"
@@ -19,7 +20,7 @@ import (
 )
 
 func main() {
-	logger := log.New(os.Stdout, "mobilechat-server ", log.LstdFlags|log.LUTC|log.Lmicroseconds)
+	logger := log.New(jsonlog.New(os.Stdout), "", 0)
 
 	cfg, err := config.Load()
 	if err != nil {
