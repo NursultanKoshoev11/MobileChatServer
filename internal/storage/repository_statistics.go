@@ -136,8 +136,8 @@ func (r *Repository) statisticsTimeline(ctx context.Context, groupID string, fro
 	if granularity == "week" || granularity == "month" || granularity == "year" {
 		dateTrunc = granularity
 	}
-	query := fmt.Sprintf(`
-		SELECT to_char(date_trunc('%s', created_at), 'YYYY-MM-DD') AS bucket,
+	rows, err := r.db.Query(ctx, `
+		SELECT to_char(date_trunc($4, created_at), 'YYYY-MM-DD') AS bucket,
 			COUNT(*)::int AS total,
 			COUNT(*) FILTER (WHERE status IN ('resolved', 'rejected'))::int AS closed,
 			COUNT(*) FILTER (WHERE status NOT IN ('resolved', 'rejected'))::int AS open,
@@ -145,9 +145,8 @@ func (r *Repository) statisticsTimeline(ctx context.Context, groupID string, fro
 			COUNT(*) FILTER (WHERE request_type = 'complaint')::int AS complaints
 		FROM public_requests
 		WHERE group_id = $1 AND hidden_at IS NULL AND created_at >= $2 AND created_at < $3
-		GROUP BY date_trunc('%s', created_at)
-		ORDER BY date_trunc('%s', created_at) ASC`, dateTrunc, dateTrunc, dateTrunc)
-	rows, err := r.db.Query(ctx, query, groupID, from, to)
+		GROUP BY date_trunc($4, created_at)
+		ORDER BY date_trunc($4, created_at) ASC`, groupID, from, to, dateTrunc)
 	if err != nil {
 		return nil, fmt.Errorf("load statistics timeline: %w", err)
 	}
@@ -198,5 +197,5 @@ func percentage(value, total int) float64 {
 	if total <= 0 {
 		return 0
 	}
-	return math.Round((float64(value) / float64(total) * 100) * 10) / 10
+	return math.Round((float64(value)/float64(total)*100)*10) / 10
 }
