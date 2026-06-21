@@ -203,7 +203,6 @@ func (s *Service) createPublicRequestComment(ctx context.Context, authorID, requ
 		return domain.PublicRequestComment{}, err
 	}
 	s.RecordEvent(ctx, authorID, "public_request_commented", "public_request", requestID)
-	go s.notifyGroupAboutNewPublicRequestComment(context.Background(), authorID, requestID, comment.Body)
 	return comment, nil
 }
 
