@@ -53,7 +53,13 @@ func signToken(userID, secret string, ttl time.Duration, issuer string, audience
 
 func parseToken(tokenString, secret string, issuer string, audience string) (Claims, error) {
 	claims := Claims{}
-	token, err := jwt.ParseWithClaims(tokenString, &claims, func(token *jwt.Token) (any, error) {
+	parser := jwt.NewParser(
+		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+		jwt.WithIssuer(issuer),
+		jwt.WithAudience(audience),
+		jwt.WithExpirationRequired(),
+	)
+	token, err := parser.ParseWithClaims(tokenString, &claims, func(token *jwt.Token) (any, error) {
 		if token.Method != jwt.SigningMethodHS256 {
 			return nil, fmt.Errorf("unexpected signing method")
 		}
@@ -65,23 +71,8 @@ func parseToken(tokenString, secret string, issuer string, audience string) (Cla
 	if !token.Valid {
 		return Claims{}, fmt.Errorf("invalid token")
 	}
-	if claims.UserID == "" {
-		return Claims{}, fmt.Errorf("missing user id")
-	}
-	if claims.Issuer != issuer {
-		return Claims{}, fmt.Errorf("invalid token issuer")
-	}
-	if !hasAudience(claims.Audience, audience) {
-		return Claims{}, fmt.Errorf("invalid token audience")
+	if claims.UserID == "" || claims.Subject == "" || claims.UserID != claims.Subject {
+		return Claims{}, fmt.Errorf("invalid token subject")
 	}
 	return claims, nil
-}
-
-func hasAudience(audiences jwt.ClaimStrings, expected string) bool {
-	for _, audience := range audiences {
-		if audience == expected {
-			return true
-		}
-	}
-	return false
 }
