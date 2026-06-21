@@ -31,6 +31,7 @@ type Server struct {
 	allowedOrigins map[string]bool
 	hub            *realtime.Hub
 	limiter        *RateLimiter
+	strictLimiter  *RateLimiter
 	upgrader       websocket.Upgrader
 }
 
@@ -42,6 +43,7 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 		allowedOrigins: parseOrigins(allowedOrigins),
 		hub:            realtime.NewHub(logger),
 		limiter:        NewRateLimiter(600, time.Minute),
+		strictLimiter:  NewRateLimiter(20, time.Minute),
 	}
 	server.upgrader = websocket.Upgrader{
 		ReadBufferSize:  1024,
@@ -499,12 +501,23 @@ func (s *Server) rateLimit(next http.Handler) http.Handler {
 		if user := currentUser(r); user.ID != "" {
 			key = user.ID
 		}
-		if !s.limiter.Allow(key) {
+		limiter := s.limiter
+		if isStrictRateLimitedPath(r.URL.Path) {
+			limiter = s.strictLimiter
+			key = r.URL.Path + ":" + key
+		}
+		if !limiter.Allow(key) {
 			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "rate limit exceeded"})
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func isStrictRateLimitedPath(path string) bool {
+	return strings.HasPrefix(path, "/api/auth/request-code") ||
+		strings.HasPrefix(path, "/api/auth/verify-code") ||
+		strings.HasPrefix(path, "/api/groups/") && strings.HasSuffix(path, "/messages")
 }
 
 func (s *Server) cors(next http.Handler) http.Handler {

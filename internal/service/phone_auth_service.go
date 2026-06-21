@@ -14,11 +14,11 @@ import (
 )
 
 const (
-	phoneCodeTTL              = 5 * time.Minute
-	phoneCodeMaxAttempts      = 5
-	phoneCodeRateLimitWindow  = 10 * time.Minute
-	phoneCodeRateLimitMax     = 3
-	phoneCodeMinRequestGap    = 30 * time.Second
+	phoneCodeTTL             = 5 * time.Minute
+	phoneCodeMaxAttempts     = 5
+	phoneCodeRateLimitWindow = 10 * time.Minute
+	phoneCodeRateLimitMax    = 3
+	phoneCodeMinRequestGap   = 30 * time.Second
 )
 
 type PhoneAuthConfig struct {
@@ -57,11 +57,6 @@ func (s *PhoneAuthService) RequestCode(ctx context.Context, input RequestPhoneCo
 	}
 
 	if s.isTestAuthMobile(mobile) {
-		return RequestPhoneCodeOutput{Status: "test_code_not_sent", DevCode: s.cfg.TestAuthCode, AccountExists: accountExists}, nil
-	}
-
-	if s.isDevelopmentMode() {
-		return RequestPhoneCodeOutput{Status: "dev_code_not_sent", DevCode: "any_non_empty_code", AccountExists: accountExists}, nil
 	}
 
 	if err := s.enforcePhoneCodeRateLimit(ctx, mobile); err != nil {
@@ -123,18 +118,6 @@ func (s *PhoneAuthService) VerifyCode(ctx context.Context, input VerifyPhoneCode
 			displayName = s.cfg.TestAuthDisplayName
 		}
 		user, err := s.getOrCreatePhoneUser(ctx, mobile, displayName)
-		if err != nil {
-			return domain.PhoneSession{}, err
-		}
-		_ = s.repo.MarkPhoneVerified(ctx, user.ID)
-		if err := s.repo.UpsertUserRoleFromAllowlist(ctx, user.ID, mobile); err != nil {
-			return domain.PhoneSession{}, err
-		}
-		return s.issuePhoneSession(ctx, user)
-	}
-
-	if s.isDevelopmentMode() {
-		user, err := s.getOrCreatePhoneUser(ctx, mobile, input.DisplayName)
 		if err != nil {
 			return domain.PhoneSession{}, err
 		}
@@ -289,8 +272,4 @@ func normalizeTestValue(value string) string {
 	value = strings.ReplaceAll(value, "(", "")
 	value = strings.ReplaceAll(value, ")", "")
 	return value
-}
-
-func (s *PhoneAuthService) isDevelopmentMode() bool {
-	return strings.EqualFold(s.cfg.Environment, "development") || strings.EqualFold(s.cfg.Environment, "local")
 }

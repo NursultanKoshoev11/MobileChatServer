@@ -46,9 +46,9 @@ func Load() (Config, error) {
 		DatabaseURL:                    os.Getenv("DATABASE_URL"),
 		JWTSecret:                      os.Getenv("JWT_SECRET"),
 		AllowedOrigins:                 getEnv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:8080"),
-		Environment:                    getEnv("APP_ENV", "development"),
+		Environment:                    getEnv("APP_ENV", "production"),
 		BCryptCost:                     getEnvInt("BCRYPT_COST", 12),
-		SMSProvider:                    getEnv("SMS_PROVIDER", "dev"),
+		SMSProvider:                    getEnv("SMS_PROVIDER", "disabled"),
 		SMSFrom:                        getEnv("SMS_FROM", "MobileChat"),
 		FCMProjectID:                   os.Getenv("FCM_PROJECT_ID"),
 		FCMClientEmail:                 os.Getenv("FCM_CLIENT_EMAIL"),
@@ -68,7 +68,7 @@ func Load() (Config, error) {
 		OpenAIModerationAPIKey:         os.Getenv("OPENAI_API_KEY"),
 		OpenAIModerationModel:          getEnv("OPENAI_MODERATION_MODEL", "omni-moderation-latest"),
 		OpenAIModerationEndpoint:       getEnv("OPENAI_MODERATION_ENDPOINT", "https://api.openai.com/v1/moderations"),
-		ModerationFailClosed:           getEnvBool("MODERATION_FAIL_CLOSED", false),
+		ModerationFailClosed:           getEnvBool("MODERATION_FAIL_CLOSED", true),
 	}
 
 	cfg.RunMigrationsOnStart = getEnvBool("RUN_MIGRATIONS_ON_START", cfg.Environment != "production")
@@ -87,6 +87,12 @@ func Load() (Config, error) {
 	}
 	if cfg.Environment == "production" && cfg.SMSProvider == "dev" {
 		return Config{}, fmt.Errorf("SMS_PROVIDER=dev is not allowed in production")
+	}
+	if cfg.Environment == "production" && cfg.TestAuthEnabled {
+		return Config{}, fmt.Errorf("TEST_AUTH_ENABLED=true is not allowed in production")
+	}
+	if cfg.Environment == "production" && !cfg.ModerationFailClosed {
+		return Config{}, fmt.Errorf("MODERATION_FAIL_CLOSED=false is not allowed in production")
 	}
 
 	return cfg, nil
