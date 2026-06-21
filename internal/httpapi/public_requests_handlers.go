@@ -22,6 +22,11 @@ func (s *Server) createPublicRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.hub.BroadcastGroup(groupID, realtime.Event{Type: "public_request.created", GroupID: groupID, Payload: request})
+	if memberIDs, err := s.svc.ListGroupMemberIDsExcept(r.Context(), groupID, currentUser(r).ID); err == nil {
+		for _, memberID := range memberIDs {
+			s.hub.NotifyUser(memberID, realtime.Event{Type: "public_request.created", GroupID: groupID, Payload: request})
+		}
+	}
 	writeJSON(w, http.StatusCreated, request)
 }
 
@@ -132,4 +137,14 @@ func (s *Server) broadcastPublicRequestRefresh(r *http.Request, requestID string
 		return
 	}
 	s.hub.BroadcastGroup(ctx.GroupID, realtime.Event{Type: eventType, GroupID: ctx.GroupID, Payload: payload})
+}
+
+func (s *Server) markPublicRequestsRead(w http.ResponseWriter, r *http.Request) {
+	groupID := chi.URLParam(r, "groupID")
+	if err := s.svc.MarkPublicRequestsRead(r.Context(), currentUser(r).ID, groupID); err != nil {
+		s.writeError(w, err)
+		return
+	}
+	s.hub.NotifyUser(currentUser(r).ID, realtime.Event{Type: "public_request.read", GroupID: groupID, Payload: map[string]string{"group_id": groupID}})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }

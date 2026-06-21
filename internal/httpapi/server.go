@@ -97,6 +97,7 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 		r.Get("/api/groups/{groupID}/ws", server.groupWebSocket)
 		r.Post("/api/groups/{groupID}/requests", server.createPublicRequest)
 		r.Get("/api/groups/{groupID}/requests", server.listPublicRequests)
+		r.Post("/api/groups/{groupID}/requests/read", server.markPublicRequestsRead)
 		r.Get("/api/groups/{groupID}/statistics", server.groupStatistics)
 		r.Get("/api/invites", server.listInvites)
 		r.Post("/api/invites/{inviteID}/accept", server.acceptInvite)

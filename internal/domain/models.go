@@ -35,15 +35,16 @@ type User struct {
 }
 
 type Group struct {
-	ID          string          `json:"id"`
-	Title       string          `json:"title"`
-	Description string          `json:"description"`
-	Visibility  GroupVisibility `json:"visibility"`
-	OwnerID     string          `json:"owner_id"`
-	InviteCode  string          `json:"invite_code,omitempty"`
-	CreatedAt   time.Time       `json:"created_at"`
-	MemberCount int             `json:"member_count"`
-	MyRole      *GroupRole      `json:"my_role,omitempty"`
+	ID                       string          `json:"id"`
+	Title                    string          `json:"title"`
+	Description              string          `json:"description"`
+	Visibility               GroupVisibility `json:"visibility"`
+	OwnerID                  string          `json:"owner_id"`
+	InviteCode               string          `json:"invite_code,omitempty"`
+	CreatedAt                time.Time       `json:"created_at"`
+	MemberCount              int             `json:"member_count"`
+	UnreadPublicRequestCount int             `json:"unread_public_request_count"`
+	MyRole                   *GroupRole      `json:"my_role,omitempty"`
 }
 
 type MediaType string

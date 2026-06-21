@@ -57,3 +57,11 @@ func (s *Service) RemoveMember(ctx context.Context, actorID, groupID, targetUser
 	s.RecordEvent(ctx, actorID, eventType, "group", groupID)
 	return nil
 }
+
+func (s *Service) ListGroupMemberIDsExcept(ctx context.Context, groupID, excludeUserID string) ([]string, error) {
+	groupID = strings.TrimSpace(groupID)
+	if groupID == "" {
+		return nil, NewValidationError("group_id is required")
+	}
+	return s.repo.ListGroupMemberIDsExcept(ctx, groupID, excludeUserID)
+}

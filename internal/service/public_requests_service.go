@@ -126,6 +126,14 @@ func (s *Service) createPublicRequest(ctx context.Context, authorID, groupID str
 	return request, nil
 }
 
+func (s *Service) MarkPublicRequestsRead(ctx context.Context, userID, groupID string) error {
+	groupID = strings.TrimSpace(groupID)
+	if groupID == "" {
+		return NewValidationError("group_id is required")
+	}
+	return s.repo.MarkPublicRequestsRead(ctx, groupID, userID)
+}
+
 func (s *Service) ListPublicRequests(ctx context.Context, viewerID, groupID string, limit int, before time.Time, mineOnly bool) ([]domain.PublicRequest, error) {
 	groupID = strings.TrimSpace(groupID)
 	if groupID == "" {

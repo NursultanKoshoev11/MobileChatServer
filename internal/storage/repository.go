@@ -91,10 +91,15 @@ func (r *Repository) GetUserByID(ctx context.Context, userID string) (domain.Use
 func (r *Repository) ListUserGroups(ctx context.Context, userID string) ([]domain.Group, error) {
 	query := `
 		SELECT g.id, g.title, g.description, g.visibility, g.owner_id, COALESCE(g.invite_code, '') AS invite_code, g.created_at,
-		       COUNT(gm_all.user_id)::int AS member_count, gm.role
+		       COUNT(DISTINCT gm_all.user_id)::int AS member_count, gm.role,
+		       COUNT(DISTINCT pr.id)::int AS unread_public_request_count
 		FROM groups g
 		JOIN group_members gm ON gm.group_id = g.id AND gm.user_id = $1
 		LEFT JOIN group_members gm_all ON gm_all.group_id = g.id
+		LEFT JOIN public_request_reads prr ON prr.group_id = g.id AND prr.user_id = $1
+		LEFT JOIN public_requests pr ON pr.group_id = g.id
+		  AND pr.author_id <> $1
+		  AND pr.created_at > COALESCE(prr.last_read_at, 'epoch'::timestamptz)
 		GROUP BY g.id, gm.role
 		ORDER BY g.created_at DESC`
 	rows, err := r.db.Query(ctx, query, userID)
@@ -107,7 +112,7 @@ func (r *Repository) ListUserGroups(ctx context.Context, userID string) ([]domai
 	for rows.Next() {
 		var group domain.Group
 		var role domain.GroupRole
-		if err := rows.Scan(&group.ID, &group.Title, &group.Description, &group.Visibility, &group.OwnerID, &group.InviteCode, &group.CreatedAt, &group.MemberCount, &role); err != nil {
+		if err := rows.Scan(&group.ID, &group.Title, &group.Description, &group.Visibility, &group.OwnerID, &group.InviteCode, &group.CreatedAt, &group.MemberCount, &role, &group.UnreadPublicRequestCount); err != nil {
 			return nil, fmt.Errorf("scan user group: %w", err)
 		}
 		group.MyRole = &role

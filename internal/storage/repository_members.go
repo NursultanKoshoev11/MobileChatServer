@@ -95,3 +95,23 @@ func (r *Repository) RemoveGroupMember(ctx context.Context, groupID, actorID, ta
 	}
 	return nil
 }
+
+func (r *Repository) ListGroupMemberIDsExcept(ctx context.Context, groupID, excludeUserID string) ([]string, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT user_id
+		FROM group_members
+		WHERE group_id = $1 AND user_id <> $2`, groupID, excludeUserID)
+	if err != nil {
+		return nil, fmt.Errorf("list group member ids: %w", err)
+	}
+	defer rows.Close()
+	ids := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan group member id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}

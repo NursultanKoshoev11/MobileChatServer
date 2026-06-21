@@ -318,3 +318,22 @@ func (r *Repository) publicRequestInteractionMode(ctx context.Context, requestID
 	}
 	return mode, nil
 }
+
+func (r *Repository) MarkPublicRequestsRead(ctx context.Context, groupID, userID string) error {
+	isMember, err := r.IsGroupMember(ctx, groupID, userID)
+	if err != nil {
+		return err
+	}
+	if !isMember {
+		return ErrForbidden
+	}
+	_, err = r.db.Exec(ctx, `
+		INSERT INTO public_request_reads (group_id, user_id, last_read_at)
+		VALUES ($1, $2, now())
+		ON CONFLICT (group_id, user_id)
+		DO UPDATE SET last_read_at = EXCLUDED.last_read_at`, groupID, userID)
+	if err != nil {
+		return fmt.Errorf("mark public requests read: %w", err)
+	}
+	return nil
+}
