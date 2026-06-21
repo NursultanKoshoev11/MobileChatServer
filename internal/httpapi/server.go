@@ -32,6 +32,7 @@ type Server struct {
 	hub            *realtime.Hub
 	limiter        *RateLimiter
 	strictLimiter  *RateLimiter
+	router         http.Handler
 	upgrader       websocket.Upgrader
 }
 
@@ -63,6 +64,7 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 	r.Use(server.rateLimit)
 
 	r.Get("/api/health", server.health)
+	r.Get("/api/health/ws", server.websocketHealth)
 
 	r.Route("/api/auth", func(r chi.Router) {
 		r.Post("/request-code", server.requestPhoneCode)
@@ -124,11 +126,24 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 		r.Post("/api/admin/group-creation-requests/{requestID}/need-more-info", server.needMoreInfoForGroupCreationRequest)
 	})
 
-	return r
+	server.router = r
+	return server
+}
+
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.router.ServeHTTP(w, r)
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) websocketHealth(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "clients": s.hub.ClientCount()})
+}
+
+func (s *Server) DrainWebSockets(timeout time.Duration) {
+	s.hub.Drain(timeout)
 }
 
 func (s *Server) requestPhoneCode(w http.ResponseWriter, r *http.Request) {

@@ -15,6 +15,9 @@ const (
 	pongWait       = 60 * time.Second
 	pingPeriod     = (pongWait * 9) / 10
 	maxMessageSize = 4096
+	sendBufferSize = 256
+	deliveryWait   = 250 * time.Millisecond
+	websocketDrain = 30 * time.Second
 )
 
 type Event struct {
@@ -86,11 +89,7 @@ func (h *Hub) BroadcastGroup(groupID string, event Event) {
 	}
 	h.mu.RUnlock()
 	for _, client := range clients {
-		select {
-		case client.Send <- event:
-		default:
-			h.Unregister(client)
-		}
+		h.deliver(client, event)
 	}
 }
 
@@ -102,12 +101,73 @@ func (h *Hub) NotifyUser(userID string, event Event) {
 	}
 	h.mu.RUnlock()
 	for _, client := range clients {
-		select {
-		case client.Send <- event:
-		default:
-			h.Unregister(client)
+		h.deliver(client, event)
+	}
+}
+
+func (h *Hub) deliver(client *Client, event Event) {
+	select {
+	case client.Send <- event:
+		return
+	case <-time.After(deliveryWait):
+		h.logger.Printf("websocket delivery timeout type=%s group_id=%s user_id=%s queued=%d", event.Type, client.GroupID, client.UserID, len(client.Send))
+		h.Unregister(client)
+	}
+}
+
+func (h *Hub) Drain(timeout time.Duration) {
+	if timeout <= 0 {
+		timeout = websocketDrain
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		if h.ClientCount() == 0 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	h.CloseAll()
+}
+
+func (h *Hub) CloseAll() {
+	h.mu.Lock()
+	clients := make([]*Client, 0)
+	for _, groupClients := range h.groups {
+		for client := range groupClients {
+			clients = append(clients, client)
 		}
 	}
+	for _, userClients := range h.users {
+		for client := range userClients {
+			clients = append(clients, client)
+		}
+	}
+	h.mu.Unlock()
+	seen := map[*Client]bool{}
+	for _, client := range clients {
+		if seen[client] {
+			continue
+		}
+		seen[client] = true
+		h.Unregister(client)
+	}
+}
+
+func (h *Hub) ClientCount() int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	seen := map[*Client]bool{}
+	for _, groupClients := range h.groups {
+		for client := range groupClients {
+			seen[client] = true
+		}
+	}
+	for _, userClients := range h.users {
+		for client := range userClients {
+			seen[client] = true
+		}
+	}
+	return len(seen)
 }
 
 type Client struct {
@@ -119,7 +179,7 @@ type Client struct {
 }
 
 func NewClient(hub *Hub, conn *websocket.Conn, user domain.User, groupID string) *Client {
-	return &Client{Hub: hub, Conn: conn, Send: make(chan Event, 32), UserID: user.ID, GroupID: groupID}
+	return &Client{Hub: hub, Conn: conn, Send: make(chan Event, sendBufferSize), UserID: user.ID, GroupID: groupID}
 }
 
 func (c *Client) ReadPump() {

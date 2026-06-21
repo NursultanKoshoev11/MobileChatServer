@@ -119,9 +119,12 @@ func main() {
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
 
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 35*time.Second)
 	defer shutdownCancel()
 	logger.Println("shutdown started")
+	if drainable, ok := handler.(interface{ DrainWebSockets(time.Duration) }); ok {
+		drainable.DrainWebSockets(30 * time.Second)
+	}
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		logger.Printf("graceful shutdown failed: %v", err)
 		if closeErr := server.Close(); closeErr != nil {
