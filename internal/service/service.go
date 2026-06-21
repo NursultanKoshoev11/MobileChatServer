@@ -94,11 +94,7 @@ func (s *Service) Register(ctx context.Context, input RegisterInput) (domain.Ses
 		return domain.Session{}, fmt.Errorf("hash password: %w", err)
 	}
 
-	user := domain.User{
-		ID:          "U-" + strings.ToUpper(randomHex(8)),
-		Email:       email,
-		DisplayName: displayName,
-	}
+	user := domain.User{ID: "U-" + strings.ToUpper(randomHex(8)), Email: email, DisplayName: displayName}
 	user, err = s.repo.CreateUser(ctx, user, hash)
 	if err != nil {
 		return domain.Session{}, err
@@ -143,11 +139,14 @@ func (s *Service) RefreshSession(ctx context.Context, input RefreshInput) (domai
 	if err != nil {
 		return domain.Session{}, err
 	}
-	accessToken, err := security.SignAccessToken(user.ID, s.cfg.JWTSecret, s.cfg.AccessTokenTTL)
+	newSession, err := s.issueSession(ctx, user)
 	if err != nil {
 		return domain.Session{}, err
 	}
-	return domain.Session{AccessToken: accessToken, RefreshToken: refreshToken, User: user}, nil
+	if err := s.repo.RevokeRefreshSession(ctx, record.ID); err != nil {
+		return domain.Session{}, err
+	}
+	return newSession, nil
 }
 
 func (s *Service) Authenticate(ctx context.Context, token string) (domain.User, error) {
@@ -166,23 +165,7 @@ func (s *Service) Authenticate(ctx context.Context, token string) (domain.User, 
 }
 
 func (s *Service) ListUserGroups(ctx context.Context, userID string) ([]domain.Group, error) {
-	groups, err := s.repo.ListUserGroups(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	for index := range groups {
-		if strings.TrimSpace(groups[index].InviteCode) != "" {
-			continue
-		}
-		group, err := s.EnsureGroupInviteCode(ctx, userID, groups[index].ID)
-		if err != nil {
-			return nil, err
-		}
-		groups[index].InviteCode = group.InviteCode
-		groups[index].MemberCount = group.MemberCount
-		groups[index].MyRole = group.MyRole
-	}
-	return groups, nil
+	return s.repo.ListUserGroups(ctx, userID)
 }
 
 func (s *Service) SearchPublicGroups(ctx context.Context, query string) ([]domain.Group, error) {
@@ -201,14 +184,7 @@ func (s *Service) CreateGroup(ctx context.Context, ownerID string, input CreateG
 	if input.Visibility != domain.VisibilityPublic && input.Visibility != domain.VisibilityPrivate {
 		return domain.Group{}, NewValidationError("visibility must be public or private")
 	}
-	group := domain.Group{
-		ID:          "G-" + strings.ToUpper(randomHex(8)),
-		Title:       title,
-		Description: description,
-		Visibility:  input.Visibility,
-		OwnerID:     ownerID,
-		InviteCode:  randomInviteCode(),
-	}
+	group := domain.Group{ID: "G-" + strings.ToUpper(randomHex(8)), Title: title, Description: description, Visibility: input.Visibility, OwnerID: ownerID, InviteCode: randomInviteCode()}
 	return s.repo.CreateGroup(ctx, group)
 }
 
@@ -310,12 +286,8 @@ func (s *Service) createMessage(ctx context.Context, senderID, groupID string, i
 	if groupID == "" {
 		return domain.Message{}, NewValidationError("group_id is required")
 	}
-	role, err := s.repo.GetMemberRole(ctx, groupID, senderID)
-	if err != nil {
+	if _, err := s.repo.GetMemberRole(ctx, groupID, senderID); err != nil {
 		return domain.Message{}, err
-	}
-	if role != domain.RoleOwner && role != domain.RoleAdmin {
-		return domain.Message{}, storage.ErrForbidden
 	}
 	if text == "" {
 		return domain.Message{}, NewValidationError("text is required")
@@ -324,21 +296,11 @@ func (s *Service) createMessage(ctx context.Context, senderID, groupID string, i
 		return domain.Message{}, NewValidationError(fmt.Sprintf("text must be at most %d characters", maxMessageLen))
 	}
 	if runModeration {
-		if err := s.moderateContent(ctx, domain.ContentModerationItem{
-			GroupID:     groupID,
-			ContentType: domain.ContentTypeGroupMessage,
-			AuthorID:    senderID,
-			Body:        text,
-		}); err != nil {
+		if err := s.moderateContent(ctx, domain.ContentModerationItem{GroupID: groupID, ContentType: domain.ContentTypeGroupMessage, AuthorID: senderID, Body: text}); err != nil {
 			return domain.Message{}, err
 		}
 	}
-	message := domain.Message{
-		ID:       "M-" + strings.ToUpper(randomHex(12)),
-		GroupID:  groupID,
-		SenderID: senderID,
-		Text:     text,
-	}
+	message := domain.Message{ID: "M-" + strings.ToUpper(randomHex(12)), GroupID: groupID, SenderID: senderID, Text: text}
 	return s.repo.CreateMessage(ctx, message)
 }
 
@@ -358,9 +320,7 @@ func (s *Service) issueSession(ctx context.Context, user domain.User) (domain.Se
 	return domain.Session{AccessToken: accessToken, RefreshToken: refreshToken, User: user}, nil
 }
 
-func normalizeEmail(email string) string {
-	return strings.ToLower(strings.TrimSpace(email))
-}
+func normalizeEmail(email string) string { return strings.ToLower(strings.TrimSpace(email)) }
 
 func normalizePhone(phone string) string {
 	phone = strings.TrimSpace(phone)
@@ -445,17 +405,9 @@ func randomChars(alphabet string, count int) string {
 	return builder.String()
 }
 
-type ValidationError struct {
-	Message string
-}
-
-func (e ValidationError) Error() string {
-	return e.Message
-}
-
-func NewValidationError(message string) ValidationError {
-	return ValidationError{Message: message}
-}
+type ValidationError struct{ Message string }
+func (e ValidationError) Error() string { return e.Message }
+func NewValidationError(message string) ValidationError { return ValidationError{Message: message} }
 
 var (
 	ErrUnauthorized       = errors.New("unauthorized")
