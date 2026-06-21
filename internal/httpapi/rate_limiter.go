@@ -63,17 +63,28 @@ func (l *RateLimiter) cleanupLoop() {
 }
 
 func clientIP(r *http.Request) string {
-	forwarded := r.Header.Get("X-Forwarded-For")
-	if forwarded != "" {
+	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
 		parts := strings.Split(forwarded, ",")
-		return strings.TrimSpace(parts[0])
+		for i := len(parts) - 1; i >= 0; i-- {
+			candidate := strings.TrimSpace(parts[i])
+			if candidate == "" {
+				continue
+			}
+			if ip := net.ParseIP(candidate); ip != nil {
+				return ip.String()
+			}
+		}
 	}
-	realIP := r.Header.Get("X-Real-IP")
-	if realIP != "" {
-		return strings.TrimSpace(realIP)
+	if realIP := strings.TrimSpace(r.Header.Get("X-Real-IP")); realIP != "" {
+		if ip := net.ParseIP(realIP); ip != nil {
+			return ip.String()
+		}
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err == nil {
+		if ip := net.ParseIP(host); ip != nil {
+			return ip.String()
+		}
 		return host
 	}
 	return r.RemoteAddr
