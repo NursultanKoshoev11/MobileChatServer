@@ -77,7 +77,7 @@ func Load() (Config, error) {
 
 	cfg.RunMigrationsOnStart = getEnvBool("RUN_MIGRATIONS_ON_START", cfg.Environment != "production")
 
-	accessTokenTTLMinutes := getEnvInt("ACCESS_TOKEN_TTL_MINUTES", 60)
+	accessTokenTTLMinutes := getEnvInt("ACCESS_TOKEN_TTL_MINUTES", 5)
 	cfg.AccessTokenTTL = time.Duration(accessTokenTTLMinutes) * time.Minute
 
 	if cfg.DatabaseURL == "" {
@@ -103,6 +103,9 @@ func Load() (Config, error) {
 	}
 	if cfg.Environment == "production" && cfg.BackendInstanceCount > 1 && cfg.RealtimeBroker == "local" {
 		return Config{}, fmt.Errorf("REALTIME_BROKER=local is not allowed with multiple backend instances in production")
+	}
+	if cfg.Environment == "production" && cfg.AccessTokenTTL > 15*time.Minute {
+		return Config{}, fmt.Errorf("ACCESS_TOKEN_TTL_MINUTES must be 15 or less in production")
 	}
 
 	return cfg, nil
