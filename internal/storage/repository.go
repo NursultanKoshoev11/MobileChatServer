@@ -25,6 +25,10 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 	return &Repository{db: db}
 }
 
+func (r *Repository) Ping(ctx context.Context) error {
+	return r.db.Ping(ctx)
+}
+
 func (r *Repository) CreateUser(ctx context.Context, user domain.User, passwordHash string) (domain.User, error) {
 	if user.Role == "" {
 		user.Role = domain.UserRoleUser
@@ -316,7 +320,7 @@ func (r *Repository) ListMessages(ctx context.Context, groupID, userID string, l
 		SELECT m.id, m.group_id, m.sender_id, u.display_name, m.text, m.created_at
 		FROM messages m
 		JOIN users u ON u.id = m.sender_id
-		WHERE m.group_id = $1 AND ($2::timestamptz IS NULL OR m.created_at < $2)
+		WHERE m.group_id = $1 AND m.deleted_at IS NULL AND ($2::timestamptz IS NULL OR m.created_at < $2)
 		ORDER BY m.created_at DESC
 		LIMIT $3`
 	var beforePtr *time.Time

@@ -83,6 +83,7 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 		r.Get("/api/groups", server.listGroups)
 		r.Post("/api/groups", server.createGroup)
 		r.Get("/api/groups/search", server.searchGroups)
+		r.Get("/api/users/search", server.searchUsers)
 		r.Post("/api/groups/join-by-code", server.joinByCode)
 		r.Post("/api/groups/{groupID}/join", server.joinPublicGroup)
 		r.Post("/api/groups/{groupID}/invite-code", server.ensureGroupInviteCode)
@@ -98,6 +99,8 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 		r.Post("/api/groups/{groupID}/invite-user", server.inviteUser)
 		r.Get("/api/groups/{groupID}/messages", server.listMessages)
 		r.Post("/api/groups/{groupID}/messages", server.sendMessage)
+		r.Patch("/api/groups/{groupID}/messages/{messageID}", server.updateMessage)
+		r.Delete("/api/groups/{groupID}/messages/{messageID}", server.deleteMessage)
 		r.Get("/api/groups/{groupID}/ws", server.groupWebSocket)
 		r.Post("/api/groups/{groupID}/requests", server.createPublicRequest)
 		r.Get("/api/groups/{groupID}/requests", server.listPublicRequests)
@@ -135,7 +138,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	if err := s.svc.HealthCheck(ctx); err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "error", "database": "unavailable"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "database": "ok"})
 }
 
 func (s *Server) websocketHealth(w http.ResponseWriter, r *http.Request) {
@@ -264,7 +273,19 @@ func (s *Server) ensureGroupInviteCode(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listGroupMembers(w http.ResponseWriter, r *http.Request) {
-	members, err := s.svc.ListGroupMembers(r.Context(), currentUser(r).ID, chi.URLParam(r, "groupID"))
+	limit := 100
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			limit = parsed
+		}
+	}
+	offset := 0
+	if raw := r.URL.Query().Get("offset"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			offset = parsed
+		}
+	}
+	members, err := s.svc.ListGroupMembersPage(r.Context(), currentUser(r).ID, chi.URLParam(r, "groupID"), limit, offset)
 	if err != nil {
 		s.writeError(w, err)
 		return
@@ -424,8 +445,28 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, err)
 		return
 	}
-	s.hub.BroadcastGroup(groupID, realtime.Event{Type: "message.created", GroupID: groupID, Payload: message})
+	s.broadcastGroupAndUsers(r, groupID, realtime.Event{Type: "message.created", GroupID: groupID, Payload: message})
 	writeJSON(w, http.StatusCreated, message)
+}
+
+func (s *Server) broadcastGroupAndUsers(r *http.Request, groupID string, event realtime.Event) {
+	groupID = strings.TrimSpace(groupID)
+	if groupID == "" {
+		return
+	}
+	if event.GroupID == "" {
+		event.GroupID = groupID
+	}
+	s.hub.BroadcastGroup(groupID, event)
+	actorID := currentUser(r).ID
+	memberIDs, err := s.svc.ListGroupMemberIDsExcept(r.Context(), groupID, actorID)
+	if err != nil {
+		s.logger.Printf("realtime user broadcast skipped group_id=%s type=%s error=%v", groupID, event.Type, err)
+		return
+	}
+	for _, memberID := range memberIDs {
+		s.hub.NotifyUser(memberID, event)
+	}
 }
 
 func firstNonEmpty(values ...string) string {
@@ -560,7 +601,7 @@ func (s *Server) cors(next http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
 		}
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID")
 		w.Header().Set("Access-Control-Expose-Headers", "X-Request-ID")
 		if r.Method == http.MethodOptions {
@@ -623,6 +664,7 @@ func (s *Server) writeError(w http.ResponseWriter, err error) {
 		return
 	}
 	var validation service.ValidationError
+	var unavailable service.ServiceUnavailableError
 	var pending service.ContentModerationPendingError
 	switch {
 	case errors.As(err, &pending):
@@ -632,6 +674,8 @@ func (s *Server) writeError(w http.ResponseWriter, err error) {
 		writeJSON(w, http.StatusAccepted, map[string]any{"status": "pending_review", "moderation_item": pending.Item})
 	case errors.As(err, &validation):
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": validation.Error()})
+	case errors.As(err, &unavailable):
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": unavailable.Error()})
 	case errors.Is(err, service.ErrUnauthorized):
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 	case errors.Is(err, service.ErrInvalidCredentials):

@@ -15,20 +15,7 @@ type LearnedModerationRule struct {
 }
 
 func (r *Repository) ensureLearnedModerationRules(ctx context.Context) error {
-	query := `
-		CREATE TABLE IF NOT EXISTS learned_moderation_rules (
-			id bigserial PRIMARY KEY,
-			group_id text NOT NULL,
-			pattern text NOT NULL,
-			action text NOT NULL DEFAULT 'deny',
-			weight integer NOT NULL DEFAULT 1,
-			source_item_id text,
-			created_at timestamptz NOT NULL DEFAULT now(),
-			updated_at timestamptz NOT NULL DEFAULT now(),
-			UNIQUE(group_id, pattern)
-		)`
-	_, err := r.db.Exec(ctx, query)
-	return err
+	return nil
 }
 
 func (r *Repository) UpsertLearnedModerationRule(ctx context.Context, rule LearnedModerationRule) error {

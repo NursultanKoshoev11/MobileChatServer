@@ -100,12 +100,21 @@ func (s *Service) ApproveGroupCreationRequest(ctx context.Context, admin domain.
 		OwnerID:     request.RequesterID,
 		InviteCode:  randomInviteCode(),
 	}
-	approved, err := s.repo.ApproveGroupCreationRequest(ctx, requestID, admin.ID, strings.TrimSpace(input.AdminComment), group)
-	if err != nil {
-		return domain.GroupCreationRequest{}, err
+	var approved domain.GroupCreationRequest
+	var lastErr error
+	for attempt := 0; attempt < 8; attempt++ {
+		group.InviteCode = randomInviteCode()
+		approved, err = s.repo.ApproveGroupCreationRequest(ctx, requestID, admin.ID, strings.TrimSpace(input.AdminComment), group)
+		if err == nil {
+			s.RecordEvent(ctx, admin.ID, "group_creation_request_approved", "group_creation_request", approved.ID)
+			return approved, nil
+		}
+		lastErr = err
+		if !strings.Contains(strings.ToLower(err.Error()), "duplicate") {
+			return domain.GroupCreationRequest{}, err
+		}
 	}
-	s.RecordEvent(ctx, admin.ID, "group_creation_request_approved", "group_creation_request", approved.ID)
-	return approved, nil
+	return domain.GroupCreationRequest{}, fmt.Errorf("generate group invite code: %w", lastErr)
 }
 
 func (s *Service) RejectGroupCreationRequest(ctx context.Context, admin domain.User, requestID string, input ReviewGroupCreationRequestInput) (domain.GroupCreationRequest, error) {

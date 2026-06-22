@@ -89,7 +89,7 @@ func (h *Hub) Unregister(client *Client) {
 		if clients := h.groups[client.GroupID]; clients != nil {
 			if clients[client] {
 				delete(clients, client)
-				close(client.Send)
+				client.closeSend()
 				closed = true
 			}
 			if len(clients) == 0 {
@@ -101,7 +101,7 @@ func (h *Hub) Unregister(client *Client) {
 		if clients[client] {
 			delete(clients, client)
 			if !closed {
-				close(client.Send)
+				client.closeSend()
 			}
 		}
 		if len(clients) == 0 {
@@ -144,13 +144,11 @@ func (h *Hub) NotifyUser(userID string, event Event) {
 
 func (h *Hub) deliver(client *Client, event Event) {
 	event = h.prepareEvent(event)
-	select {
-	case client.Send <- event:
+	if client.sendEvent(event) {
 		return
-	case <-time.After(deliveryWait):
-		h.logger.Printf("websocket delivery timeout type=%s group_id=%s user_id=%s queued=%d", event.Type, client.GroupID, client.UserID, len(client.Send))
-		h.Unregister(client)
 	}
+	h.logger.Printf("websocket delivery dropped type=%s group_id=%s user_id=%s queued=%d", event.Type, client.GroupID, client.UserID, len(client.Send))
+	h.Unregister(client)
 }
 
 func (h *Hub) Drain(timeout time.Duration) {
@@ -231,12 +229,39 @@ type Client struct {
 	GroupID  string
 	RemoteIP string
 
+	sendMu     sync.RWMutex
+	sendClosed bool
+
 	readWindowStart time.Time
 	readCount       int
 }
 
 func NewClient(hub *Hub, conn *websocket.Conn, user domain.User, groupID string, remoteIP string) *Client {
 	return &Client{Hub: hub, Conn: conn, Send: make(chan Event, sendBufferSize), UserID: user.ID, GroupID: groupID, RemoteIP: remoteIP}
+}
+
+func (c *Client) sendEvent(event Event) bool {
+	c.sendMu.RLock()
+	defer c.sendMu.RUnlock()
+	if c.sendClosed {
+		return false
+	}
+	select {
+	case c.Send <- event:
+		return true
+	default:
+		return false
+	}
+}
+
+func (c *Client) closeSend() {
+	c.sendMu.Lock()
+	defer c.sendMu.Unlock()
+	if c.sendClosed {
+		return
+	}
+	close(c.Send)
+	c.sendClosed = true
 }
 
 func (c *Client) ReadPump() {

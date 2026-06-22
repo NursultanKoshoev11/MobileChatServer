@@ -136,7 +136,7 @@ func (s *Server) broadcastPublicRequestRefresh(r *http.Request, requestID string
 	if err != nil || ctx.GroupID == "" {
 		return
 	}
-	s.hub.BroadcastGroup(ctx.GroupID, realtime.Event{Type: eventType, GroupID: ctx.GroupID, Payload: payload})
+	s.broadcastGroupAndUsers(r, ctx.GroupID, realtime.Event{Type: eventType, GroupID: ctx.GroupID, Payload: payload})
 }
 
 func (s *Server) markPublicRequestsRead(w http.ResponseWriter, r *http.Request) {

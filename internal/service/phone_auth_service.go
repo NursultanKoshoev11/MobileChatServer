@@ -75,6 +75,9 @@ func (s *PhoneAuthService) RequestCode(ctx context.Context, input RequestPhoneCo
 		return RequestPhoneCodeOutput{}, fmt.Errorf("sms sender is not configured")
 	}
 	if err := s.sender.SendVerificationCode(ctx, mobile, code); err != nil {
+		if errors.Is(err, sms.ErrDisabled) {
+			return RequestPhoneCodeOutput{}, NewServiceUnavailableError("sms verification is temporarily unavailable")
+		}
 		return RequestPhoneCodeOutput{}, err
 	}
 	return RequestPhoneCodeOutput{Status: "code_sent", AccountExists: accountExists}, nil
