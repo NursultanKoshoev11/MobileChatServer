@@ -38,6 +38,8 @@ type Config struct {
 	OpenAIModerationModel          string
 	OpenAIModerationEndpoint       string
 	ModerationFailClosed           bool
+	RealtimeBroker                 string
+	BackendInstanceCount           int
 }
 
 func Load() (Config, error) {
@@ -69,6 +71,8 @@ func Load() (Config, error) {
 		OpenAIModerationModel:          getEnv("OPENAI_MODERATION_MODEL", "omni-moderation-latest"),
 		OpenAIModerationEndpoint:       getEnv("OPENAI_MODERATION_ENDPOINT", "https://api.openai.com/v1/moderations"),
 		ModerationFailClosed:           getEnvBool("MODERATION_FAIL_CLOSED", true),
+		RealtimeBroker:                 getEnv("REALTIME_BROKER", "local"),
+		BackendInstanceCount:           getEnvInt("BACKEND_INSTANCE_COUNT", 1),
 	}
 
 	cfg.RunMigrationsOnStart = getEnvBool("RUN_MIGRATIONS_ON_START", cfg.Environment != "production")
@@ -85,14 +89,20 @@ func Load() (Config, error) {
 	if cfg.BCryptCost < 10 || cfg.BCryptCost > 15 {
 		return Config{}, fmt.Errorf("BCRYPT_COST must be between 10 and 15")
 	}
-	if cfg.Environment == "production" && cfg.SMSProvider == "dev" {
-		return Config{}, fmt.Errorf("SMS_PROVIDER=dev is not allowed in production")
+	if cfg.Environment == "production" && originListContainsWildcard(cfg.AllowedOrigins) {
+		return Config{}, fmt.Errorf("wildcard CORS origin is not allowed in production")
+	}
+	if cfg.Environment == "production" && (cfg.SMSProvider == "dev" || cfg.SMSProvider == "disabled") {
+		return Config{}, fmt.Errorf("development or disabled SMS provider is not allowed in production")
 	}
 	if cfg.Environment == "production" && cfg.TestAuthEnabled {
 		return Config{}, fmt.Errorf("TEST_AUTH_ENABLED=true is not allowed in production")
 	}
 	if cfg.Environment == "production" && !cfg.ModerationFailClosed {
 		return Config{}, fmt.Errorf("MODERATION_FAIL_CLOSED=false is not allowed in production")
+	}
+	if cfg.Environment == "production" && cfg.BackendInstanceCount > 1 && cfg.RealtimeBroker == "local" {
+		return Config{}, fmt.Errorf("REALTIME_BROKER=local is not allowed with multiple backend instances in production")
 	}
 
 	return cfg, nil
@@ -162,4 +172,13 @@ func getEnvList(key string) []string {
 		values = append(values, value)
 	}
 	return values
+}
+
+func originListContainsWildcard(raw string) bool {
+	for _, part := range strings.Split(raw, ",") {
+		if strings.TrimSpace(part) == "*" {
+			return true
+		}
+	}
+	return false
 }

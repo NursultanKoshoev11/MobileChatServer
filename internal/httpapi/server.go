@@ -441,6 +441,11 @@ func firstNonEmpty(values ...string) string {
 func (s *Server) groupWebSocket(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
 	groupID := chi.URLParam(r, "groupID")
+	remoteIP := clientIP(r)
+	if !s.strictLimiter.Allow("ws:" + remoteIP) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many websocket connection attempts"})
+		return
+	}
 	if _, err := s.svc.ListMessages(r.Context(), user.ID, groupID, 1, time.Time{}); err != nil {
 		s.writeError(w, err)
 		return
@@ -450,8 +455,12 @@ func (s *Server) groupWebSocket(w http.ResponseWriter, r *http.Request) {
 		s.logger.Printf("websocket upgrade failed: %v", err)
 		return
 	}
-	client := realtime.NewClient(s.hub, conn, user, groupID)
-	s.hub.Register(client)
+	client := realtime.NewClient(s.hub, conn, user, groupID, remoteIP)
+	if !s.hub.Register(client) {
+		_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseTryAgainLater, "connection limit reached"))
+		_ = conn.Close()
+		return
+	}
 	client.Send <- realtime.Event{Type: "connection.ready", GroupID: groupID, Payload: map[string]string{"user_id": user.ID}}
 	go client.WritePump()
 	go client.ReadPump()
@@ -459,13 +468,22 @@ func (s *Server) groupWebSocket(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) userWebSocket(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
+	remoteIP := clientIP(r)
+	if !s.strictLimiter.Allow("ws:" + remoteIP) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many websocket connection attempts"})
+		return
+	}
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		s.logger.Printf("user websocket upgrade failed: %v", err)
 		return
 	}
-	client := realtime.NewClient(s.hub, conn, user, "")
-	s.hub.Register(client)
+	client := realtime.NewClient(s.hub, conn, user, "", remoteIP)
+	if !s.hub.Register(client) {
+		_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseTryAgainLater, "connection limit reached"))
+		_ = conn.Close()
+		return
+	}
 	client.Send <- realtime.Event{Type: "connection.ready", Payload: map[string]string{"user_id": user.ID}}
 	go client.WritePump()
 	go client.ReadPump()

@@ -47,7 +47,9 @@ func (s *Service) notifyGroupAboutNewPublicRequest(ctx context.Context, authorID
 			"request_id": requestID,
 		},
 	}
-	if err := s.notifier.SendToTokens(ctx, values, message); err != nil {
+	result, err := s.notifier.SendToTokens(ctx, values, message)
+	s.cleanupInvalidPushTokens(ctx, result.InvalidTokens)
+	if err != nil {
 		log.Printf("push public_request.created failed group_id=%s request_id=%s tokens=%d error=%v", groupID, requestID, len(values), err)
 	}
 }
@@ -80,7 +82,9 @@ func (s *Service) notifyGroupAboutNewPublicRequestComment(ctx context.Context, a
 			"request_id": requestID,
 		},
 	}
-	if err := s.notifier.SendToTokens(ctx, values, message); err != nil {
+	result, err := s.notifier.SendToTokens(ctx, values, message)
+	s.cleanupInvalidPushTokens(ctx, result.InvalidTokens)
+	if err != nil {
 		log.Printf("push public_request.comment_created failed group_id=%s request_id=%s tokens=%d error=%v", request.GroupID, requestID, len(values), err)
 	}
 }

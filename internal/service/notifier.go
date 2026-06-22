@@ -8,12 +8,16 @@ type PushMessage struct {
 	Data  map[string]string
 }
 
+type PushSendResult struct {
+	InvalidTokens []string
+}
+
 type Notifier interface {
-	SendToTokens(ctx context.Context, tokens []string, message PushMessage) error
+	SendToTokens(ctx context.Context, tokens []string, message PushMessage) (PushSendResult, error)
 }
 
 type NoopNotifier struct{}
 
-func (NoopNotifier) SendToTokens(ctx context.Context, tokens []string, message PushMessage) error {
-	return nil
+func (NoopNotifier) SendToTokens(ctx context.Context, tokens []string, message PushMessage) (PushSendResult, error) {
+	return PushSendResult{}, nil
 }

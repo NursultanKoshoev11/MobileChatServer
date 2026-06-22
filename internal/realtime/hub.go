@@ -2,8 +2,10 @@ package realtime
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/domain"
@@ -11,35 +13,55 @@ import (
 )
 
 const (
-	writeWait      = 10 * time.Second
-	pongWait       = 60 * time.Second
-	pingPeriod     = (pongWait * 9) / 10
-	maxMessageSize = 4096
-	sendBufferSize = 256
-	deliveryWait   = 250 * time.Millisecond
-	websocketDrain = 30 * time.Second
+	writeWait               = 10 * time.Second
+	pongWait                = 60 * time.Second
+	pingPeriod              = (pongWait * 9) / 10
+	maxMessageSize          = 4096
+	sendBufferSize          = 256
+	deliveryWait            = 250 * time.Millisecond
+	websocketDrain          = 30 * time.Second
+	maxTotalConnections     = 10000
+	maxConnectionsPerUser   = 20
+	maxConnectionsPerIP     = 50
+	maxClientMessagesMinute = 120
 )
 
 type Event struct {
+	ID      string `json:"id,omitempty"`
 	Type    string `json:"type"`
 	GroupID string `json:"group_id,omitempty"`
 	Payload any    `json:"payload,omitempty"`
+	SentAt  string `json:"sent_at,omitempty"`
 }
 
 type Hub struct {
-	logger *log.Logger
-	mu     sync.RWMutex
-	groups map[string]map[*Client]bool
-	users  map[string]map[*Client]bool
+	logger       *log.Logger
+	mu           sync.RWMutex
+	groups       map[string]map[*Client]bool
+	users        map[string]map[*Client]bool
+	remoteIPs    map[string]map[*Client]bool
+	eventCounter uint64
 }
 
 func NewHub(logger *log.Logger) *Hub {
-	return &Hub{logger: logger, groups: make(map[string]map[*Client]bool), users: make(map[string]map[*Client]bool)}
+	return &Hub{logger: logger, groups: make(map[string]map[*Client]bool), users: make(map[string]map[*Client]bool), remoteIPs: make(map[string]map[*Client]bool)}
 }
 
-func (h *Hub) Register(client *Client) {
+func (h *Hub) Register(client *Client) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.clientCountLocked() >= maxTotalConnections {
+		h.logger.Printf("websocket rejected: total connection limit reached user_id=%s remote_ip=%s", client.UserID, client.RemoteIP)
+		return false
+	}
+	if len(h.users[client.UserID]) >= maxConnectionsPerUser {
+		h.logger.Printf("websocket rejected: per-user connection limit reached user_id=%s remote_ip=%s", client.UserID, client.RemoteIP)
+		return false
+	}
+	if client.RemoteIP != "" && len(h.remoteIPs[client.RemoteIP]) >= maxConnectionsPerIP {
+		h.logger.Printf("websocket rejected: per-ip connection limit reached user_id=%s remote_ip=%s", client.UserID, client.RemoteIP)
+		return false
+	}
 	if client.GroupID != "" {
 		if h.groups[client.GroupID] == nil {
 			h.groups[client.GroupID] = make(map[*Client]bool)
@@ -50,6 +72,13 @@ func (h *Hub) Register(client *Client) {
 		h.users[client.UserID] = make(map[*Client]bool)
 	}
 	h.users[client.UserID][client] = true
+	if client.RemoteIP != "" {
+		if h.remoteIPs[client.RemoteIP] == nil {
+			h.remoteIPs[client.RemoteIP] = make(map[*Client]bool)
+		}
+		h.remoteIPs[client.RemoteIP][client] = true
+	}
+	return true
 }
 
 func (h *Hub) Unregister(client *Client) {
@@ -79,6 +108,14 @@ func (h *Hub) Unregister(client *Client) {
 			delete(h.users, client.UserID)
 		}
 	}
+	if client.RemoteIP != "" {
+		if clients := h.remoteIPs[client.RemoteIP]; clients != nil {
+			delete(clients, client)
+			if len(clients) == 0 {
+				delete(h.remoteIPs, client.RemoteIP)
+			}
+		}
+	}
 }
 
 func (h *Hub) BroadcastGroup(groupID string, event Event) {
@@ -106,6 +143,7 @@ func (h *Hub) NotifyUser(userID string, event Event) {
 }
 
 func (h *Hub) deliver(client *Client, event Event) {
+	event = h.prepareEvent(event)
 	select {
 	case client.Send <- event:
 		return
@@ -156,6 +194,10 @@ func (h *Hub) CloseAll() {
 func (h *Hub) ClientCount() int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
+	return h.clientCountLocked()
+}
+
+func (h *Hub) clientCountLocked() int {
 	seen := map[*Client]bool{}
 	for _, groupClients := range h.groups {
 		for client := range groupClients {
@@ -170,16 +212,31 @@ func (h *Hub) ClientCount() int {
 	return len(seen)
 }
 
-type Client struct {
-	Hub     *Hub
-	Conn    *websocket.Conn
-	Send    chan Event
-	UserID  string
-	GroupID string
+func (h *Hub) prepareEvent(event Event) Event {
+	if event.ID == "" {
+		seq := atomic.AddUint64(&h.eventCounter, 1)
+		event.ID = fmt.Sprintf("rt-%d-%d", time.Now().UnixNano(), seq)
+	}
+	if event.SentAt == "" {
+		event.SentAt = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	return event
 }
 
-func NewClient(hub *Hub, conn *websocket.Conn, user domain.User, groupID string) *Client {
-	return &Client{Hub: hub, Conn: conn, Send: make(chan Event, sendBufferSize), UserID: user.ID, GroupID: groupID}
+type Client struct {
+	Hub      *Hub
+	Conn     *websocket.Conn
+	Send     chan Event
+	UserID   string
+	GroupID  string
+	RemoteIP string
+
+	readWindowStart time.Time
+	readCount       int
+}
+
+func NewClient(hub *Hub, conn *websocket.Conn, user domain.User, groupID string, remoteIP string) *Client {
+	return &Client{Hub: hub, Conn: conn, Send: make(chan Event, sendBufferSize), UserID: user.ID, GroupID: groupID, RemoteIP: remoteIP}
 }
 
 func (c *Client) ReadPump() {
@@ -188,10 +245,43 @@ func (c *Client) ReadPump() {
 	_ = c.Conn.SetReadDeadline(time.Now().Add(pongWait))
 	c.Conn.SetPongHandler(func(string) error { _ = c.Conn.SetReadDeadline(time.Now().Add(pongWait)); return nil })
 	for {
-		_, _, err := c.Conn.ReadMessage()
+		_, payload, err := c.Conn.ReadMessage()
 		if err != nil {
 			break
 		}
+		if !c.allowClientMessage() {
+			c.Hub.logger.Printf("websocket client message rate limit user_id=%s remote_ip=%s", c.UserID, c.RemoteIP)
+			break
+		}
+		c.handleClientMessage(payload)
+	}
+}
+
+func (c *Client) allowClientMessage() bool {
+	now := time.Now()
+	if c.readWindowStart.IsZero() || now.Sub(c.readWindowStart) >= time.Minute {
+		c.readWindowStart = now
+		c.readCount = 1
+		return true
+	}
+	c.readCount++
+	return c.readCount <= maxClientMessagesMinute
+}
+
+func (c *Client) handleClientMessage(payload []byte) {
+	var message struct {
+		Type    string `json:"type"`
+		EventID string `json:"event_id"`
+		Reason  string `json:"reason"`
+	}
+	if err := json.Unmarshal(payload, &message); err != nil {
+		return
+	}
+	switch message.Type {
+	case "ack":
+		c.Hub.logger.Printf("websocket ack event_id=%s user_id=%s group_id=%s", message.EventID, c.UserID, c.GroupID)
+	case "nack":
+		c.Hub.logger.Printf("websocket nack event_id=%s user_id=%s group_id=%s reason=%s", message.EventID, c.UserID, c.GroupID, message.Reason)
 	}
 }
 

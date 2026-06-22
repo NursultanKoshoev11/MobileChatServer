@@ -61,3 +61,24 @@ func (r *Repository) ListGroupPushTokensExceptUser(ctx context.Context, groupID,
 	}
 	return tokens, rows.Err()
 }
+
+func (r *Repository) DeletePushTokensByValue(ctx context.Context, tokens []string) error {
+	cleaned := make([]string, 0, len(tokens))
+	seen := map[string]bool{}
+	for _, token := range tokens {
+		token = strings.TrimSpace(token)
+		if token == "" || seen[token] {
+			continue
+		}
+		seen[token] = true
+		cleaned = append(cleaned, token)
+	}
+	if len(cleaned) == 0 {
+		return nil
+	}
+	_, err := r.db.Exec(ctx, `DELETE FROM push_tokens WHERE token = ANY($1)`, cleaned)
+	if err != nil {
+		return fmt.Errorf("delete invalid push tokens: %w", err)
+	}
+	return nil
+}

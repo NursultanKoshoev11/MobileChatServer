@@ -39,13 +39,14 @@ func (n *FCMNotifier) Enabled() bool {
 	return strings.TrimSpace(n.ProjectID) != "" && strings.TrimSpace(n.ClientEmail) != "" && strings.TrimSpace(n.PrivateKey) != ""
 }
 
-func (n *FCMNotifier) SendToTokens(ctx context.Context, tokens []string, message service.PushMessage) error {
+func (n *FCMNotifier) SendToTokens(ctx context.Context, tokens []string, message service.PushMessage) (service.PushSendResult, error) {
+	result := service.PushSendResult{}
 	if !n.Enabled() || len(tokens) == 0 {
-		return nil
+		return result, nil
 	}
 	accessToken, err := n.getAccessToken(ctx)
 	if err != nil {
-		return err
+		return result, err
 	}
 	client := n.HTTPClient
 	if client == nil {
@@ -61,16 +62,40 @@ func (n *FCMNotifier) SendToTokens(ctx context.Context, tokens []string, message
 			continue
 		}
 		seen[token] = true
-		if err := n.sendOne(ctx, client, accessToken, token, message); err != nil {
-			failed++
-			lastErr = err
+		err := n.sendOneWithRetry(ctx, client, accessToken, token, message)
+		if err == nil {
 			continue
 		}
+		if isInvalidTokenError(err) {
+			result.InvalidTokens = append(result.InvalidTokens, token)
+			continue
+		}
+		failed++
+		lastErr = err
 	}
 	if failed > 0 {
-		return fmt.Errorf("fcm send failed for %d token(s): %w", failed, lastErr)
+		return result, fmt.Errorf("fcm send failed for %d token(s): %w", failed, lastErr)
 	}
-	return nil
+	return result, nil
+}
+
+func (n *FCMNotifier) sendOneWithRetry(ctx context.Context, client *http.Client, accessToken, token string, message service.PushMessage) error {
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Duration(150*(1<<attempt)) * time.Millisecond):
+			}
+		}
+		err := n.sendOne(ctx, client, accessToken, token, message)
+		if err == nil || isInvalidTokenError(err) || !isTransientFCMError(err) {
+			return err
+		}
+		lastErr = err
+	}
+	return lastErr
 }
 
 func (n *FCMNotifier) sendOne(ctx context.Context, client *http.Client, accessToken, token string, message service.PushMessage) error {
@@ -118,7 +143,33 @@ func (n *FCMNotifier) sendOne(ctx context.Context, client *http.Client, accessTo
 		return nil
 	}
 	text, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
-	return fmt.Errorf("fcm send failed: status=%d body=%s", res.StatusCode, string(text))
+	return fcmSendError{StatusCode: res.StatusCode, Body: string(text)}
+}
+
+type fcmSendError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e fcmSendError) Error() string {
+	return fmt.Sprintf("fcm send failed: status=%d body=%s", e.StatusCode, e.Body)
+}
+
+func isInvalidTokenError(err error) bool {
+	fcmErr, ok := err.(fcmSendError)
+	if !ok {
+		return false
+	}
+	body := strings.ToUpper(fcmErr.Body)
+	return strings.Contains(body, "UNREGISTERED") || strings.Contains(body, "INVALID_ARGUMENT") || strings.Contains(body, "SENDER_ID_MISMATCH") || strings.Contains(body, "THIRD_PARTY_AUTH_ERROR")
+}
+
+func isTransientFCMError(err error) bool {
+	fcmErr, ok := err.(fcmSendError)
+	if !ok {
+		return true
+	}
+	return fcmErr.StatusCode == http.StatusTooManyRequests || fcmErr.StatusCode >= 500
 }
 
 func (n *FCMNotifier) getAccessToken(ctx context.Context) (string, error) {

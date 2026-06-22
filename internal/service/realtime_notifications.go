@@ -25,7 +25,9 @@ func (s *Service) NotifyUsers(ctx context.Context, userIDs []string, message Pus
 	if len(values) == 0 {
 		return
 	}
-	if err := s.notifier.SendToTokens(ctx, values, message); err != nil {
+	result, err := s.notifier.SendToTokens(ctx, values, message)
+	s.cleanupInvalidPushTokens(ctx, result.InvalidTokens)
+	if err != nil {
 		log.Printf("push users notification failed users=%d tokens=%d error=%v", len(userIDs), len(values), err)
 	}
 }
@@ -94,4 +96,13 @@ func (s *Service) NotifyAdminsAboutContentModerationPending(ctx context.Context,
 			"queue_count": strconv.Itoa(count),
 		},
 	})
+}
+
+func (s *Service) cleanupInvalidPushTokens(ctx context.Context, tokens []string) {
+	if len(tokens) == 0 {
+		return
+	}
+	if err := s.repo.DeletePushTokensByValue(ctx, tokens); err != nil {
+		log.Printf("push invalid token cleanup failed tokens=%d error=%v", len(tokens), err)
+	}
 }
