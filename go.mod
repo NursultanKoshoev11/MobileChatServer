@@ -1,9 +1,9 @@
 module github.com/NursultanKoshoev11/MobileChatServer
 
-go 1.22
+go 1.23
 
 require (
-	github.com/go-chi/chi/v5 v5.1.0
+	github.com/go-chi/chi/v5 v5.3.0
 	github.com/golang-jwt/jwt/v5 v5.2.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/jackc/pgx/v5 v5.7.1
