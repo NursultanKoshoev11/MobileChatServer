@@ -1,0 +1,60 @@
+name: API Full Endpoint Coverage
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_base_url:
+        description: "Target API base URL"
+        required: true
+        default: "http://127.0.0.1:8080"
+      strict_full:
+        description: "Require all fixture-based endpoint checks"
+        required: false
+        default: "0"
+
+permissions:
+  contents: read
+
+jobs:
+  api-endpoint-coverage:
+    name: API endpoint coverage
+    runs-on: ubuntu-latest
+
+    env:
+      API_BASE_URL: ${{ inputs.api_base_url }}
+      API_STRICT_FULL: ${{ inputs.strict_full }}
+      API_TEST_PHONE: ${{ secrets.API_TEST_PHONE }}
+      API_TEST_CODE: ${{ secrets.API_TEST_CODE }}
+      API_TEST_DISPLAY_NAME: ${{ secrets.API_TEST_DISPLAY_NAME }}
+      API_TEST_GROUP_ID: ${{ secrets.API_TEST_GROUP_ID }}
+      API_TEST_TARGET_USER_ID: ${{ secrets.API_TEST_TARGET_USER_ID }}
+      API_TEST_TARGET_PHONE: ${{ secrets.API_TEST_TARGET_PHONE }}
+      API_TEST_INVITE_ID: ${{ secrets.API_TEST_INVITE_ID }}
+      API_TEST_REQUEST_ID: ${{ secrets.API_TEST_REQUEST_ID }}
+      API_TEST_COMMENT_ID: ${{ secrets.API_TEST_COMMENT_ID }}
+      API_TEST_MODERATION_ITEM_ID: ${{ secrets.API_TEST_MODERATION_ITEM_ID }}
+      API_TEST_ADMIN_GROUP_CREATION_REQUEST_ID: ${{ secrets.API_TEST_ADMIN_GROUP_CREATION_REQUEST_ID }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install API test dependencies
+        run: python -m pip install -r tests/api/requirements.txt
+
+      - name: Run endpoint coverage tests
+        run: python -m pytest tests/api -v --junitxml=api-endpoint-coverage.xml
+
+      - name: Upload endpoint coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: api-endpoint-coverage-report
+          path: api-endpoint-coverage.xml
+          if-no-files-found: error
+          retention-days: 14
