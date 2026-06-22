@@ -1,0 +1,336 @@
+{
+  "generated_from": "internal/httpapi/server.go",
+  "total_endpoints": 55,
+  "endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "auth": false,
+      "area": "health"
+    },
+    {
+      "method": "GET",
+      "path": "/api/health/ws",
+      "auth": false,
+      "area": "health"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/request-code",
+      "auth": false,
+      "area": "auth"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/verify-code",
+      "auth": false,
+      "area": "auth"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/refresh",
+      "auth": false,
+      "area": "auth"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/logout",
+      "auth": false,
+      "area": "auth"
+    },
+    {
+      "method": "GET",
+      "path": "/api/me",
+      "auth": true,
+      "area": "profile"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ws-token",
+      "auth": true,
+      "area": "websocket"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ws",
+      "auth": true,
+      "area": "websocket"
+    },
+    {
+      "method": "POST",
+      "path": "/api/push/register",
+      "auth": true,
+      "area": "push"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/push/token",
+      "auth": true,
+      "area": "push"
+    },
+    {
+      "method": "GET",
+      "path": "/api/groups",
+      "auth": true,
+      "area": "groups"
+    },
+    {
+      "method": "POST",
+      "path": "/api/groups",
+      "auth": true,
+      "area": "groups_admin"
+    },
+    {
+      "method": "GET",
+      "path": "/api/groups/search",
+      "auth": true,
+      "area": "groups"
+    },
+    {
+      "method": "POST",
+      "path": "/api/groups/join-by-code",
+      "auth": true,
+      "area": "groups"
+    },
+    {
+      "method": "POST",
+      "path": "/api/groups/{groupID}/join",
+      "auth": true,
+      "area": "groups"
+    },
+    {
+      "method": "POST",
+      "path": "/api/groups/{groupID}/invite-code",
+      "auth": true,
+      "area": "groups_admin"
+    },
+    {
+      "method": "GET",
+      "path": "/api/groups/{groupID}/members",
+      "auth": true,
+      "area": "group_members"
+    },
+    {
+      "method": "POST",
+      "path": "/api/groups/{groupID}/members/{userID}/role",
+      "auth": true,
+      "area": "group_members_admin"
+    },
+    {
+      "method": "POST",
+      "path": "/api/groups/{groupID}/members/role-by-phone",
+      "auth": true,
+      "area": "group_members_admin"
+    },
+    {
+      "method": "POST",
+      "path": "/api/groups/{groupID}/comment-mutes/by-phone",
+      "auth": true,
+      "area": "comment_mutes_admin"
+    },
+    {
+      "method": "POST",
+      "path": "/api/groups/{groupID}/comment-mutes/unmute-by-phone",
+      "auth": true,
+      "area": "comment_mutes_admin"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/groups/{groupID}/comment-mutes/by-phone",
+      "auth": true,
+      "area": "comment_mutes_admin"
+    },
+    {
+      "method": "POST",
+      "path": "/api/groups/{groupID}/comment-mutes/{userID}",
+      "auth": true,
+      "area": "comment_mutes_admin"
+    },
+    {
+      "method": "POST",
+      "path": "/api/groups/{groupID}/comment-mutes/{userID}/clear",
+      "auth": true,
+      "area": "comment_mutes_admin"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/groups/{groupID}/leave",
+      "auth": true,
+      "area": "groups"
+    },
+    {
+      "method": "POST",
+      "path": "/api/groups/{groupID}/invite-user",
+      "auth": true,
+      "area": "group_invites"
+    },
+    {
+      "method": "GET",
+      "path": "/api/groups/{groupID}/messages",
+      "auth": true,
+      "area": "messages"
+    },
+    {
+      "method": "POST",
+      "path": "/api/groups/{groupID}/messages",
+      "auth": true,
+      "area": "messages"
+    },
+    {
+      "method": "GET",
+      "path": "/api/groups/{groupID}/ws",
+      "auth": true,
+      "area": "websocket"
+    },
+    {
+      "method": "POST",
+      "path": "/api/groups/{groupID}/requests",
+      "auth": true,
+      "area": "public_requests"
+    },
+    {
+      "method": "GET",
+      "path": "/api/groups/{groupID}/requests",
+      "auth": true,
+      "area": "public_requests"
+    },
+    {
+      "method": "POST",
+      "path": "/api/groups/{groupID}/requests/read",
+      "auth": true,
+      "area": "public_requests"
+    },
+    {
+      "method": "GET",
+      "path": "/api/groups/{groupID}/statistics",
+      "auth": true,
+      "area": "statistics"
+    },
+    {
+      "method": "GET",
+      "path": "/api/invites",
+      "auth": true,
+      "area": "invites"
+    },
+    {
+      "method": "POST",
+      "path": "/api/invites/{inviteID}/accept",
+      "auth": true,
+      "area": "invites"
+    },
+    {
+      "method": "POST",
+      "path": "/api/invites/{inviteID}/decline",
+      "auth": true,
+      "area": "invites"
+    },
+    {
+      "method": "POST",
+      "path": "/api/requests/{requestID}/support",
+      "auth": true,
+      "area": "request_votes"
+    },
+    {
+      "method": "POST",
+      "path": "/api/requests/{requestID}/oppose",
+      "auth": true,
+      "area": "request_votes"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/requests/{requestID}/vote",
+      "auth": true,
+      "area": "request_votes"
+    },
+    {
+      "method": "GET",
+      "path": "/api/requests/{requestID}/comments",
+      "auth": true,
+      "area": "request_comments"
+    },
+    {
+      "method": "POST",
+      "path": "/api/requests/{requestID}/comments",
+      "auth": true,
+      "area": "request_comments"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/requests/comments/{commentID}",
+      "auth": true,
+      "area": "request_comments"
+    },
+    {
+      "method": "POST",
+      "path": "/api/requests/{requestID}/status",
+      "auth": true,
+      "area": "request_admin"
+    },
+    {
+      "method": "POST",
+      "path": "/api/requests/{requestID}/hide",
+      "auth": true,
+      "area": "request_admin"
+    },
+    {
+      "method": "GET",
+      "path": "/api/groups/{groupID}/moderation/items/count",
+      "auth": true,
+      "area": "moderation_admin"
+    },
+    {
+      "method": "GET",
+      "path": "/api/groups/{groupID}/moderation/items",
+      "auth": true,
+      "area": "moderation_admin"
+    },
+    {
+      "method": "POST",
+      "path": "/api/moderation/items/{itemID}/approve",
+      "auth": true,
+      "area": "moderation_admin"
+    },
+    {
+      "method": "POST",
+      "path": "/api/moderation/items/{itemID}/reject",
+      "auth": true,
+      "area": "moderation_admin"
+    },
+    {
+      "method": "POST",
+      "path": "/api/group-creation-requests",
+      "auth": true,
+      "area": "group_creation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/group-creation-requests",
+      "auth": true,
+      "area": "group_creation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/group-creation-requests",
+      "auth": true,
+      "area": "group_creation_admin"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/group-creation-requests/{requestID}/approve",
+      "auth": true,
+      "area": "group_creation_admin"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/group-creation-requests/{requestID}/reject",
+      "auth": true,
+      "area": "group_creation_admin"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/group-creation-requests/{requestID}/need-more-info",
+      "auth": true,
+      "area": "group_creation_admin"
+    }
+  ]
+}
