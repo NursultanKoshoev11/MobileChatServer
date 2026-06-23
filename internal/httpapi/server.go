@@ -65,6 +65,7 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 
 	r.Get("/api/health", server.health)
 	r.Get("/api/health/ws", server.websocketHealth)
+	r.Get("/api/public-files/{groupID}/{fileID}", server.servePublicFile)
 
 	r.Route("/api/auth", func(r chi.Router) {
 		r.Post("/request-code", server.requestPhoneCode)
@@ -102,6 +103,8 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 		r.Patch("/api/groups/{groupID}/messages/{messageID}", server.updateMessage)
 		r.Delete("/api/groups/{groupID}/messages/{messageID}", server.deleteMessage)
 		r.Get("/api/groups/{groupID}/ws", server.groupWebSocket)
+		r.Post("/api/groups/{groupID}/files", server.uploadPublicFile)
+		r.Get("/api/groups/{groupID}/files/{fileID}", server.servePublicFile)
 		r.Post("/api/groups/{groupID}/requests", server.createPublicRequest)
 		r.Get("/api/groups/{groupID}/requests", server.listPublicRequests)
 		r.Post("/api/groups/{groupID}/requests/read", server.markPublicRequestsRead)
