@@ -1,4 +1,4 @@
-﻿CREATE TABLE IF NOT EXISTS learned_moderation_rules (
+CREATE TABLE IF NOT EXISTS learned_moderation_rules (
     id bigserial PRIMARY KEY,
     group_id text NOT NULL,
     pattern text NOT NULL,
