@@ -66,7 +66,7 @@ jobs:
           cd /opt/projects/MobileChatServer
           git fetch origin main
           git checkout main
-          git restore Caddyfile docker-compose.prod.yml || true
+          git restore Caddyfile docker-compose.prod.yml internal/service/phone_auth_service.go internal/httpapi/server.go || true
           git pull --ff-only origin main
 
           if ! free | awk '/Swap:/ { exit !($2 > 0) }'; then
