@@ -21,12 +21,7 @@ func (s *Server) createPublicRequest(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, err)
 		return
 	}
-	s.hub.BroadcastGroup(groupID, realtime.Event{Type: "public_request.created", GroupID: groupID, Payload: request})
-	if memberIDs, err := s.svc.ListGroupMemberIDsExcept(r.Context(), groupID, currentUser(r).ID); err == nil {
-		for _, memberID := range memberIDs {
-			s.hub.NotifyUser(memberID, realtime.Event{Type: "public_request.created", GroupID: groupID, Payload: request})
-		}
-	}
+	s.broadcastGroupAndUsers(r, groupID, realtime.Event{Type: "public_request.created", GroupID: groupID, Payload: request})
 	writeJSON(w, http.StatusCreated, request)
 }
 
@@ -133,7 +128,12 @@ func (s *Server) updatePublicRequestStatus(w http.ResponseWriter, r *http.Reques
 
 func (s *Server) broadcastPublicRequestRefresh(r *http.Request, requestID string, eventType string, payload any) {
 	ctx, err := s.svc.GetPublicRequestRealtimeContext(r.Context(), requestID)
-	if err != nil || ctx.GroupID == "" {
+	if err != nil {
+		s.logger.Printf("public request realtime context failed request_id=%s type=%s error=%v", requestID, eventType, err)
+		return
+	}
+	if ctx.GroupID == "" {
+		s.logger.Printf("public request realtime skipped: empty group_id request_id=%s type=%s", requestID, eventType)
 		return
 	}
 	s.broadcastGroupAndUsers(r, ctx.GroupID, realtime.Event{Type: eventType, GroupID: ctx.GroupID, Payload: payload})
