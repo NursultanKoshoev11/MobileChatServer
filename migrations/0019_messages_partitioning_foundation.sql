@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS messages_archive_partitioned (
-    LIKE messages INCLUDING DEFAULTS INCLUDING CONSTRAINTS INCLUDING INDEXES
+    LIKE messages INCLUDING DEFAULTS
 ) PARTITION BY RANGE (created_at);
 
 CREATE TABLE IF NOT EXISTS messages_archive_2026_01 PARTITION OF messages_archive_partitioned
