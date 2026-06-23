@@ -10,7 +10,7 @@ import (
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/storage"
 )
 
-const webSocketTokenTTL = 60 * time.Second
+const webSocketTokenTTL = 5 * time.Minute
 
 func (s *Service) IssueWebSocketToken(userID string) (string, error) {
 	if userID == "" {
