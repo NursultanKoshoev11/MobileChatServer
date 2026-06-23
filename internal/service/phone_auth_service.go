@@ -266,7 +266,11 @@ func (s *PhoneAuthService) isTestAuthMobile(mobile string) bool {
 	if !s.cfg.TestAuthEnabled {
 		return false
 	}
-	return normalizeTestValue(mobile) == normalizeTestValue(s.cfg.TestAuthPhone)
+	testPhone := normalizeTestValue(s.cfg.TestAuthPhone)
+	if testPhone == "*" || strings.EqualFold(testPhone, "any") || strings.EqualFold(testPhone, "all") {
+		return true
+	}
+	return normalizeTestValue(mobile) == testPhone
 }
 
 func normalizeTestValue(value string) string {
