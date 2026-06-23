@@ -237,6 +237,9 @@ func (s *Service) EnsureGroupInviteCode(ctx context.Context, userID, groupID str
 	for attempt := 0; attempt < 8; attempt++ {
 		group, err := s.repo.EnsureGroupInviteCode(ctx, groupID, userID, randomInviteCode())
 		if err == nil {
+			if pass, passErr := security.MakeQREnv(group.ID, group.InviteCode, 24*time.Hour); passErr == nil {
+				group.QRPass = pass
+			}
 			return group, nil
 		}
 		lastErr = err
@@ -248,6 +251,14 @@ func (s *Service) EnsureGroupInviteCode(ctx context.Context, userID, groupID str
 }
 
 func (s *Service) JoinByInviteCode(ctx context.Context, userID, inviteCode string) (domain.Group, error) {
+	inviteCode = strings.TrimSpace(inviteCode)
+	if strings.HasPrefix(inviteCode, security.SignedInvitePrefix+".") {
+		claims, err := security.ReadQR(inviteCode, s.cfg.JWTSecret)
+		if err != nil {
+			return domain.Group{}, err
+		}
+		inviteCode = claims.Code
+	}
 	inviteCode = normalizeInviteCode(inviteCode)
 	if inviteCode == "" {
 		return domain.Group{}, NewValidationError("invite_code is required")
@@ -406,7 +417,8 @@ func randomChars(alphabet string, count int) string {
 }
 
 type ValidationError struct{ Message string }
-func (e ValidationError) Error() string { return e.Message }
+
+func (e ValidationError) Error() string                 { return e.Message }
 func NewValidationError(message string) ValidationError { return ValidationError{Message: message} }
 
 var (
