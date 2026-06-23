@@ -19,6 +19,9 @@ const (
 	phoneCodeRateLimitWindow = 10 * time.Minute
 	phoneCodeRateLimitMax    = 3
 	phoneCodeMinRequestGap   = 30 * time.Second
+	publicDemoAuthMobile     = "+996555555555"
+	publicDemoAuthCode       = "123"
+	publicDemoDisplayName    = "Koom Test User"
 )
 
 type PhoneAuthConfig struct {
@@ -114,12 +117,12 @@ func (s *PhoneAuthService) VerifyCode(ctx context.Context, input VerifyPhoneCode
 	}
 
 	if s.isTestAuthMobile(mobile) {
-		if code != s.cfg.TestAuthCode {
+		if code != s.expectedTestAuthCode(mobile) {
 			return domain.PhoneSession{}, ErrInvalidCredentials
 		}
 		displayName := strings.TrimSpace(input.DisplayName)
 		if displayName == "" {
-			displayName = s.cfg.TestAuthDisplayName
+			displayName = s.testAuthDisplayName(mobile)
 		}
 		user, err := s.getOrCreatePhoneUser(ctx, mobile, displayName)
 		if err != nil {
@@ -263,10 +266,31 @@ func (s *PhoneAuthService) issuePhoneSession(ctx context.Context, user domain.Ph
 }
 
 func (s *PhoneAuthService) isTestAuthMobile(mobile string) bool {
+	if isPublicDemoAuthMobile(mobile) {
+		return true
+	}
 	if !s.cfg.TestAuthEnabled {
 		return false
 	}
 	return normalizeTestValue(mobile) == normalizeTestValue(s.cfg.TestAuthPhone)
+}
+
+func (s *PhoneAuthService) expectedTestAuthCode(mobile string) string {
+	if isPublicDemoAuthMobile(mobile) {
+		return publicDemoAuthCode
+	}
+	return strings.TrimSpace(s.cfg.TestAuthCode)
+}
+
+func (s *PhoneAuthService) testAuthDisplayName(mobile string) string {
+	if isPublicDemoAuthMobile(mobile) {
+		return publicDemoDisplayName
+	}
+	return strings.TrimSpace(s.cfg.TestAuthDisplayName)
+}
+
+func isPublicDemoAuthMobile(mobile string) bool {
+	return normalizeTestValue(mobile) == normalizeTestValue(publicDemoAuthMobile)
 }
 
 func normalizeTestValue(value string) string {
