@@ -1,0 +1,5 @@
+-- 0013 intentionally reserved.
+--
+-- This no-op migration keeps the numeric migration sequence continuous between
+-- 0012 and 0014. It prevents deployment confusion in tooling that expects
+-- sequential migration numbers.

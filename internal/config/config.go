@@ -95,14 +95,25 @@ func Load() (Config, error) {
 	if cfg.Environment == "production" && (cfg.SMSProvider == "dev" || cfg.SMSProvider == "disabled") {
 		return Config{}, fmt.Errorf("development or disabled SMS provider is not allowed in production")
 	}
+	if cfg.Environment == "production" && strings.EqualFold(cfg.SMSProvider, "twilio") {
+		if strings.TrimSpace(os.Getenv("TWILIO_ACCOUNT_SID")) == "" || strings.TrimSpace(os.Getenv("TWILIO_AUTH_TOKEN")) == "" {
+			return Config{}, fmt.Errorf("TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN are required when SMS_PROVIDER=twilio in production")
+		}
+		if strings.TrimSpace(cfg.SMSFrom) == "" && strings.TrimSpace(os.Getenv("TWILIO_MESSAGING_SERVICE_SID")) == "" {
+			return Config{}, fmt.Errorf("SMS_FROM or TWILIO_MESSAGING_SERVICE_SID is required when SMS_PROVIDER=twilio in production")
+		}
+	}
 	if cfg.Environment == "production" && cfg.TestAuthEnabled {
 		return Config{}, fmt.Errorf("TEST_AUTH_ENABLED=true is not allowed in production")
 	}
 	if cfg.Environment == "production" && !cfg.ModerationFailClosed {
 		return Config{}, fmt.Errorf("MODERATION_FAIL_CLOSED=false is not allowed in production")
 	}
-	if cfg.Environment == "production" && cfg.BackendInstanceCount > 1 && cfg.RealtimeBroker == "local" {
-		return Config{}, fmt.Errorf("REALTIME_BROKER=local is not allowed with multiple backend instances in production")
+	if cfg.Environment == "production" && cfg.BackendInstanceCount > 1 {
+		if cfg.RealtimeBroker == "local" {
+			return Config{}, fmt.Errorf("REALTIME_BROKER=local is not allowed with multiple backend instances in production")
+		}
+		return Config{}, fmt.Errorf("BACKEND_INSTANCE_COUNT greater than 1 requires a shared Redis rate limiter; the current rate limiter is in-memory")
 	}
 	if cfg.Environment == "production" && cfg.AccessTokenTTL > 15*time.Minute {
 		return Config{}, fmt.Errorf("ACCESS_TOKEN_TTL_MINUTES must be 15 or less in production")

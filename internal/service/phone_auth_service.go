@@ -57,6 +57,7 @@ func (s *PhoneAuthService) RequestCode(ctx context.Context, input RequestPhoneCo
 	}
 
 	if s.isTestAuthMobile(mobile) {
+		return RequestPhoneCodeOutput{Status: "test_code_ready", AccountExists: accountExists}, nil
 	}
 
 	if err := s.enforcePhoneCodeRateLimit(ctx, mobile); err != nil {
