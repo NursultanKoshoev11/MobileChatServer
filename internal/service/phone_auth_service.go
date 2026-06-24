@@ -19,7 +19,6 @@ const (
 	phoneCodeRateLimitWindow = 10 * time.Minute
 	phoneCodeRateLimitMax    = 3
 	phoneCodeMinRequestGap   = 30 * time.Second
-	publicDemoAuthMobile     = "+996555555555"
 	publicDemoAuthCode       = "123"
 	publicDemoDisplayName    = "Koom Test User"
 )
@@ -190,7 +189,9 @@ func (s *PhoneAuthService) Refresh(ctx context.Context, input RefreshInput) (dom
 	if err != nil {
 		return domain.PhoneSession{}, err
 	}
-	// Keep the old refresh token valid until expiry so parallel app wake-up requests do not log the user out.
+	if err := s.repo.RevokeRefreshSession(ctx, record.ID); err != nil {
+		return domain.PhoneSession{}, err
+	}
 	return newSession, nil
 }
 
@@ -264,44 +265,28 @@ func (s *PhoneAuthService) issuePhoneSession(ctx context.Context, user domain.Ph
 }
 
 func (s *PhoneAuthService) isTestAuthMobile(mobile string) bool {
-	if s.cfg.Environment != "production" {
-		return true
-	}
-	if isPublicDemoAuthMobile(mobile) {
-		return true
-	}
-	if !s.cfg.TestAuthEnabled {
+	if s.cfg.Environment == "production" {
 		return false
 	}
 	testPhone := normalizeTestValue(s.cfg.TestAuthPhone)
-	if testPhone == "*" || strings.EqualFold(testPhone, "any") || strings.EqualFold(testPhone, "all") {
+	if testPhone == "" || testPhone == "*" || strings.EqualFold(testPhone, "any") || strings.EqualFold(testPhone, "all") {
 		return true
 	}
 	return normalizeTestValue(mobile) == testPhone
 }
 
 func (s *PhoneAuthService) expectedTestAuthCode(mobile string) string {
-	if s.cfg.Environment != "production" {
-		return publicDemoAuthCode
+	if code := strings.TrimSpace(s.cfg.TestAuthCode); code != "" {
+		return code
 	}
-	if isPublicDemoAuthMobile(mobile) {
-		return publicDemoAuthCode
-	}
-	return strings.TrimSpace(s.cfg.TestAuthCode)
+	return publicDemoAuthCode
 }
 
 func (s *PhoneAuthService) testAuthDisplayName(mobile string) string {
-	if s.cfg.Environment != "production" {
-		return publicDemoDisplayName
+	if name := strings.TrimSpace(s.cfg.TestAuthDisplayName); name != "" {
+		return name
 	}
-	if isPublicDemoAuthMobile(mobile) {
-		return publicDemoDisplayName
-	}
-	return strings.TrimSpace(s.cfg.TestAuthDisplayName)
-}
-
-func isPublicDemoAuthMobile(mobile string) bool {
-	return normalizeTestValue(mobile) == normalizeTestValue(publicDemoAuthMobile)
+	return publicDemoDisplayName
 }
 
 func normalizeTestValue(value string) string {
