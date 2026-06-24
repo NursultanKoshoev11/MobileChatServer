@@ -190,9 +190,7 @@ func (s *PhoneAuthService) Refresh(ctx context.Context, input RefreshInput) (dom
 	if err != nil {
 		return domain.PhoneSession{}, err
 	}
-	if err := s.repo.RevokeRefreshSession(ctx, record.ID); err != nil {
-		return domain.PhoneSession{}, err
-	}
+	// Keep the old refresh token valid until expiry so parallel app wake-up requests do not log the user out.
 	return newSession, nil
 }
 

@@ -23,7 +23,7 @@ const (
 	maxDescriptionLen = 240
 	maxMessageLen     = 2000
 	minPasswordLen    = 8
-	refreshTokenTTL   = 30 * 24 * time.Hour
+	refreshTokenTTL   = 365 * 24 * time.Hour
 )
 
 var emailPattern = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
