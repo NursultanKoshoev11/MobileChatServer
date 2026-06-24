@@ -83,6 +83,9 @@ jobs:
           docker builder prune -af || true
           sudo apt-get clean || true
           sudo journalctl --vacuum-size=100M || true
+          sudo mkdir -p data/public-files
+          sudo chown -R 10001:10001 data
+          sudo chmod -R u+rwX,g+rX,o-rwx data
 
           migrate_name="mobilechat-migrate-$(date +%s)"
           docker compose --env-file .env.prod -f docker-compose.prod.yml --profile caddy run --rm --name "$migrate_name" migrate

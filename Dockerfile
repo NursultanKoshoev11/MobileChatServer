@@ -14,7 +14,7 @@ RUN go build -p=1 -trimpath -ldflags='-s -w' -o /out/mobilechat-migrate ./cmd/mi
 
 FROM alpine:3.20
 
-RUN adduser -D -H -u 10001 appuser
+RUN adduser -D -H -u 10001 appuser && mkdir -p /app/data && chown -R appuser:appuser /app/data
 WORKDIR /app
 COPY --from=builder /out/mobilechat-server /app/mobilechat-server
 COPY --from=builder /out/mobilechat-migrate /app/mobilechat-migrate
