@@ -56,6 +56,8 @@ type publicRequestPayloadPhoto struct {
 	Name      string `json:"name"`
 	SizeBytes int    `json:"size_bytes"`
 	Base64    string `json:"base64"`
+	FileID    string `json:"file_id"`
+	URL       string `json:"url"`
 }
 
 type publicRequestPayloadVideo struct {
@@ -324,6 +326,22 @@ func parsePublicRequestBodyPayload(body string) (publicRequestBodyMeta, bool, er
 }
 
 func validatePublicRequestPhotoPayload(photo publicRequestPayloadPhoto) error {
+	if photo.SizeBytes > 0 && photo.SizeBytes > maxPublicRequestPhotoBytes {
+		return NewValidationError(fmt.Sprintf("photo must be less than %d bytes", maxPublicRequestPhotoBytes))
+	}
+
+	fileID := strings.TrimSpace(photo.FileID)
+	url := strings.TrimSpace(photo.URL)
+	if fileID != "" || url != "" {
+		if fileID != "" && !strings.HasPrefix(fileID, "PF-") {
+			return NewValidationError("photo file_id is invalid")
+		}
+		if url != "" && !strings.Contains(url, "/api/public-files/") {
+			return NewValidationError("photo url is invalid")
+		}
+		return nil
+	}
+
 	data := strings.TrimSpace(photo.Base64)
 	if data == "" {
 		return NewValidationError("photo data is required")
@@ -342,9 +360,6 @@ func validatePublicRequestPhotoPayload(photo publicRequestPayloadPhoto) error {
 		return NewValidationError("photo data is required")
 	}
 	if len(decoded) > maxPublicRequestPhotoBytes {
-		return NewValidationError(fmt.Sprintf("photo must be less than %d bytes", maxPublicRequestPhotoBytes))
-	}
-	if photo.SizeBytes > 0 && photo.SizeBytes > maxPublicRequestPhotoBytes {
 		return NewValidationError(fmt.Sprintf("photo must be less than %d bytes", maxPublicRequestPhotoBytes))
 	}
 	return nil
