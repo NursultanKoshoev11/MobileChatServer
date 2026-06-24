@@ -18,3 +18,5 @@ logs/
 *.log
 README.md
 SECURITY.md
+
+data/
