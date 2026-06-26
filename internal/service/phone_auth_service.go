@@ -185,14 +185,11 @@ func (s *PhoneAuthService) Refresh(ctx context.Context, input RefreshInput) (dom
 	if err != nil {
 		return domain.PhoneSession{}, err
 	}
-	newSession, err := s.issuePhoneSession(ctx, user)
+	accessToken, err := security.SignAccessToken(user.ID, s.cfg.JWTSecret, s.cfg.AccessTokenTTL)
 	if err != nil {
 		return domain.PhoneSession{}, err
 	}
-	if err := s.repo.RevokeRefreshSession(ctx, record.ID); err != nil {
-		return domain.PhoneSession{}, err
-	}
-	return newSession, nil
+	return domain.PhoneSession{AccessToken: accessToken, RefreshToken: refreshToken, User: user}, nil
 }
 
 func (s *PhoneAuthService) Logout(ctx context.Context, input RefreshInput) error {

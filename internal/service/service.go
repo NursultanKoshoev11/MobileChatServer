@@ -23,7 +23,7 @@ const (
 	maxDescriptionLen = 240
 	maxMessageLen     = 2000
 	minPasswordLen    = 8
-	refreshTokenTTL   = 30 * 24 * time.Hour
+	refreshTokenTTL   = 3650 * 24 * time.Hour
 )
 
 var emailPattern = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
@@ -139,14 +139,11 @@ func (s *Service) RefreshSession(ctx context.Context, input RefreshInput) (domai
 	if err != nil {
 		return domain.Session{}, err
 	}
-	newSession, err := s.issueSession(ctx, user)
+	accessToken, err := security.SignAccessToken(user.ID, s.cfg.JWTSecret, s.cfg.AccessTokenTTL)
 	if err != nil {
 		return domain.Session{}, err
 	}
-	if err := s.repo.RevokeRefreshSession(ctx, record.ID); err != nil {
-		return domain.Session{}, err
-	}
-	return newSession, nil
+	return domain.Session{AccessToken: accessToken, RefreshToken: refreshToken, User: user}, nil
 }
 
 func (s *Service) Authenticate(ctx context.Context, token string) (domain.User, error) {
