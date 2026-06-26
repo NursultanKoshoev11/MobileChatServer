@@ -28,7 +28,12 @@ func (s *Service) UpdateMessage(ctx context.Context, actorID, groupID, messageID
 	if err := s.moderateContent(ctx, domain.ContentModerationItem{GroupID: groupID, ContentType: domain.ContentTypeGroupMessage, AuthorID: actorID, Body: text}); err != nil {
 		return domain.Message{}, err
 	}
-	return s.repo.UpdateMessage(ctx, groupID, actorID, messageID, text)
+	message, err := s.repo.UpdateMessage(ctx, groupID, actorID, messageID, text)
+	if err != nil {
+		return domain.Message{}, err
+	}
+	go s.NotifyGroupAboutMessageUpdated(context.Background(), actorID, message)
+	return message, nil
 }
 
 func (s *Service) DeleteMessage(ctx context.Context, actorID, groupID, messageID string) (domain.Message, error) {
@@ -37,5 +42,10 @@ func (s *Service) DeleteMessage(ctx context.Context, actorID, groupID, messageID
 	if groupID == "" || messageID == "" {
 		return domain.Message{}, NewValidationError("group_id and message_id are required")
 	}
-	return s.repo.DeleteMessage(ctx, groupID, actorID, messageID)
+	message, err := s.repo.DeleteMessage(ctx, groupID, actorID, messageID)
+	if err != nil {
+		return domain.Message{}, err
+	}
+	go s.NotifyGroupAboutMessageDeleted(context.Background(), actorID, message)
+	return message, nil
 }

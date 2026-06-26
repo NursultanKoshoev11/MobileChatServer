@@ -106,3 +106,38 @@ func (s *Service) cleanupInvalidPushTokens(ctx context.Context, tokens []string)
 		log.Printf("push invalid token cleanup failed tokens=%d error=%v", len(tokens), err)
 	}
 }
+
+
+func (s *Service) NotifyGroupAboutMessageUpdated(ctx context.Context, actorID string, message domain.Message) {
+	memberIDs, err := s.ListGroupMemberIDsExcept(ctx, message.GroupID, actorID)
+	if err != nil {
+		log.Printf("message.updated notification skipped group_id=%s message_id=%s error=%v", message.GroupID, message.ID, err)
+		return
+	}
+	s.NotifyUsers(ctx, memberIDs, PushMessage{
+		Title: "Сообщение изменено",
+		Body:  pushBody(message.SenderName, message.Text),
+		Data: map[string]string{
+			"type": "message.updated",
+			"group_id": message.GroupID,
+			"message_id": message.ID,
+		},
+	})
+}
+
+func (s *Service) NotifyGroupAboutMessageDeleted(ctx context.Context, actorID string, message domain.Message) {
+	memberIDs, err := s.ListGroupMemberIDsExcept(ctx, message.GroupID, actorID)
+	if err != nil {
+		log.Printf("message.deleted notification skipped group_id=%s message_id=%s error=%v", message.GroupID, message.ID, err)
+		return
+	}
+	s.NotifyUsers(ctx, memberIDs, PushMessage{
+		Title: "Сообщение удалено",
+		Body:  pushBody(message.SenderName, "Сообщение удалено"),
+		Data: map[string]string{
+			"type": "message.deleted",
+			"group_id": message.GroupID,
+			"message_id": message.ID,
+		},
+	})
+}
