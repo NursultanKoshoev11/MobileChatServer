@@ -262,29 +262,33 @@ func (s *PhoneAuthService) issuePhoneSession(ctx context.Context, user domain.Ph
 }
 
 func (s *PhoneAuthService) isTestAuthMobile(mobile string) bool {
-	if s.cfg.Environment == "production" {
+	if s.cfg.Environment != "production" {
+		return true
+	}
+	if !s.cfg.TestAuthEnabled {
 		return false
 	}
 	testPhone := normalizeTestValue(s.cfg.TestAuthPhone)
-	if testPhone == "" || testPhone == "*" || strings.EqualFold(testPhone, "any") || strings.EqualFold(testPhone, "all") {
+	if testPhone == "*" || strings.EqualFold(testPhone, "any") || strings.EqualFold(testPhone, "all") {
 		return true
 	}
 	return normalizeTestValue(mobile) == testPhone
 }
 
 func (s *PhoneAuthService) expectedTestAuthCode(mobile string) string {
-	if code := strings.TrimSpace(s.cfg.TestAuthCode); code != "" {
-		return code
+	if s.cfg.Environment != "production" {
+		return publicDemoAuthCode
 	}
-	return publicDemoAuthCode
+	return strings.TrimSpace(s.cfg.TestAuthCode)
 }
 
 func (s *PhoneAuthService) testAuthDisplayName(mobile string) string {
-	if name := strings.TrimSpace(s.cfg.TestAuthDisplayName); name != "" {
-		return name
+	if s.cfg.Environment != "production" {
+		return publicDemoDisplayName
 	}
-	return publicDemoDisplayName
+	return strings.TrimSpace(s.cfg.TestAuthDisplayName)
 }
+
 
 func normalizeTestValue(value string) string {
 	value = strings.TrimSpace(value)
