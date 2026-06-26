@@ -65,9 +65,8 @@ jobs:
           set -euo pipefail
           cd /opt/projects/MobileChatServer
           git fetch origin main
-          git checkout main
-          git restore Caddyfile docker-compose.prod.yml internal/service/phone_auth_service.go internal/httpapi/server.go || true
-          git pull --ff-only origin main
+          git checkout -B main origin/main
+          git reset --hard origin/main
 
           if ! free | awk '/Swap:/ { exit !($2 > 0) }'; then
             echo "No swap detected. Creating temporary 2G swapfile for Docker build."
