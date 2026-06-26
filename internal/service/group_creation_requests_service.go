@@ -16,7 +16,7 @@ const (
 	maxRegionLen             = 120
 	maxOfficialContactLen    = 160
 	maxGroupRequestReasonLen = 2000
-	maxDocumentsLen          = 3000
+	maxDocumentsLen          = 16 * 1024 * 1024
 )
 
 type CreateGroupCreationRequestInput struct {

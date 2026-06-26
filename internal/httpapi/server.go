@@ -23,7 +23,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-const maxJSONBodyBytes = 12 << 20
+const maxJSONBodyBytes = 16 * 1024 * 1024
 
 type userContextKey struct{}
 
