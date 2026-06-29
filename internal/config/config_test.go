@@ -10,3 +10,15 @@ func TestOriginListContainsWildcard(t *testing.T) {
 		t.Fatal("did not expect wildcard")
 	}
 }
+
+func TestWildcardTestAuthPhoneRequiresLocalEnvironment(t *testing.T) {
+	if !wildcardTestAuthPhone("*") || !wildcardTestAuthPhone("any") {
+		t.Fatal("expected wildcard values to be detected")
+	}
+	if !localTestAuthEnvironment("development") || !localTestAuthEnvironment("test") {
+		t.Fatal("expected local test auth environments")
+	}
+	if localTestAuthEnvironment("staging") || localTestAuthEnvironment("production") {
+		t.Fatal("did not expect shared environments to allow wildcard test auth")
+	}
+}

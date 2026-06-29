@@ -35,11 +35,12 @@ type Server struct {
 	hub            *realtime.Hub
 	limiter        *RateLimiter
 	strictLimiter  *RateLimiter
+	trustedProxies []net.IPNet
 	router         http.Handler
 	upgrader       websocket.Upgrader
 }
 
-func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.Logger, allowedOrigins string) http.Handler {
+func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.Logger, allowedOrigins string, trustedProxyCIDRs ...string) http.Handler {
 	server := &Server{
 		svc:            svc,
 		phoneAuth:      phoneAuth,
@@ -48,10 +49,12 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 		hub:            realtime.NewHub(logger),
 		limiter:        NewRateLimiter(600, time.Minute),
 		strictLimiter:  NewRateLimiter(20, time.Minute),
+		trustedProxies: parseTrustedProxyCIDRs(strings.Join(trustedProxyCIDRs, ",")),
 	}
 	server.upgrader = websocket.Upgrader{
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
+		Subprotocols:    []string{"koom-ws"},
 		CheckOrigin: func(r *http.Request) bool {
 			origin := r.Header.Get("Origin")
 			return origin == "" || server.allowedOrigins["*"] || server.allowedOrigins[origin]
@@ -60,7 +63,6 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
 	r.Use(server.recoverer)
 	r.Use(server.requestLogger)
 	r.Use(server.cors)
@@ -68,7 +70,6 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 
 	r.Get("/api/health", server.health)
 	r.Get("/api/health/ws", server.websocketHealth)
-	r.Get("/api/public-files/{groupID}/{fileID}", server.servePublicFile)
 
 	r.Route("/api/auth", func(r chi.Router) {
 		r.Post("/request-code", server.requestPhoneCode)
@@ -108,6 +109,7 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 		r.Get("/api/groups/{groupID}/ws", server.groupWebSocket)
 		r.Post("/api/groups/{groupID}/files", server.uploadPublicFile)
 		r.Get("/api/groups/{groupID}/files/{fileID}", server.servePublicFile)
+		r.Get("/api/public-files/{groupID}/{fileID}", server.servePublicFile)
 		r.Post("/api/groups/{groupID}/requests", server.createPublicRequest)
 		r.Get("/api/groups/{groupID}/requests", server.listPublicRequests)
 		r.Post("/api/groups/{groupID}/requests/read", server.markPublicRequestsRead)
@@ -488,7 +490,7 @@ func firstNonEmpty(values ...string) string {
 func (s *Server) groupWebSocket(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
 	groupID := chi.URLParam(r, "groupID")
-	remoteIP := clientIP(r)
+	remoteIP := s.clientIP(r)
 	if !s.strictLimiter.Allow("ws:" + remoteIP) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many websocket connection attempts"})
 		return
@@ -515,7 +517,7 @@ func (s *Server) groupWebSocket(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) userWebSocket(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
-	remoteIP := clientIP(r)
+	remoteIP := s.clientIP(r)
 	if !s.strictLimiter.Allow("ws:" + remoteIP) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many websocket connection attempts"})
 		return
@@ -565,10 +567,23 @@ func bearerTokenFromRequest(r *http.Request) (string, bool) {
 	if strings.HasPrefix(header, "Bearer ") {
 		return strings.TrimSpace(strings.TrimPrefix(header, "Bearer ")), false
 	}
+	if token := bearerTokenFromWebSocketProtocol(r); token != "" && strings.HasSuffix(r.URL.Path, "/ws") {
+		return token, true
+	}
 	if token := strings.TrimSpace(r.URL.Query().Get("token")); token != "" && strings.HasSuffix(r.URL.Path, "/ws") {
 		return token, true
 	}
 	return "", false
+}
+
+func bearerTokenFromWebSocketProtocol(r *http.Request) string {
+	for _, item := range strings.Split(r.Header.Get("Sec-WebSocket-Protocol"), ",") {
+		item = strings.TrimSpace(item)
+		if strings.Count(item, ".") == 2 {
+			return item
+		}
+	}
+	return ""
 }
 
 func (s *Server) rateLimit(next http.Handler) http.Handler {
@@ -577,7 +592,7 @@ func (s *Server) rateLimit(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		key := clientIP(r)
+		key := s.clientIP(r)
 		if user := currentUser(r); user.ID != "" {
 			key = user.ID
 		}
@@ -623,7 +638,7 @@ func (s *Server) requestLogger(next http.Handler) http.Handler {
 		started := time.Now()
 		recorder := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(recorder, r)
-		s.logger.Printf("request_id=%s method=%s path=%s status=%d bytes=%d duration_ms=%d remote=%s", middleware.GetReqID(r.Context()), r.Method, r.URL.Path, recorder.status, recorder.bytes, time.Since(started).Milliseconds(), r.RemoteAddr)
+		s.logger.Printf("request_id=%s method=%s path=%s status=%d bytes=%d duration_ms=%d remote=%s", middleware.GetReqID(r.Context()), r.Method, r.URL.Path, recorder.status, recorder.bytes, time.Since(started).Milliseconds(), s.clientIP(r))
 	})
 }
 
@@ -706,6 +721,28 @@ func parseOrigins(raw string) map[string]bool {
 	}
 	if len(result) == 0 {
 		result["*"] = true
+	}
+	return result
+}
+
+func parseTrustedProxyCIDRs(raw string) []net.IPNet {
+	result := make([]net.IPNet, 0)
+	for _, item := range strings.Split(raw, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if ip := net.ParseIP(item); ip != nil {
+			mask := net.CIDRMask(32, 32)
+			if ip.To4() == nil {
+				mask = net.CIDRMask(128, 128)
+			}
+			result = append(result, net.IPNet{IP: ip, Mask: mask})
+			continue
+		}
+		if _, network, err := net.ParseCIDR(item); err == nil {
+			result = append(result, *network)
+		}
 	}
 	return result
 }

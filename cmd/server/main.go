@@ -99,7 +99,7 @@ func main() {
 		TestAuthDisplayName: cfg.TestAuthDisplayName,
 	}, newSMSSender(cfg, logger))
 
-	handler := httpapi.New(svc, phoneAuth, logger, cfg.AllowedOrigins)
+	handler := httpapi.New(svc, phoneAuth, logger, cfg.AllowedOrigins, cfg.TrustedProxyCIDRs)
 	server := &http.Server{
 		Addr:              ":" + cfg.Port,
 		Handler:           handler,

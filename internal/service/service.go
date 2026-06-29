@@ -2,11 +2,8 @@ package service
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"math/big"
 	"regexp"
 	"strings"
 	"time"
@@ -143,7 +140,18 @@ func (s *Service) RefreshSession(ctx context.Context, input RefreshInput) (domai
 	if err != nil {
 		return domain.Session{}, err
 	}
-	return domain.Session{AccessToken: accessToken, RefreshToken: refreshToken, User: user}, nil
+	newRefreshToken, err := security.NewOpaqueToken(48)
+	if err != nil {
+		return domain.Session{}, err
+	}
+	newRefreshSessionID := "RT-" + strings.ToUpper(randomHex(12))
+	if err := s.repo.RotateRefreshSession(ctx, record.ID, newRefreshSessionID, user.ID, security.HashToken(newRefreshToken), time.Now().UTC().Add(refreshTokenTTL)); err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			return domain.Session{}, ErrUnauthorized
+		}
+		return domain.Session{}, err
+	}
+	return domain.Session{AccessToken: accessToken, RefreshToken: newRefreshToken, User: user}, nil
 }
 
 func (s *Service) Authenticate(ctx context.Context, token string) (domain.User, error) {
@@ -180,9 +188,9 @@ func (s *Service) CreateGroup(ctx context.Context, ownerID string, input CreateG
 	}
 	visibility := input.Visibility
 	if visibility == "" {
-		visibility = domain.GroupVisibilityPrivate
+		visibility = domain.VisibilityPrivate
 	}
-	if visibility != domain.GroupVisibilityPrivate && visibility != domain.GroupVisibilityPublic {
+	if visibility != domain.VisibilityPrivate && visibility != domain.VisibilityPublic {
 		return domain.Group{}, NewValidationError("visibility must be private or public")
 	}
 	return s.repo.CreateGroup(ctx, domain.Group{ID: "G-" + strings.ToUpper(randomHex(8)), OwnerID: ownerID, Title: title, Description: description, Visibility: visibility})

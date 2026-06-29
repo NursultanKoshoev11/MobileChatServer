@@ -10,12 +10,12 @@ import (
 )
 
 type RefreshSessionRecord struct {
-	ID        string
-	UserID    string
+	ID         string
+	UserID     string
 	SecretHash string
-	ExpiresAt time.Time
-	RevokedAt *time.Time
-	CreatedAt time.Time
+	ExpiresAt  time.Time
+	RevokedAt  *time.Time
+	CreatedAt  time.Time
 }
 
 func (r *Repository) CreateRefreshSession(ctx context.Context, id, userID, secretHash string, expiresAt time.Time) error {
@@ -45,6 +45,32 @@ func (r *Repository) RevokeRefreshSession(ctx context.Context, sessionID string)
 	_, err := r.db.Exec(ctx, `UPDATE refresh_tokens SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL`, sessionID)
 	if err != nil {
 		return fmt.Errorf("revoke refresh session: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) RotateRefreshSession(ctx context.Context, oldSessionID, newSessionID, userID, newSecretHash string, expiresAt time.Time) error {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin refresh rotation: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	result, err := tx.Exec(ctx, `UPDATE refresh_tokens SET revoked_at = now() WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL`, oldSessionID, userID)
+	if err != nil {
+		return fmt.Errorf("revoke old refresh session: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at)
+		VALUES ($1, $2, $3, $4)`, newSessionID, userID, newSecretHash, expiresAt); err != nil {
+		return fmt.Errorf("create rotated refresh session: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit refresh rotation: %w", err)
 	}
 	return nil
 }

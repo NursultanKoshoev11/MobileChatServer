@@ -63,9 +63,25 @@ func (l *RateLimiter) cleanupLoop() {
 }
 
 func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err == nil {
+		if ip := net.ParseIP(host); ip != nil {
+			return ip.String()
+		}
+		return host
+	}
+	return r.RemoteAddr
+}
+
+func (s *Server) clientIP(r *http.Request) string {
+	remote := clientIP(r)
+	remoteIP := net.ParseIP(remote)
+	if remoteIP == nil || !ipInNetworks(remoteIP, s.trustedProxies) {
+		return remote
+	}
 	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
 		parts := strings.Split(forwarded, ",")
-		for i := len(parts) - 1; i >= 0; i-- {
+		for i := 0; i < len(parts); i++ {
 			candidate := strings.TrimSpace(parts[i])
 			if candidate == "" {
 				continue
@@ -80,12 +96,14 @@ func clientIP(r *http.Request) string {
 			return ip.String()
 		}
 	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err == nil {
-		if ip := net.ParseIP(host); ip != nil {
-			return ip.String()
+	return remote
+}
+
+func ipInNetworks(ip net.IP, networks []net.IPNet) bool {
+	for _, network := range networks {
+		if network.Contains(ip) {
+			return true
 		}
-		return host
 	}
-	return r.RemoteAddr
+	return false
 }

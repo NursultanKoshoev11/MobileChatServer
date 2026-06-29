@@ -19,8 +19,6 @@ const (
 	phoneCodeRateLimitWindow = 10 * time.Minute
 	phoneCodeRateLimitMax    = 3
 	phoneCodeMinRequestGap   = 30 * time.Second
-	publicDemoAuthCode       = "123"
-	publicDemoDisplayName    = "Koom Test User"
 )
 
 type PhoneAuthConfig struct {
@@ -189,7 +187,18 @@ func (s *PhoneAuthService) Refresh(ctx context.Context, input RefreshInput) (dom
 	if err != nil {
 		return domain.PhoneSession{}, err
 	}
-	return domain.PhoneSession{AccessToken: accessToken, RefreshToken: refreshToken, User: user}, nil
+	newRefreshToken, err := security.NewOpaqueToken(48)
+	if err != nil {
+		return domain.PhoneSession{}, err
+	}
+	newRefreshSessionID := "RT-" + strings.ToUpper(randomHex(12))
+	if err := s.repo.RotateRefreshSession(ctx, record.ID, newRefreshSessionID, user.ID, security.HashToken(newRefreshToken), time.Now().UTC().Add(refreshTokenTTL)); err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			return domain.PhoneSession{}, ErrUnauthorized
+		}
+		return domain.PhoneSession{}, err
+	}
+	return domain.PhoneSession{AccessToken: accessToken, RefreshToken: newRefreshToken, User: user}, nil
 }
 
 func (s *PhoneAuthService) Logout(ctx context.Context, input RefreshInput) error {
@@ -262,33 +271,32 @@ func (s *PhoneAuthService) issuePhoneSession(ctx context.Context, user domain.Ph
 }
 
 func (s *PhoneAuthService) isTestAuthMobile(mobile string) bool {
-	if s.cfg.Environment != "production" {
-		return true
-	}
 	if !s.cfg.TestAuthEnabled {
 		return false
 	}
 	testPhone := normalizeTestValue(s.cfg.TestAuthPhone)
 	if testPhone == "*" || strings.EqualFold(testPhone, "any") || strings.EqualFold(testPhone, "all") {
-		return true
+		return isLocalTestAuthEnvironment(s.cfg.Environment)
 	}
 	return normalizeTestValue(mobile) == testPhone
 }
 
 func (s *PhoneAuthService) expectedTestAuthCode(mobile string) string {
-	if s.cfg.Environment != "production" {
-		return publicDemoAuthCode
-	}
 	return strings.TrimSpace(s.cfg.TestAuthCode)
 }
 
 func (s *PhoneAuthService) testAuthDisplayName(mobile string) string {
-	if s.cfg.Environment != "production" {
-		return publicDemoDisplayName
-	}
 	return strings.TrimSpace(s.cfg.TestAuthDisplayName)
 }
 
+func isLocalTestAuthEnvironment(environment string) bool {
+	switch strings.ToLower(strings.TrimSpace(environment)) {
+	case "local", "dev", "development", "test", "testing":
+		return true
+	default:
+		return false
+	}
+}
 
 func normalizeTestValue(value string) string {
 	value = strings.TrimSpace(value)

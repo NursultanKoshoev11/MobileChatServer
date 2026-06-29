@@ -40,6 +40,7 @@ type Config struct {
 	ModerationFailClosed           bool
 	RealtimeBroker                 string
 	BackendInstanceCount           int
+	TrustedProxyCIDRs              string
 }
 
 func Load() (Config, error) {
@@ -73,6 +74,7 @@ func Load() (Config, error) {
 		ModerationFailClosed:           getEnvBool("MODERATION_FAIL_CLOSED", true),
 		RealtimeBroker:                 getEnv("REALTIME_BROKER", "local"),
 		BackendInstanceCount:           getEnvInt("BACKEND_INSTANCE_COUNT", 1),
+		TrustedProxyCIDRs:              os.Getenv("TRUSTED_PROXY_CIDRS"),
 	}
 
 	cfg.RunMigrationsOnStart = getEnvBool("RUN_MIGRATIONS_ON_START", cfg.Environment != "production")
@@ -117,6 +119,9 @@ func Load() (Config, error) {
 	}
 	if cfg.Environment == "production" && cfg.AccessTokenTTL > 15*time.Minute {
 		return Config{}, fmt.Errorf("ACCESS_TOKEN_TTL_MINUTES must be 15 or less in production")
+	}
+	if cfg.TestAuthEnabled && wildcardTestAuthPhone(cfg.TestAuthPhone) && !localTestAuthEnvironment(cfg.Environment) {
+		return Config{}, fmt.Errorf("wildcard TEST_AUTH_PHONE is allowed only in local, development, or test environments")
 	}
 
 	return cfg, nil
@@ -195,4 +200,18 @@ func originListContainsWildcard(raw string) bool {
 		}
 	}
 	return false
+}
+
+func wildcardTestAuthPhone(raw string) bool {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	return value == "*" || value == "any" || value == "all"
+}
+
+func localTestAuthEnvironment(environment string) bool {
+	switch strings.ToLower(strings.TrimSpace(environment)) {
+	case "local", "dev", "development", "test", "testing":
+		return true
+	default:
+		return false
+	}
 }

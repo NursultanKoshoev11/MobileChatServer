@@ -86,14 +86,22 @@ func (s *Server) uploadPublicFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func validPublicFileKind(kind string, contentType string) bool {
-	if contentType == "application/octet-stream" {
-		return kind == "photo" || kind == "video"
-	}
+	contentType = strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
 	if kind == "photo" {
-		return strings.HasPrefix(contentType, "image/")
+		switch contentType {
+		case "image/jpeg", "image/png", "image/webp":
+			return true
+		default:
+			return false
+		}
 	}
 	if kind == "video" {
-		return strings.HasPrefix(contentType, "video/")
+		switch contentType {
+		case "video/mp4", "video/quicktime", "video/webm":
+			return true
+		default:
+			return false
+		}
 	}
 	return false
 }
