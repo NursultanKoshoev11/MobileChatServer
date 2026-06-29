@@ -1,0 +1,5 @@
+Deploy trigger for AWS self-hosted runner
+
+Target branch: main
+Target commit before trigger: d38aff5730eb044f1038eb7644d32d32ae518370
+Purpose: trigger Backend Check and Deploy on AWS Runner workflow without changing application code.
