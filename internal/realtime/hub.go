@@ -5,14 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/domain"
-	"github.com/NursultanKoshoev11/MobileChatServer/internal/security"
 	"github.com/gorilla/websocket"
 )
 
@@ -38,17 +36,30 @@ type Event struct {
 	SentAt  string `json:"sent_at,omitempty"`
 }
 
+type AuthRefreshValidator func(ctx context.Context, token string) (userID string, err error)
+
 type Hub struct {
-	logger       *log.Logger
-	mu           sync.RWMutex
-	groups       map[string]map[*Client]bool
-	users        map[string]map[*Client]bool
-	remoteIPs    map[string]map[*Client]bool
-	eventCounter uint64
+	logger               *log.Logger
+	authRefreshValidator AuthRefreshValidator
+	mu                   sync.RWMutex
+	groups               map[string]map[*Client]bool
+	users                map[string]map[*Client]bool
+	remoteIPs            map[string]map[*Client]bool
+	eventCounter         uint64
 }
 
-func NewHub(logger *log.Logger) *Hub {
-	return &Hub{logger: logger, groups: make(map[string]map[*Client]bool), users: make(map[string]map[*Client]bool), remoteIPs: make(map[string]map[*Client]bool)}
+func NewHub(logger *log.Logger, validators ...AuthRefreshValidator) *Hub {
+	var validator AuthRefreshValidator
+	if len(validators) > 0 {
+		validator = validators[0]
+	}
+	return &Hub{
+		logger:               logger,
+		authRefreshValidator: validator,
+		groups:               make(map[string]map[*Client]bool),
+		users:                make(map[string]map[*Client]bool),
+		remoteIPs:            make(map[string]map[*Client]bool),
+	}
 }
 
 func (h *Hub) Register(client *Client) bool {
@@ -328,9 +339,9 @@ func (c *Client) handleAuthRefresh(token string) bool {
 		c.Hub.logger.Printf("websocket auth refresh rejected: missing token user_id=%s remote_ip=%s", c.UserID, c.RemoteIP)
 		return false
 	}
-	secret := strings.TrimSpace(os.Getenv("JWT_SECRET"))
-	if secret == "" {
-		c.Hub.logger.Printf("websocket auth refresh rejected: JWT_SECRET is not configured user_id=%s remote_ip=%s", c.UserID, c.RemoteIP)
+	validator := c.Hub.authRefreshValidator
+	if validator == nil {
+		c.Hub.logger.Printf("websocket auth refresh rejected: validator is not configured user_id=%s remote_ip=%s", c.UserID, c.RemoteIP)
 		return false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -341,11 +352,11 @@ func (c *Client) handleAuthRefresh(token string) bool {
 		err    error
 	}, 1)
 	go func() {
-		claims, err := security.ParseWebSocketToken(token, secret)
+		userID, err := validator(ctx, token)
 		claimsCh <- struct {
 			userID string
 			err    error
-		}{userID: claims.UserID, err: err}
+		}{userID: userID, err: err}
 	}()
 
 	select {

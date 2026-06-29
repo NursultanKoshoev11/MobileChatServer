@@ -46,7 +46,13 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 		phoneAuth:      phoneAuth,
 		logger:         logger,
 		allowedOrigins: parseOrigins(allowedOrigins),
-		hub:            realtime.NewHub(logger),
+		hub: realtime.NewHub(logger, func(ctx context.Context, token string) (string, error) {
+			user, err := svc.AuthenticateWebSocket(ctx, token)
+			if err != nil {
+				return "", err
+			}
+			return user.ID, nil
+		}),
 		limiter:        NewRateLimiter(600, time.Minute),
 		strictLimiter:  NewRateLimiter(20, time.Minute),
 		trustedProxies: parseTrustedProxyCIDRs(strings.Join(trustedProxyCIDRs, ",")),
