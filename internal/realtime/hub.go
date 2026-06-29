@@ -1,14 +1,18 @@
 package realtime
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/domain"
+	"github.com/NursultanKoshoev11/MobileChatServer/internal/security"
 	"github.com/gorilla/websocket"
 )
 
@@ -278,7 +282,9 @@ func (c *Client) ReadPump() {
 			c.Hub.logger.Printf("websocket client message rate limit user_id=%s remote_ip=%s", c.UserID, c.RemoteIP)
 			break
 		}
-		c.handleClientMessage(payload)
+		if !c.handleClientMessage(payload) {
+			break
+		}
 	}
 }
 
@@ -293,21 +299,74 @@ func (c *Client) allowClientMessage() bool {
 	return c.readCount <= maxClientMessagesMinute
 }
 
-func (c *Client) handleClientMessage(payload []byte) {
+func (c *Client) handleClientMessage(payload []byte) bool {
 	var message struct {
 		Type    string `json:"type"`
 		EventID string `json:"event_id"`
 		Reason  string `json:"reason"`
+		Token   string `json:"token"`
 	}
 	if err := json.Unmarshal(payload, &message); err != nil {
-		return
+		return true
 	}
 	switch message.Type {
 	case "ack":
 		c.Hub.logger.Printf("websocket ack event_id=%s user_id=%s group_id=%s", message.EventID, c.UserID, c.GroupID)
 	case "nack":
 		c.Hub.logger.Printf("websocket nack event_id=%s user_id=%s group_id=%s reason=%s", message.EventID, c.UserID, c.GroupID, message.Reason)
+	case "ping":
+		c.sendEvent(Event{Type: "pong", Payload: map[string]string{"ts": time.Now().UTC().Format(time.RFC3339Nano)}})
+	case "auth_refresh":
+		return c.handleAuthRefresh(message.Token)
 	}
+	return true
+}
+
+func (c *Client) handleAuthRefresh(token string) bool {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		c.Hub.logger.Printf("websocket auth refresh rejected: missing token user_id=%s remote_ip=%s", c.UserID, c.RemoteIP)
+		return false
+	}
+	secret := strings.TrimSpace(os.Getenv("JWT_SECRET"))
+	if secret == "" {
+		c.Hub.logger.Printf("websocket auth refresh rejected: JWT_SECRET is not configured user_id=%s remote_ip=%s", c.UserID, c.RemoteIP)
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	claimsCh := make(chan struct {
+		userID string
+		err    error
+	}, 1)
+	go func() {
+		claims, err := security.ParseWebSocketToken(token, secret)
+		claimsCh <- struct {
+			userID string
+			err    error
+		}{userID: claims.UserID, err: err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		c.Hub.logger.Printf("websocket auth refresh rejected: validation timeout user_id=%s remote_ip=%s", c.UserID, c.RemoteIP)
+		return false
+	case result := <-claimsCh:
+		if result.err != nil {
+			c.Hub.logger.Printf("websocket auth refresh rejected: invalid token user_id=%s remote_ip=%s error=%v", c.UserID, c.RemoteIP, result.err)
+			return false
+		}
+		if result.userID != c.UserID {
+			c.Hub.logger.Printf("websocket auth refresh rejected: token user mismatch current_user_id=%s token_user_id=%s remote_ip=%s", c.UserID, result.userID, c.RemoteIP)
+			return false
+		}
+	}
+
+	_ = c.Conn.SetReadDeadline(time.Now().Add(pongWait))
+	c.sendEvent(Event{Type: "auth.refreshed", Payload: map[string]string{"user_id": c.UserID}})
+	c.Hub.logger.Printf("websocket auth refreshed user_id=%s group_id=%s remote_ip=%s", c.UserID, c.GroupID, c.RemoteIP)
+	return true
 }
 
 func (c *Client) WritePump() {
