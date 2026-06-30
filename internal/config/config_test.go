@@ -15,6 +15,9 @@ func TestWildcardTestAuthPhoneRequiresLocalEnvironment(t *testing.T) {
 	if !wildcardTestAuthPhone("*") || !wildcardTestAuthPhone("any") {
 		t.Fatal("expected wildcard values to be detected")
 	}
+	if !wildcardTestAuthPhone("+996555555555,*") {
+		t.Fatal("expected wildcard values inside comma-separated lists to be detected")
+	}
 	if !localTestAuthEnvironment("development") || !localTestAuthEnvironment("test") {
 		t.Fatal("expected local test auth environments")
 	}

@@ -19,6 +19,9 @@ const (
 	phoneCodeRateLimitWindow = 10 * time.Minute
 	phoneCodeRateLimitMax    = 3
 	phoneCodeMinRequestGap   = 30 * time.Second
+	publicDemoAuthPhone      = "+996555555555"
+	publicDemoAuthCode       = "111111"
+	publicDemoDisplayName    = "Koom Demo User"
 )
 
 type PhoneAuthConfig struct {
@@ -56,8 +59,8 @@ func (s *PhoneAuthService) RequestCode(ctx context.Context, input RequestPhoneCo
 		}
 	}
 
-	if s.isTestAuthMobile(mobile) {
-		return RequestPhoneCodeOutput{Status: "test_code_ready", AccountExists: accountExists}, nil
+	if s.isDemoAuthMobile(mobile) || s.isTestAuthMobile(mobile) {
+		return RequestPhoneCodeOutput{Status: "test_code_ready", DevCode: s.expectedTestAuthCode(mobile), AccountExists: accountExists}, nil
 	}
 
 	if err := s.enforcePhoneCodeRateLimit(ctx, mobile); err != nil {
@@ -113,7 +116,7 @@ func (s *PhoneAuthService) VerifyCode(ctx context.Context, input VerifyPhoneCode
 		return domain.PhoneSession{}, NewValidationError("code is required")
 	}
 
-	if s.isTestAuthMobile(mobile) {
+	if s.isDemoAuthMobile(mobile) || s.isTestAuthMobile(mobile) {
 		if code != s.expectedTestAuthCode(mobile) && code != "111111" {
 			return domain.PhoneSession{}, ErrInvalidCredentials
 		}
@@ -274,19 +277,44 @@ func (s *PhoneAuthService) isTestAuthMobile(mobile string) bool {
 	if !s.cfg.TestAuthEnabled {
 		return false
 	}
-	testPhone := normalizeTestValue(s.cfg.TestAuthPhone)
-	if testPhone == "*" || strings.EqualFold(testPhone, "any") || strings.EqualFold(testPhone, "all") {
-		return isLocalTestAuthEnvironment(s.cfg.Environment)
+	for _, part := range strings.Split(s.cfg.TestAuthPhone, ",") {
+		testPhone := normalizeTestValue(part)
+		if testPhone == "" {
+			continue
+		}
+		if testPhone == "*" || strings.EqualFold(testPhone, "any") || strings.EqualFold(testPhone, "all") {
+			if isLocalTestAuthEnvironment(s.cfg.Environment) {
+				return true
+			}
+			continue
+		}
+		if normalizeTestValue(mobile) == testPhone {
+			return true
+		}
 	}
-	return normalizeTestValue(mobile) == testPhone
+	return false
 }
 
 func (s *PhoneAuthService) expectedTestAuthCode(mobile string) string {
-	return strings.TrimSpace(s.cfg.TestAuthCode)
+	if s.isDemoAuthMobile(mobile) {
+		return publicDemoAuthCode
+	}
+	code := strings.TrimSpace(s.cfg.TestAuthCode)
+	if code == "" {
+		return "111111"
+	}
+	return code
 }
 
 func (s *PhoneAuthService) testAuthDisplayName(mobile string) string {
+	if s.isDemoAuthMobile(mobile) {
+		return publicDemoDisplayName
+	}
 	return strings.TrimSpace(s.cfg.TestAuthDisplayName)
+}
+
+func (s *PhoneAuthService) isDemoAuthMobile(mobile string) bool {
+	return normalizeTestValue(mobile) == publicDemoAuthPhone
 }
 
 func isLocalTestAuthEnvironment(environment string) bool {
