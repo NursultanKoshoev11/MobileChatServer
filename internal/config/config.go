@@ -59,7 +59,7 @@ func Load() (Config, error) {
 		SuperAdminPhones:               getEnvList("SUPER_ADMIN_PHONES"),
 		PlatformAdminPhones:            getEnvList("PLATFORM_ADMIN_PHONES"),
 		TestAuthEnabled:                getEnvBool("TEST_AUTH_ENABLED", false),
-		TestAuthPhone:                  getEnv("TEST_AUTH_PHONE", "+996555555555,+996700000001"),
+		TestAuthPhone:                  getEnv("TEST_AUTH_PHONE", "+996555555555,+996700000001,+996700000002"),
 		TestAuthCode:                   getEnv("TEST_AUTH_CODE", "111111"),
 		TestAuthDisplayName:            getEnv("TEST_AUTH_DISPLAY_NAME", "Firebase Test User"),
 		ContentModerationEnabled:       getEnvBool("CONTENT_MODERATION_ENABLED", true),

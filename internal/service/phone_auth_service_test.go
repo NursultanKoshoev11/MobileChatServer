@@ -6,7 +6,7 @@ func TestTestAuthMobileSupportsCommaSeparatedPhones(t *testing.T) {
 	auth := NewPhoneAuth(nil, PhoneAuthConfig{
 		Environment:     "staging",
 		TestAuthEnabled: true,
-		TestAuthPhone:   "+996555555555, +996700000001",
+		TestAuthPhone:   "+996555555555, +996700000001, +996700000002",
 	}, nil)
 
 	if !auth.isTestAuthMobile("+996555555555") {
@@ -14,6 +14,9 @@ func TestTestAuthMobileSupportsCommaSeparatedPhones(t *testing.T) {
 	}
 	if !auth.isTestAuthMobile("+996700000001") {
 		t.Fatal("expected second configured test phone to be accepted")
+	}
+	if !auth.isTestAuthMobile("+996700000002") {
+		t.Fatal("expected third configured test phone to be accepted")
 	}
 	if auth.isTestAuthMobile("+996700123456") {
 		t.Fatal("did not expect unconfigured phone to be accepted")
@@ -54,16 +57,18 @@ func TestPublicDemoAuthMobileDoesNotRequireTestAuthFlag(t *testing.T) {
 		TestAuthEnabled: false,
 	}, nil)
 
-	if !auth.isDemoAuthMobile("+996555555555") {
-		t.Fatal("expected public demo auth phone to be accepted")
+	for _, phone := range []string{"+996555555555", "+996700000001", "+996700000002"} {
+		if !auth.isDemoAuthMobile(phone) {
+			t.Fatalf("expected public demo auth phone %s to be accepted", phone)
+		}
+		if got := auth.expectedTestAuthCode(phone); got != "111111" {
+			t.Fatalf("expected public demo auth code 111111 for %s, got %q", phone, got)
+		}
+		if got := auth.testAuthDisplayName(phone); got != "Koom Demo User" {
+			t.Fatalf("expected public demo display name for %s, got %q", phone, got)
+		}
 	}
-	if auth.isDemoAuthMobile("+996700000001") {
+	if auth.isDemoAuthMobile("+996700123456") {
 		t.Fatal("did not expect other phones to use public demo auth")
-	}
-	if got := auth.expectedTestAuthCode("+996555555555"); got != "111111" {
-		t.Fatalf("expected public demo auth code 111111, got %q", got)
-	}
-	if got := auth.testAuthDisplayName("+996555555555"); got != "Koom Demo User" {
-		t.Fatalf("expected public demo display name, got %q", got)
 	}
 }

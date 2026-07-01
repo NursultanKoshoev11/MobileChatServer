@@ -19,10 +19,15 @@ const (
 	phoneCodeRateLimitWindow = 10 * time.Minute
 	phoneCodeRateLimitMax    = 3
 	phoneCodeMinRequestGap   = 30 * time.Second
-	publicDemoAuthPhone      = "+996555555555"
 	publicDemoAuthCode       = "111111"
 	publicDemoDisplayName    = "Koom Demo User"
 )
+
+var publicDemoAuthPhones = []string{
+	"+996555555555",
+	"+996700000001",
+	"+996700000002",
+}
 
 type PhoneAuthConfig struct {
 	JWTSecret           string
@@ -314,7 +319,13 @@ func (s *PhoneAuthService) testAuthDisplayName(mobile string) string {
 }
 
 func (s *PhoneAuthService) isDemoAuthMobile(mobile string) bool {
-	return normalizeTestValue(mobile) == publicDemoAuthPhone
+	normalized := normalizeTestValue(mobile)
+	for _, phone := range publicDemoAuthPhones {
+		if normalized == normalizeTestValue(phone) {
+			return true
+		}
+	}
+	return false
 }
 
 func isLocalTestAuthEnvironment(environment string) bool {
