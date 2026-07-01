@@ -27,6 +27,8 @@ var publicDemoAuthPhones = []string{
 	"+996555555555",
 	"+996700000001",
 	"+996700000002",
+	"+996700000003",
+	"+996700000004",
 }
 
 type PhoneAuthConfig struct {

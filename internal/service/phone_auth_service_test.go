@@ -6,7 +6,7 @@ func TestTestAuthMobileSupportsCommaSeparatedPhones(t *testing.T) {
 	auth := NewPhoneAuth(nil, PhoneAuthConfig{
 		Environment:     "staging",
 		TestAuthEnabled: true,
-		TestAuthPhone:   "+996555555555, +996700000001, +996700000002",
+		TestAuthPhone:   "+996555555555, +996700000001, +996700000002, +996700000003, +996700000004",
 	}, nil)
 
 	if !auth.isTestAuthMobile("+996555555555") {
@@ -17,6 +17,12 @@ func TestTestAuthMobileSupportsCommaSeparatedPhones(t *testing.T) {
 	}
 	if !auth.isTestAuthMobile("+996700000002") {
 		t.Fatal("expected third configured test phone to be accepted")
+	}
+	if !auth.isTestAuthMobile("+996700000003") {
+		t.Fatal("expected fourth configured test phone to be accepted")
+	}
+	if !auth.isTestAuthMobile("+996700000004") {
+		t.Fatal("expected fifth configured test phone to be accepted")
 	}
 	if auth.isTestAuthMobile("+996700123456") {
 		t.Fatal("did not expect unconfigured phone to be accepted")
@@ -57,7 +63,13 @@ func TestPublicDemoAuthMobileDoesNotRequireTestAuthFlag(t *testing.T) {
 		TestAuthEnabled: false,
 	}, nil)
 
-	for _, phone := range []string{"+996555555555", "+996700000001", "+996700000002"} {
+	for _, phone := range []string{
+		"+996555555555",
+		"+996700000001",
+		"+996700000002",
+		"+996700000003",
+		"+996700000004",
+	} {
 		if !auth.isDemoAuthMobile(phone) {
 			t.Fatalf("expected public demo auth phone %s to be accepted", phone)
 		}
