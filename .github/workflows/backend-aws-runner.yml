@@ -104,7 +104,7 @@ jobs:
 
           COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=1 docker compose --env-file .env.prod -f docker-compose.prod.yml --profile caddy up -d --build api postgres backup caddy
           for i in {1..30}; do
-            if curl -fsS http://127.0.0.1:8080/api/health >/dev/null && curl -fsS https://koom.servemp3.com/api/health >/dev/null; then
+            if curl -fsS http://127.0.0.1:8080/api/health >/dev/null && curl -fsS https://koommy.duckdns.org/api/health >/dev/null; then
               echo "Health check OK"
               docker ps
               exit 0
