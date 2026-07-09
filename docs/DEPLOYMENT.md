@@ -7,7 +7,7 @@ This checklist is for deploying the Koom backend behind HTTPS.
 DuckDNS should point the domain to the server public IP:
 
 ```text
-koommy.duckdns.org -> 16.171.199.28
+koommy.duckdns.org -> 16.171.171.191
 ```
 
 ## 2. Firewall / Security Group
