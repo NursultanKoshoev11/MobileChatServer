@@ -77,6 +77,8 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 	r.Get("/api/health", server.health)
 	r.Get("/privacy", server.privacyPolicy)
 	r.Head("/privacy", server.privacyPolicy)
+	r.Get("/child-safety", server.childSafetyStandards)
+	r.Head("/child-safety", server.childSafetyStandards)
 	r.Get("/api/health/ws", server.websocketHealth)
 
 	r.Route("/api/auth", func(r chi.Router) {
