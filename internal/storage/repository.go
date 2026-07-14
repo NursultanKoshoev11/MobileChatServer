@@ -97,7 +97,7 @@ func (r *Repository) ListUserGroups(ctx context.Context, userID string) ([]domai
 		return nil, err
 	}
 	query := `
-		SELECT g.id, g.title, g.description, g.visibility, g.owner_id, COALESCE(g.invite_code, '') AS invite_code, g.created_at,
+		SELECT g.id, g.title, g.description, g.visibility, g.owner_id, COALESCE(g.avatar_data, '') AS avatar_data, COALESCE(g.invite_code, '') AS invite_code, g.created_at,
 		       (SELECT COUNT(*)::int FROM group_members gm_all WHERE gm_all.group_id = g.id) AS member_count,
 		       gm.role,
 		       (
@@ -121,7 +121,7 @@ func (r *Repository) ListUserGroups(ctx context.Context, userID string) ([]domai
 	for rows.Next() {
 		var group domain.Group
 		var role domain.GroupRole
-		if err := rows.Scan(&group.ID, &group.Title, &group.Description, &group.Visibility, &group.OwnerID, &group.InviteCode, &group.CreatedAt, &group.MemberCount, &role, &group.UnreadPublicRequestCount); err != nil {
+		if err := rows.Scan(&group.ID, &group.Title, &group.Description, &group.Visibility, &group.OwnerID, &group.AvatarData, &group.InviteCode, &group.CreatedAt, &group.MemberCount, &role, &group.UnreadPublicRequestCount); err != nil {
 			return nil, fmt.Errorf("scan user group: %w", err)
 		}
 		group.MyRole = &role
@@ -133,7 +133,7 @@ func (r *Repository) ListUserGroups(ctx context.Context, userID string) ([]domai
 func (r *Repository) SearchPublicGroups(ctx context.Context, queryText string) ([]domain.Group, error) {
 	queryText = strings.TrimSpace(queryText)
 	query := `
-		SELECT g.id, g.title, g.description, g.visibility, g.owner_id, COALESCE(g.invite_code, '') AS invite_code, g.created_at,
+		SELECT g.id, g.title, g.description, g.visibility, g.owner_id, COALESCE(g.avatar_data, '') AS avatar_data, COALESCE(g.invite_code, '') AS invite_code, g.created_at,
 		       COUNT(gm.user_id)::int AS member_count
 		FROM groups g
 		LEFT JOIN group_members gm ON gm.group_id = g.id
@@ -151,7 +151,7 @@ func (r *Repository) SearchPublicGroups(ctx context.Context, queryText string) (
 	groups := make([]domain.Group, 0)
 	for rows.Next() {
 		var group domain.Group
-		if err := rows.Scan(&group.ID, &group.Title, &group.Description, &group.Visibility, &group.OwnerID, &group.InviteCode, &group.CreatedAt, &group.MemberCount); err != nil {
+		if err := rows.Scan(&group.ID, &group.Title, &group.Description, &group.Visibility, &group.OwnerID, &group.AvatarData, &group.InviteCode, &group.CreatedAt, &group.MemberCount); err != nil {
 			return nil, fmt.Errorf("scan public group: %w", err)
 		}
 		groups = append(groups, group)
@@ -195,7 +195,7 @@ func (r *Repository) EnsureGroupInviteCode(ctx context.Context, groupID, userID,
 	defer tx.Rollback(ctx)
 
 	query := `
-		SELECT g.id, g.title, g.description, g.visibility, g.owner_id, COALESCE(g.invite_code, '') AS invite_code, g.created_at,
+		SELECT g.id, g.title, g.description, g.visibility, g.owner_id, COALESCE(g.avatar_data, '') AS avatar_data, COALESCE(g.invite_code, '') AS invite_code, g.created_at,
 		       gm.role,
 		       (SELECT COUNT(*)::int FROM group_members WHERE group_id = g.id) AS member_count
 		FROM groups g
@@ -204,7 +204,7 @@ func (r *Repository) EnsureGroupInviteCode(ctx context.Context, groupID, userID,
 		FOR UPDATE OF g`
 	var group domain.Group
 	var role domain.GroupRole
-	if err := tx.QueryRow(ctx, query, groupID, userID).Scan(&group.ID, &group.Title, &group.Description, &group.Visibility, &group.OwnerID, &group.InviteCode, &group.CreatedAt, &role, &group.MemberCount); err != nil {
+	if err := tx.QueryRow(ctx, query, groupID, userID).Scan(&group.ID, &group.Title, &group.Description, &group.Visibility, &group.OwnerID, &group.AvatarData, &group.InviteCode, &group.CreatedAt, &role, &group.MemberCount); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.Group{}, ErrForbidden
 		}
@@ -245,11 +245,11 @@ func (r *Repository) JoinPublicGroup(ctx context.Context, groupID, userID string
 func (r *Repository) JoinByInviteCode(ctx context.Context, userID, inviteCode string) (domain.Group, error) {
 	normalizedCode := normalizeStoredInviteCode(inviteCode)
 	query := `
-		SELECT id, title, description, visibility, owner_id, COALESCE(invite_code, '') AS invite_code, created_at
+		SELECT id, title, description, visibility, owner_id, COALESCE(avatar_data, '') AS avatar_data, COALESCE(invite_code, '') AS invite_code, created_at
 		FROM groups
 		WHERE REPLACE(UPPER(COALESCE(invite_code, '')), '-', '') = $1`
 	var group domain.Group
-	if err := r.db.QueryRow(ctx, query, normalizedCode).Scan(&group.ID, &group.Title, &group.Description, &group.Visibility, &group.OwnerID, &group.InviteCode, &group.CreatedAt); err != nil {
+	if err := r.db.QueryRow(ctx, query, normalizedCode).Scan(&group.ID, &group.Title, &group.Description, &group.Visibility, &group.OwnerID, &group.AvatarData, &group.InviteCode, &group.CreatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.Group{}, ErrNotFound
 		}

@@ -103,6 +103,7 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 		r.Post("/api/groups/join-by-code", server.joinByCode)
 		r.Post("/api/groups/{groupID}/join", server.joinPublicGroup)
 		r.Post("/api/groups/{groupID}/invite-code", server.ensureGroupInviteCode)
+		r.Put("/api/groups/{groupID}/avatar", server.updateGroupAvatar)
 		r.Get("/api/groups/{groupID}/members", server.listGroupMembers)
 		r.Post("/api/groups/{groupID}/members/{userID}/role", server.updateGroupMemberRole)
 		r.Post("/api/groups/{groupID}/members/role-by-phone", server.updateGroupMemberRoleByPhone)

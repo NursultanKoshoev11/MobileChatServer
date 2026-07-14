@@ -1,0 +1,2 @@
+ALTER TABLE groups
+    ADD COLUMN IF NOT EXISTS avatar_data TEXT NOT NULL DEFAULT '';

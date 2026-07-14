@@ -41,6 +41,7 @@ type Group struct {
 	Description              string          `json:"description"`
 	Visibility               GroupVisibility `json:"visibility"`
 	OwnerID                  string          `json:"owner_id"`
+	AvatarData               string          `json:"avatar_data,omitempty"`
 	InviteCode               string          `json:"invite_code,omitempty"`
 	QRPass                   string          `json:"qr_pass,omitempty"`
 	CreatedAt                time.Time       `json:"created_at"`
