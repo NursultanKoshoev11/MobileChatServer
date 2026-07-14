@@ -98,8 +98,9 @@ func (s *Service) createPublicRequest(ctx context.Context, authorID, groupID str
 	if err != nil {
 		return domain.PublicRequest{}, err
 	}
+	var moderationNotice *ContentModerationReviewNotice
 	if runModeration {
-		if err := s.moderateContent(ctx, domain.ContentModerationItem{
+		notice, err := s.moderateContent(ctx, domain.ContentModerationItem{
 			GroupID:         groupID,
 			ContentType:     domain.ContentTypePublicRequest,
 			AuthorID:        authorID,
@@ -107,9 +108,11 @@ func (s *Service) createPublicRequest(ctx context.Context, authorID, groupID str
 			Body:            body,
 			RequestType:     input.RequestType,
 			InteractionMode: mode,
-		}); err != nil {
+		})
+		if err != nil {
 			return domain.PublicRequest{}, err
 		}
+		moderationNotice = notice
 	}
 	request, err := s.repo.CreatePublicRequest(ctx, domain.PublicRequest{
 		ID:              "REQ-" + strings.ToUpper(randomHex(12)),
@@ -123,6 +126,7 @@ func (s *Service) createPublicRequest(ctx context.Context, authorID, groupID str
 	if err != nil {
 		return domain.PublicRequest{}, err
 	}
+	s.publishModerationReviewNotice(ctx, moderationNotice, request.ID)
 	s.RecordEvent(ctx, authorID, "public_request_created", "group", groupID)
 	go s.notifyGroupAboutNewPublicRequest(context.Background(), authorID, groupID, request.ID, request.Title, bodyMeta.NotificationBody())
 	return request, nil
@@ -190,20 +194,23 @@ func (s *Service) createPublicRequestComment(ctx context.Context, authorID, requ
 	if err := s.ensureCanCommentPublicRequest(ctx, authorID, requestID); err != nil {
 		return domain.PublicRequestComment{}, err
 	}
+	var moderationNotice *ContentModerationReviewNotice
 	if runModeration {
 		requestContext, err := s.GetPublicRequestRealtimeContext(ctx, requestID)
 		if err != nil {
 			return domain.PublicRequestComment{}, err
 		}
-		if err := s.moderateContent(ctx, domain.ContentModerationItem{
+		notice, err := s.moderateContent(ctx, domain.ContentModerationItem{
 			GroupID:     requestContext.GroupID,
 			ContentType: domain.ContentTypePublicRequestComment,
 			AuthorID:    authorID,
 			TargetID:    requestID,
 			Body:        body,
-		}); err != nil {
+		})
+		if err != nil {
 			return domain.PublicRequestComment{}, err
 		}
+		moderationNotice = notice
 	}
 	comment, err := s.repo.CreatePublicRequestComment(ctx, domain.PublicRequestComment{
 		ID:        "COM-" + strings.ToUpper(randomHex(12)),
@@ -214,6 +221,7 @@ func (s *Service) createPublicRequestComment(ctx context.Context, authorID, requ
 	if err != nil {
 		return domain.PublicRequestComment{}, err
 	}
+	s.publishModerationReviewNotice(ctx, moderationNotice, comment.ID)
 	s.RecordEvent(ctx, authorID, "public_request_commented", "public_request", requestID)
 	return comment, nil
 }

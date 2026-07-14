@@ -133,13 +133,21 @@ func (s *Service) createMessage(ctx context.Context, senderID, groupID string, i
 	if len(text) > maxMessageLen {
 		return domain.Message{}, NewValidationError(fmt.Sprintf("text must be at most %d characters", maxMessageLen))
 	}
+	var moderationNotice *ContentModerationReviewNotice
 	if runModeration {
-		if err := s.moderateContent(ctx, domain.ContentModerationItem{GroupID: groupID, ContentType: domain.ContentTypeGroupMessage, AuthorID: senderID, Body: text}); err != nil {
+		notice, err := s.moderateContent(ctx, domain.ContentModerationItem{GroupID: groupID, ContentType: domain.ContentTypeGroupMessage, AuthorID: senderID, Body: text})
+		if err != nil {
 			return domain.Message{}, err
 		}
+		moderationNotice = notice
 	}
 	message := domain.Message{ID: "M-" + strings.ToUpper(randomHex(12)), GroupID: groupID, SenderID: senderID, Text: text}
-	return s.repo.CreateMessage(ctx, message)
+	created, err := s.repo.CreateMessage(ctx, message)
+	if err != nil {
+		return domain.Message{}, err
+	}
+	s.publishModerationReviewNotice(ctx, moderationNotice, created.ID)
+	return created, nil
 }
 
 func (s *Service) issueSession(ctx context.Context, user domain.User) (domain.Session, error) {

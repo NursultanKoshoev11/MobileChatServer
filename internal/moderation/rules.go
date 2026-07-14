@@ -12,6 +12,27 @@ var (
 	whitespaceRegexp = regexp.MustCompile(`\s+`)
 )
 
+var prohibitedKeywordFragments = decodeHexFragments(
+	"d0bfd180d0bed0b4d0b0d0bc",
+	"d0bfd180d0bed0b4d0b0d18e",
+	"d0bfd180d0bed0b4d0b0d0b5d182d181d18f",
+	"d0bfd180d0bed0b4d0b0d191d182d181d18f",
+	"d181d0b0d182d0b0d0bc",
+	"d181d0b0d182d18bd0bbd0b0d182",
+	"d181d0b0d182d183d183",
+	"31382b",
+	"d0bfd0bed180d0bdd0be",
+	"d181d0b5d0bad181",
+	"d0b8d0bdd182d0b8d0bc",
+	"d18dd180d0bed182d0b8d0ba",
+	"d0bfd180d0bed181d182d0b8d182",
+	"d0bad0b0d0b7d0b8d0bdd0be",
+	"d181d182d0b0d0b2d0bad0b8",
+	"d0b1d183d0bad0bcd0b5d0bad0b5d180",
+	"d0bdd0b0d180d0bad0bed182",
+	"d0bcd0b0d180d0b8d185d183d0b0d0bd",
+)
+
 var profanityFragments = decodeHexFragments("d0b1d0bbd18f", "d181d183d0bad0b0", "d185d183d0b9", "d0bfd0b8d0b7d0b4", "d0b5d0b1d0b0", "d191d0b1d0b0", "d0bdd0b0d185", "d0bcd180d0b0d0b7", "d181d0b2d0bed0bbd0bed187", "d0b4d0bed0bbd0b1d0be", "6675636b", "73686974", "6269746368", "617373686f6c65")
 
 var abuseFragments = decodeHexFragments("d0b0d0bad0bcd0b0d0ba", "d0bad0b5d0bbd0b5d181d0bed0be", "d0bdd0b0d0b0d0b4d0b0d0bd", "d182d0b0d180d182d0b8d0bfd181d0b8d0b7", "d188d0b0d0bad0b0d0bb")
@@ -22,34 +43,34 @@ var hardAdFragments = []string{
 }
 
 var adFragments = append(decodeHexFragments(
-	"d0bad183d0bfd0b8d182d0b5",                         // buy
-	"d0bad183d0bfd0bbd18e",                             // buy / want to buy
-	"d0bfd180d0bed0b4d0b0d0bc",                         // sell
-	"d0bfd180d0bed0b4d0b0d18e",                         // selling
-	"d0bfd180d0bed0b4d0b0d0b5d182d181d18f",             // for sale
-	"d0bfd180d0bed0b4d0b0d191d182d181d18f",             // for sale with yo
-	"d181d0bad0b8d0b4d0bad0b0",                         // discount
-	"d0b0d0bad186d0b8d18f",                             // promo
-	"d0b4d0b5d188d0b5d0b2d0be",                         // cheap
-	"d0b4d191d188d0b5d0b2d0be",                         // cheap with yo
-	"d0b0d180d0b7d0b0d0bd",                             // cheap KG/RU
-	"d0b7d0b0d0bad0b0d0b7",                             // order
-	"d0b4d0bed181d182d0b0d0b2d0bad0b0",                 // delivery
-	"d0b2d0b0d182d181d0b0d0bf",                         // whatsapp Cyrillic
+	"d0bad183d0bfd0b8d182d0b5",                               // buy
+	"d0bad183d0bfd0bbd18e",                                   // buy / want to buy
+	"d0bfd180d0bed0b4d0b0d0bc",                               // sell
+	"d0bfd180d0bed0b4d0b0d18e",                               // selling
+	"d0bfd180d0bed0b4d0b0d0b5d182d181d18f",                   // for sale
+	"d0bfd180d0bed0b4d0b0d191d182d181d18f",                   // for sale with yo
+	"d181d0bad0b8d0b4d0bad0b0",                               // discount
+	"d0b0d0bad186d0b8d18f",                                   // promo
+	"d0b4d0b5d188d0b5d0b2d0be",                               // cheap
+	"d0b4d191d188d0b5d0b2d0be",                               // cheap with yo
+	"d0b0d180d0b7d0b0d0bd",                                   // cheap KG/RU
+	"d0b7d0b0d0bad0b0d0b7",                                   // order
+	"d0b4d0bed181d182d0b0d0b2d0bad0b0",                       // delivery
+	"d0b2d0b0d182d181d0b0d0bf",                               // whatsapp Cyrillic
 	"d182d0b5d0bbd0b5d0b3d180d0b0d0bc20d0bad0b0d0bdd0b0d0bb", // telegram channel
-	"d0bfd0bed0b4d0bfd0b8d181d18bd0b2d0b0d0b9",         // subscribe
-	"d0b7d0b0d180d0b0d0b1d0bed182d0bed0ba",             // income
-	"d0bad180d0b5d0b4d0b8d182",                         // credit
-	"d181d0b0d182d0b0d0bc",                             // sell KG
-	"d181d0b0d182d18bd0bbd0b0d182",                     // for sale KG
-	"d181d0b0d182d183d183",                             // sale KG
-	"d0b1d0b0d0b0d181d18b",                             // price KG
-	"d0b6d0b5d182d0bad0b8d180d2afd2af",                 // delivery KG
-	"d0b6d0b5d182d0bad0b8d180d183d183",                 // delivery KG alt
-	"d0b6d0b0d0b7d18bd0bbd18bd2a3d18bd0b7",             // subscribe KG
-	"d0b6d0b0d0b7d18bd0bbd18bd0bdd18bd0b7",             // subscribe KG alt
-	"d0bdd0bed0bcd0b5d180d0b8",                         // number
-	"d0bdd0bed0bcd0b5d180d0b8d0bc",                     // my number
+	"d0bfd0bed0b4d0bfd0b8d181d18bd0b2d0b0d0b9",               // subscribe
+	"d0b7d0b0d180d0b0d0b1d0bed182d0bed0ba",                   // income
+	"d0bad180d0b5d0b4d0b8d182",                               // credit
+	"d181d0b0d182d0b0d0bc",                                   // sell KG
+	"d181d0b0d182d18bd0bbd0b0d182",                           // for sale KG
+	"d181d0b0d182d183d183",                                   // sale KG
+	"d0b1d0b0d0b0d181d18b",                                   // price KG
+	"d0b6d0b5d182d0bad0b8d180d2afd2af",                       // delivery KG
+	"d0b6d0b5d182d0bad0b8d180d183d183",                       // delivery KG alt
+	"d0b6d0b0d0b7d18bd0bbd18bd2a3d18bd0b7",                   // subscribe KG
+	"d0b6d0b0d0b7d18bd0bbd18bd0bdd18bd0b7",                   // subscribe KG alt
+	"d0bdd0bed0bcd0b5d180d0b8",                               // number
+	"d0bdd0bed0bcd0b5d180d0b8d0bc",                           // my number
 ), "whatsapp", "telegram", "instagram", "facebook", "wa.me", "t.me")
 
 type RuleChecker struct{}
@@ -63,6 +84,12 @@ func (RuleChecker) Check(input Input) Decision {
 	}
 
 	reasons := make([]string, 0)
+	for _, fragment := range prohibitedKeywordFragments {
+		if strings.Contains(text, fragment) {
+			reasons = append(reasons, "prohibited_keyword")
+			return NewDecision(ActionBlock, "rules", uniqueReasons(reasons)...)
+		}
+	}
 	for _, fragment := range profanityFragments {
 		if strings.Contains(text, fragment) {
 			reasons = append(reasons, "profanity")

@@ -25,13 +25,15 @@ func (s *Service) UpdateMessage(ctx context.Context, actorID, groupID, messageID
 	if len(text) > maxMessageLen {
 		return domain.Message{}, NewValidationError(fmt.Sprintf("text must be at most %d characters", maxMessageLen))
 	}
-	if err := s.moderateContent(ctx, domain.ContentModerationItem{GroupID: groupID, ContentType: domain.ContentTypeGroupMessage, AuthorID: actorID, Body: text}); err != nil {
+	moderationNotice, err := s.moderateContent(ctx, domain.ContentModerationItem{GroupID: groupID, ContentType: domain.ContentTypeGroupMessage, AuthorID: actorID, Body: text})
+	if err != nil {
 		return domain.Message{}, err
 	}
 	message, err := s.repo.UpdateMessage(ctx, groupID, actorID, messageID, text)
 	if err != nil {
 		return domain.Message{}, err
 	}
+	s.publishModerationReviewNotice(ctx, moderationNotice, message.ID)
 	go s.NotifyGroupAboutMessageUpdated(context.Background(), actorID, message)
 	return message, nil
 }
