@@ -26,16 +26,20 @@ func (e ContentModerationPendingError) Error() string {
 	return "content requires moderation review"
 }
 
+type ContentModerationReviewNotice struct {
+	Item domain.ContentModerationItem
+}
+
 func (s *Service) SetContentModerator(moderator moderation.Moderator) {
 	s.contentModerator = moderator
 }
 
-func (s *Service) moderateContent(ctx context.Context, item domain.ContentModerationItem) error {
+func (s *Service) moderateContent(ctx context.Context, item domain.ContentModerationItem) (*ContentModerationReviewNotice, error) {
 	if s.contentModerator == nil {
-		return nil
+		return nil, nil
 	}
 	if err := s.enforceModerationRateLimit(ctx, item); err != nil {
-		return err
+		return nil, err
 	}
 	body := moderationBodyForInput(item)
 	if matches, err := s.repo.MatchLearnedModerationRules(ctx, item.GroupID, normalizeAdaptiveModerationText(body), 5); err == nil {
@@ -55,14 +59,14 @@ func (s *Service) moderateContent(ctx context.Context, item domain.ContentModera
 		Body:        body,
 	})
 	if err != nil {
-		return fmt.Errorf("moderate content: %w", err)
+		return nil, fmt.Errorf("moderate content: %w", err)
 	}
 	return s.handleModerationDecision(ctx, item, decision)
 }
 
-func (s *Service) handleModerationDecision(ctx context.Context, item domain.ContentModerationItem, decision moderation.Decision) error {
+func (s *Service) handleModerationDecision(ctx context.Context, item domain.ContentModerationItem, decision moderation.Decision) (*ContentModerationReviewNotice, error) {
 	if decision.Action == moderation.ActionAllow {
-		return nil
+		return nil, nil
 	}
 	queued := item
 	queued.ID = "MOD-" + strings.ToUpper(randomHex(12))
@@ -78,16 +82,29 @@ func (s *Service) handleModerationDecision(ctx context.Context, item domain.Cont
 	queued.ProviderScoresJSON = firstNonEmpty(decision.ProviderScoresJSON, "{}")
 	created, err := s.repo.CreateContentModerationItem(ctx, queued)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if decision.Action == moderation.ActionBlock {
 		s.RecordEvent(ctx, item.AuthorID, "content_moderation_auto_rejected", string(item.ContentType), created.ID)
 		s.applyModerationAutoMute(ctx, created)
-		return NewValidationError("content is not allowed")
+		return nil, NewValidationError("content is not allowed")
 	}
 	s.RecordEvent(ctx, item.AuthorID, "content_moderation_queued", string(item.ContentType), created.ID)
-	go s.NotifyAdminsAboutContentModerationPending(context.Background(), created)
-	return ContentModerationPendingError{Item: created}
+	return &ContentModerationReviewNotice{Item: created}, nil
+}
+
+func (s *Service) publishModerationReviewNotice(ctx context.Context, notice *ContentModerationReviewNotice, publishedResourceID string) {
+	if notice == nil || strings.TrimSpace(publishedResourceID) == "" {
+		return
+	}
+	item := notice.Item
+	updated, err := s.repo.SetContentModerationPublishedResourceID(ctx, item.ID, publishedResourceID)
+	if err == nil {
+		item = updated
+	} else {
+		item.PublishedResourceID = publishedResourceID
+	}
+	go s.NotifyAdminsAboutContentModerationPending(context.Background(), item)
 }
 
 func (s *Service) enforceModerationRateLimit(ctx context.Context, item domain.ContentModerationItem) error {
@@ -159,6 +176,16 @@ func (s *Service) ApproveContentModerationItem(ctx context.Context, reviewerID, 
 		return domain.ContentModerationReviewResult{}, err
 	}
 
+	if strings.TrimSpace(item.PublishedResourceID) != "" {
+		reviewed, err := s.repo.ReviewContentModerationItem(ctx, itemID, domain.ContentModerationStatusApproved, reviewerID, item.PublishedResourceID)
+		if err != nil {
+			return domain.ContentModerationReviewResult{}, err
+		}
+		_ = s.storeAdaptiveModerationFeedback(ctx, item, "allow", itemID)
+		s.RecordEvent(ctx, reviewerID, "content_moderation_approved", string(item.ContentType), itemID)
+		return domain.ContentModerationReviewResult{Item: reviewed}, nil
+	}
+
 	var publishedID string
 	result := domain.ContentModerationReviewResult{}
 	switch item.ContentType {
@@ -217,7 +244,10 @@ func (s *Service) RejectContentModerationItem(ctx context.Context, reviewerID, i
 	if err := s.ensureGroupModerator(ctx, reviewerID, item.GroupID); err != nil {
 		return domain.ContentModerationItem{}, err
 	}
-	reviewed, err := s.repo.ReviewContentModerationItem(ctx, itemID, domain.ContentModerationStatusRejected, reviewerID, "")
+	if err := s.removePublishedModerationResource(ctx, reviewerID, item); err != nil {
+		return domain.ContentModerationItem{}, err
+	}
+	reviewed, err := s.repo.ReviewContentModerationItem(ctx, itemID, domain.ContentModerationStatusRejected, reviewerID, item.PublishedResourceID)
 	if err != nil {
 		return domain.ContentModerationItem{}, err
 	}
@@ -225,6 +255,25 @@ func (s *Service) RejectContentModerationItem(ctx context.Context, reviewerID, i
 	s.RecordEvent(ctx, reviewerID, "content_moderation_rejected", string(item.ContentType), itemID)
 	s.applyModerationAutoMute(ctx, reviewed)
 	return reviewed, nil
+}
+
+func (s *Service) removePublishedModerationResource(ctx context.Context, reviewerID string, item domain.ContentModerationItem) error {
+	publishedID := strings.TrimSpace(item.PublishedResourceID)
+	if publishedID == "" {
+		return nil
+	}
+	switch item.ContentType {
+	case domain.ContentTypeGroupMessage:
+		_, err := s.DeleteMessage(ctx, reviewerID, item.GroupID, publishedID)
+		return err
+	case domain.ContentTypePublicRequest:
+		return s.HidePublicRequest(ctx, reviewerID, publishedID)
+	case domain.ContentTypePublicRequestComment:
+		_, err := s.DeletePublicRequestComment(ctx, reviewerID, publishedID)
+		return err
+	default:
+		return NewValidationError("content_type is invalid")
+	}
 }
 
 func (s *Service) ensureGroupModerator(ctx context.Context, userID, groupID string) error {

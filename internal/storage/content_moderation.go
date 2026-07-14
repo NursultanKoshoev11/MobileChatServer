@@ -142,6 +142,20 @@ func (r *Repository) ListContentModerationAdminUserIDs(ctx context.Context, grou
 	return ids, rows.Err()
 }
 
+func (r *Repository) SetContentModerationPublishedResourceID(ctx context.Context, itemID, publishedResourceID string) (domain.ContentModerationItem, error) {
+	tag, err := r.db.Exec(ctx, `
+		UPDATE content_moderation_items
+		SET published_resource_id = NULLIF($2, '')
+		WHERE id = $1 AND status = 'pending'`, itemID, publishedResourceID)
+	if err != nil {
+		return domain.ContentModerationItem{}, fmt.Errorf("set moderation published resource id: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ContentModerationItem{}, ErrNotFound
+	}
+	return r.GetContentModerationItem(ctx, itemID)
+}
+
 func (r *Repository) GetContentModerationItem(ctx context.Context, itemID string) (domain.ContentModerationItem, error) {
 	query := `
 		SELECT c.id, c.group_id, c.content_type, c.author_id, COALESCE(u.display_name, ''),
