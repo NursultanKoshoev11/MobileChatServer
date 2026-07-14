@@ -19,3 +19,20 @@ func (s *Server) searchUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, users)
 }
+
+type updateAvatarInput struct {
+	AvatarData string `json:"avatar_data"`
+}
+
+func (s *Server) updateMyAvatar(w http.ResponseWriter, r *http.Request) {
+	var input updateAvatarInput
+	if !readJSON(w, r, &input) {
+		return
+	}
+	user, err := s.svc.UpdateUserAvatar(r.Context(), currentUser(r).ID, input.AvatarData)
+	if err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, user)
+}

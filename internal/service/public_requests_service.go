@@ -144,32 +144,34 @@ func (s *Service) ListPublicRequests(ctx context.Context, viewerID, groupID stri
 	return s.repo.ListPublicRequests(ctx, groupID, viewerID, limit, before, mineOnly)
 }
 
-func (s *Service) VotePublicRequest(ctx context.Context, userID, requestID, voteType string) error {
+func (s *Service) VotePublicRequest(ctx context.Context, userID, requestID, voteType string) (domain.PublicRequestVoteUpdate, error) {
 	requestID = strings.TrimSpace(requestID)
 	voteType = strings.TrimSpace(voteType)
 	if requestID == "" {
-		return NewValidationError("request_id is required")
+		return domain.PublicRequestVoteUpdate{}, NewValidationError("request_id is required")
 	}
 	if voteType != "support" && voteType != "oppose" {
-		return NewValidationError("vote_type must be support or oppose")
+		return domain.PublicRequestVoteUpdate{}, NewValidationError("vote_type must be support or oppose")
 	}
-	if err := s.repo.VotePublicRequest(ctx, requestID, userID, voteType); err != nil {
-		return err
+	update, err := s.repo.VotePublicRequest(ctx, requestID, userID, voteType)
+	if err != nil {
+		return domain.PublicRequestVoteUpdate{}, err
 	}
 	s.RecordEvent(ctx, userID, "public_request_voted", "public_request", requestID)
-	return nil
+	return update, nil
 }
 
-func (s *Service) ClearPublicRequestVote(ctx context.Context, userID, requestID string) error {
+func (s *Service) ClearPublicRequestVote(ctx context.Context, userID, requestID string) (domain.PublicRequestVoteUpdate, error) {
 	requestID = strings.TrimSpace(requestID)
 	if requestID == "" {
-		return NewValidationError("request_id is required")
+		return domain.PublicRequestVoteUpdate{}, NewValidationError("request_id is required")
 	}
-	if err := s.repo.ClearPublicRequestVote(ctx, requestID, userID); err != nil {
-		return err
+	update, err := s.repo.ClearPublicRequestVote(ctx, requestID, userID)
+	if err != nil {
+		return domain.PublicRequestVoteUpdate{}, err
 	}
 	s.RecordEvent(ctx, userID, "public_request_vote_cleared", "public_request", requestID)
-	return nil
+	return update, nil
 }
 
 func (s *Service) CreatePublicRequestComment(ctx context.Context, authorID, requestID string, input CreatePublicRequestCommentInput) (domain.PublicRequestComment, error) {

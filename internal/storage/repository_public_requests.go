@@ -103,59 +103,77 @@ func (r *Repository) ListPublicRequests(ctx context.Context, groupID, viewerID s
 	return requests, rows.Err()
 }
 
-func (r *Repository) VotePublicRequest(ctx context.Context, requestID, userID, voteType string) error {
+func (r *Repository) VotePublicRequest(ctx context.Context, requestID, userID, voteType string) (domain.PublicRequestVoteUpdate, error) {
 	groupID, err := r.publicRequestGroupID(ctx, requestID)
 	if err != nil {
-		return err
+		return domain.PublicRequestVoteUpdate{}, err
 	}
 	mode, err := r.publicRequestInteractionMode(ctx, requestID)
 	if err != nil {
-		return err
+		return domain.PublicRequestVoteUpdate{}, err
 	}
 	if mode == domain.InteractionModeReadOnly {
-		return ErrForbidden
+		return domain.PublicRequestVoteUpdate{}, ErrForbidden
 	}
 	isMember, err := r.IsGroupMember(ctx, groupID, userID)
 	if err != nil {
-		return err
+		return domain.PublicRequestVoteUpdate{}, err
 	}
 	if !isMember {
-		return ErrForbidden
+		return domain.PublicRequestVoteUpdate{}, ErrForbidden
 	}
 	_, err = r.db.Exec(ctx, `
 		INSERT INTO public_request_votes (request_id, user_id, vote_type, created_at, updated_at)
 		VALUES ($1, $2, $3, now(), now())
 		ON CONFLICT (request_id, user_id) DO UPDATE SET vote_type = EXCLUDED.vote_type, updated_at = now()`, requestID, userID, voteType)
 	if err != nil {
-		return fmt.Errorf("vote public request: %w", err)
+		return domain.PublicRequestVoteUpdate{}, fmt.Errorf("vote public request: %w", err)
 	}
-	return nil
+	return r.publicRequestVoteUpdate(ctx, requestID, userID, &voteType)
 }
 
-func (r *Repository) ClearPublicRequestVote(ctx context.Context, requestID, userID string) error {
+func (r *Repository) ClearPublicRequestVote(ctx context.Context, requestID, userID string) (domain.PublicRequestVoteUpdate, error) {
 	groupID, err := r.publicRequestGroupID(ctx, requestID)
 	if err != nil {
-		return err
+		return domain.PublicRequestVoteUpdate{}, err
 	}
 	mode, err := r.publicRequestInteractionMode(ctx, requestID)
 	if err != nil {
-		return err
+		return domain.PublicRequestVoteUpdate{}, err
 	}
 	if mode == domain.InteractionModeReadOnly {
-		return ErrForbidden
+		return domain.PublicRequestVoteUpdate{}, ErrForbidden
 	}
 	isMember, err := r.IsGroupMember(ctx, groupID, userID)
 	if err != nil {
-		return err
+		return domain.PublicRequestVoteUpdate{}, err
 	}
 	if !isMember {
-		return ErrForbidden
+		return domain.PublicRequestVoteUpdate{}, ErrForbidden
 	}
 	_, err = r.db.Exec(ctx, `DELETE FROM public_request_votes WHERE request_id = $1 AND user_id = $2`, requestID, userID)
 	if err != nil {
-		return fmt.Errorf("clear public request vote: %w", err)
+		return domain.PublicRequestVoteUpdate{}, fmt.Errorf("clear public request vote: %w", err)
 	}
-	return nil
+	return r.publicRequestVoteUpdate(ctx, requestID, userID, nil)
+}
+
+func (r *Repository) publicRequestVoteUpdate(ctx context.Context, requestID, voterID string, voteType *string) (domain.PublicRequestVoteUpdate, error) {
+	update := domain.PublicRequestVoteUpdate{
+		RequestID: requestID,
+		VoterID:   voterID,
+		VoteType:  voteType,
+	}
+	err := r.db.QueryRow(ctx, `
+		SELECT
+			COUNT(*) FILTER (WHERE vote_type = 'support')::int,
+			COUNT(*) FILTER (WHERE vote_type = 'oppose')::int
+		FROM public_request_votes
+		WHERE request_id = $1`, requestID).Scan(&update.SupportCount, &update.OpposeCount)
+	if err != nil {
+		return domain.PublicRequestVoteUpdate{}, fmt.Errorf("read public request vote counts: %w", err)
+	}
+	return update, nil
 }
 
 func (r *Repository) CreatePublicRequestComment(ctx context.Context, comment domain.PublicRequestComment) (domain.PublicRequestComment, error) {

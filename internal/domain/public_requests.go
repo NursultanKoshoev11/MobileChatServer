@@ -49,6 +49,14 @@ type PublicRequest struct {
 	UpdatedAt       time.Time                    `json:"updated_at"`
 }
 
+type PublicRequestVoteUpdate struct {
+	RequestID    string  `json:"request_id"`
+	SupportCount int     `json:"support_count"`
+	OpposeCount  int     `json:"oppose_count"`
+	VoterID      string  `json:"voter_id"`
+	VoteType     *string `json:"vote_type"`
+}
+
 type PublicRequestComment struct {
 	ID         string     `json:"id"`
 	RequestID  string     `json:"request_id"`

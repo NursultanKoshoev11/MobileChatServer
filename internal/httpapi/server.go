@@ -91,6 +91,7 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 	r.Group(func(r chi.Router) {
 		r.Use(server.auth)
 		r.Get("/api/me", server.me)
+		r.Put("/api/me/avatar", server.updateMyAvatar)
 		r.Post("/api/ws-token", server.issueWebSocketToken)
 		r.Get("/api/ws", server.userWebSocket)
 		r.Post("/api/push/register", server.registerPushToken)
@@ -225,7 +226,12 @@ func (s *Server) logoutPhoneSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, currentUser(r))
+	user, err := s.svc.GetUserProfile(r.Context(), currentUser(r).ID)
+	if err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, user)
 }
 
 func (s *Server) issueWebSocketToken(w http.ResponseWriter, r *http.Request) {
@@ -632,7 +638,7 @@ func (s *Server) cors(next http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
 		}
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID")
 		w.Header().Set("Access-Control-Expose-Headers", "X-Request-ID")
 		if r.Method == http.MethodOptions {

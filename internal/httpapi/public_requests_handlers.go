@@ -49,32 +49,35 @@ func (s *Server) listPublicRequests(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) supportPublicRequest(w http.ResponseWriter, r *http.Request) {
 	requestID := chi.URLParam(r, "requestID")
-	if err := s.svc.VotePublicRequest(r.Context(), currentUser(r).ID, requestID, "support"); err != nil {
+	update, err := s.svc.VotePublicRequest(r.Context(), currentUser(r).ID, requestID, "support")
+	if err != nil {
 		s.writeError(w, err)
 		return
 	}
-	s.broadcastPublicRequestRefresh(r, requestID, "public_request.voted", map[string]string{"request_id": requestID, "vote_type": "support"})
-	writeJSON(w, http.StatusOK, map[string]string{"status": "supported"})
+	s.broadcastPublicRequestRefresh(r, requestID, "public_request.voted", update)
+	writeJSON(w, http.StatusOK, update)
 }
 
 func (s *Server) opposePublicRequest(w http.ResponseWriter, r *http.Request) {
 	requestID := chi.URLParam(r, "requestID")
-	if err := s.svc.VotePublicRequest(r.Context(), currentUser(r).ID, requestID, "oppose"); err != nil {
+	update, err := s.svc.VotePublicRequest(r.Context(), currentUser(r).ID, requestID, "oppose")
+	if err != nil {
 		s.writeError(w, err)
 		return
 	}
-	s.broadcastPublicRequestRefresh(r, requestID, "public_request.voted", map[string]string{"request_id": requestID, "vote_type": "oppose"})
-	writeJSON(w, http.StatusOK, map[string]string{"status": "opposed"})
+	s.broadcastPublicRequestRefresh(r, requestID, "public_request.voted", update)
+	writeJSON(w, http.StatusOK, update)
 }
 
 func (s *Server) clearPublicRequestVote(w http.ResponseWriter, r *http.Request) {
 	requestID := chi.URLParam(r, "requestID")
-	if err := s.svc.ClearPublicRequestVote(r.Context(), currentUser(r).ID, requestID); err != nil {
+	update, err := s.svc.ClearPublicRequestVote(r.Context(), currentUser(r).ID, requestID)
+	if err != nil {
 		s.writeError(w, err)
 		return
 	}
-	s.broadcastPublicRequestRefresh(r, requestID, "public_request.vote_cleared", map[string]string{"request_id": requestID})
-	writeJSON(w, http.StatusOK, map[string]string{"status": "cleared"})
+	s.broadcastPublicRequestRefresh(r, requestID, "public_request.vote_cleared", update)
+	writeJSON(w, http.StatusOK, update)
 }
 
 func (s *Server) createPublicRequestComment(w http.ResponseWriter, r *http.Request) {

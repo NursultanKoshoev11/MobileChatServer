@@ -61,12 +61,17 @@ def _discover_routes_from_server_go() -> set[tuple[str, str]]:
     source = SERVER_GO.read_text(encoding="utf-8")
     found: set[tuple[str, str]] = set()
 
-    # Routes are declared as r.Get("..."), r.Post("..."), r.Delete("...").
-    # The only nested prefix in the current router is /api/auth.
-    for method, path in re.findall(r"r\.(Get|Post|Delete)\(\"([^\"]+)\"", source):
-        full_path = path
-        if not full_path.startswith("/api/"):
-            full_path = "/api/auth" + full_path
+    # Match only actual route declarations at the start of a Go line.
+    # Auth routes are declared inside the /api/auth nested router.
+    auth_paths = {"/request-code", "/verify-code", "/refresh", "/logout"}
+    route_pattern = r'(?m)^\s*r\.(Get|Post|Put|Patch|Delete)\("([^"]+)"'
+    for method, path in re.findall(route_pattern, source):
+        if path in auth_paths:
+            full_path = "/api/auth" + path
+        elif path.startswith("/api/"):
+            full_path = path
+        else:
+            continue
         found.add((method.upper(), full_path))
 
     return found
@@ -133,6 +138,8 @@ def _body_for(endpoint: Endpoint) -> dict[str, Any]:
         }
     if path in {"/api/auth/refresh", "/api/auth/logout"}:
         return {"refresh_token": os.getenv("API_TEST_REFRESH_TOKEN", "invalid-refresh-token")}
+    if path == "/api/me/avatar":
+        return {"avatar_data": ""}
     if path == "/api/push/register" or path == "/api/push/token":
         return {"token": "qa-test-token", "platform": "android"}
     if path == "/api/groups":
@@ -201,6 +208,8 @@ def _path_with_fixtures(path: str) -> str:
         "{requestID}": os.getenv("API_TEST_REQUEST_ID", "missing-request-id"),
         "{commentID}": os.getenv("API_TEST_COMMENT_ID", "missing-comment-id"),
         "{itemID}": os.getenv("API_TEST_MODERATION_ITEM_ID", "missing-moderation-item-id"),
+        "{messageID}": os.getenv("API_TEST_MESSAGE_ID", "missing-message-id"),
+        "{fileID}": os.getenv("API_TEST_FILE_ID", "missing-file-id"),
     }
 
     if path.startswith("/api/admin/group-creation-requests/"):
@@ -222,6 +231,8 @@ def _missing_fixture_names(path: str) -> list[str]:
         "{requestID}": "API_TEST_REQUEST_ID",
         "{commentID}": "API_TEST_COMMENT_ID",
         "{itemID}": "API_TEST_MODERATION_ITEM_ID",
+        "{messageID}": "API_TEST_MESSAGE_ID",
+        "{fileID}": "API_TEST_FILE_ID",
     }
     missing = [env for marker, env in required.items() if marker in path and not os.getenv(env)]
     if path.startswith("/api/admin/group-creation-requests/") and not os.getenv(
