@@ -86,7 +86,7 @@ jobs:
           echo "Cleaning Docker cache and unused deployment artifacts."
           docker builder prune -af || true
           docker container prune -f || true
-          docker image prune -f || true
+          docker image prune -af || true
           sudo apt-get clean || true
           sudo journalctl --vacuum-size=100M || true
           sudo mkdir -p data/public-files
@@ -109,9 +109,8 @@ jobs:
             if curl -fsS http://127.0.0.1:8080/api/health >/dev/null && curl -fsS https://koommy.duckdns.org/api/health >/dev/null; then
               echo "Health check OK"
               docker ps
-              docker image prune -f || true
+              docker image prune -af || true
               exit 0
-
             fi
             echo "Waiting for API... $i"
             sleep 2
