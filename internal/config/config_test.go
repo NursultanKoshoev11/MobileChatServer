@@ -25,3 +25,15 @@ func TestWildcardTestAuthPhoneRequiresLocalEnvironment(t *testing.T) {
 		t.Fatal("did not expect shared environments to allow wildcard test auth")
 	}
 }
+
+func TestAppendUniquePhoneKeepsProjectOwnerOnce(t *testing.T) {
+	phones := appendUniquePhone([]string{"+996700000001"}, defaultProjectOwnerPhone)
+	if len(phones) != 2 || phones[1] != defaultProjectOwnerPhone {
+		t.Fatalf("expected project owner phone to be appended once, got %#v", phones)
+	}
+
+	phones = appendUniquePhone(phones, defaultProjectOwnerPhone)
+	if len(phones) != 2 {
+		t.Fatalf("expected duplicate project owner phone to be ignored, got %#v", phones)
+	}
+}

@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+const defaultProjectOwnerPhone = "+996000000000"
+
 type Config struct {
 	Port                           string
 	DatabaseURL                    string
@@ -56,7 +58,7 @@ func Load() (Config, error) {
 		FCMProjectID:                   os.Getenv("FCM_PROJECT_ID"),
 		FCMClientEmail:                 os.Getenv("FCM_CLIENT_EMAIL"),
 		FCMPrivateKey:                  os.Getenv("FCM_PRIVATE_KEY"),
-		SuperAdminPhones:               getEnvList("SUPER_ADMIN_PHONES"),
+		SuperAdminPhones:               appendUniquePhone(getEnvList("SUPER_ADMIN_PHONES"), getEnv("PROJECT_OWNER_PHONE", defaultProjectOwnerPhone)),
 		PlatformAdminPhones:            getEnvList("PLATFORM_ADMIN_PHONES"),
 		TestAuthEnabled:                getEnvBool("TEST_AUTH_ENABLED", false),
 		TestAuthPhone:                  getEnv("TEST_AUTH_PHONE", "+996555555555,+996700000001,+996700000002,+996700000003,+996700000004"),
@@ -125,6 +127,19 @@ func Load() (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func appendUniquePhone(phones []string, phone string) []string {
+	phone = strings.TrimSpace(phone)
+	if phone == "" {
+		return phones
+	}
+	for _, existing := range phones {
+		if strings.TrimSpace(existing) == phone {
+			return phones
+		}
+	}
+	return append(phones, phone)
 }
 
 func getEnv(key, fallback string) string {

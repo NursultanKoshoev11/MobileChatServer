@@ -38,13 +38,13 @@ func (r *Repository) UpsertUserRoleFromAllowlist(ctx context.Context, userID, ph
 }
 
 func (r *Repository) SyncAdminPhoneAllowlist(ctx context.Context, superAdminPhones, platformAdminPhones []string) error {
-	for _, phone := range superAdminPhones {
-		if err := r.upsertAdminPhone(ctx, phone, domain.UserRoleSuperAdmin); err != nil {
+	for _, phone := range platformAdminPhones {
+		if err := r.upsertAdminPhone(ctx, phone, domain.UserRolePlatformAdmin); err != nil {
 			return err
 		}
 	}
-	for _, phone := range platformAdminPhones {
-		if err := r.upsertAdminPhone(ctx, phone, domain.UserRolePlatformAdmin); err != nil {
+	for _, phone := range superAdminPhones {
+		if err := r.upsertAdminPhone(ctx, phone, domain.UserRoleSuperAdmin); err != nil {
 			return err
 		}
 	}

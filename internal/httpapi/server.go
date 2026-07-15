@@ -147,6 +147,7 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 		r.Post("/api/admin/group-creation-requests/{requestID}/approve", server.approveGroupCreationRequest)
 		r.Post("/api/admin/group-creation-requests/{requestID}/reject", server.rejectGroupCreationRequest)
 		r.Post("/api/admin/group-creation-requests/{requestID}/need-more-info", server.needMoreInfoForGroupCreationRequest)
+		r.Delete("/api/admin/groups/{groupID}", server.deleteGroupAsPlatformAdmin)
 	})
 
 	server.router = r

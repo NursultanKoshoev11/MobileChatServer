@@ -59,14 +59,6 @@ func (s *PhoneAuthService) RequestCode(ctx context.Context, input RequestPhoneCo
 		return RequestPhoneCodeOutput{}, err
 	}
 
-	if temporaryAnyPhoneDemoLoginEnabledAt(time.Now().UTC()) {
-		return RequestPhoneCodeOutput{
-			Status:        "test_code_ready",
-			DevCode:       publicDemoAuthCode,
-			AccountExists: true,
-		}, nil
-	}
-
 	accountExists := true
 	if _, err := s.repo.GetPhoneUserByMobile(ctx, mobile); err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
@@ -74,6 +66,14 @@ func (s *PhoneAuthService) RequestCode(ctx context.Context, input RequestPhoneCo
 		} else {
 			return RequestPhoneCodeOutput{}, err
 		}
+	}
+
+	if temporaryAnyPhoneDemoLoginEnabledAt(time.Now().UTC()) {
+		return RequestPhoneCodeOutput{
+			Status:        "test_code_ready",
+			DevCode:       publicDemoAuthCode,
+			AccountExists: accountExists,
+		}, nil
 	}
 
 	if s.isDemoAuthMobile(mobile) || s.isTestAuthMobile(mobile) {
@@ -137,7 +137,19 @@ func (s *PhoneAuthService) VerifyCode(ctx context.Context, input VerifyPhoneCode
 		if code != publicDemoAuthCode {
 			return domain.PhoneSession{}, ErrInvalidCredentials
 		}
-		mobile = publicDemoAuthPhones[0]
+		displayName := strings.TrimSpace(input.DisplayName)
+		if displayName == "" {
+			displayName = "Koom Test User"
+		}
+		user, err := s.getOrCreatePhoneUser(ctx, mobile, displayName)
+		if err != nil {
+			return domain.PhoneSession{}, err
+		}
+		_ = s.repo.MarkPhoneVerified(ctx, user.ID)
+		if err := s.repo.UpsertUserRoleFromAllowlist(ctx, user.ID, mobile); err != nil {
+			return domain.PhoneSession{}, err
+		}
+		return s.issuePhoneSession(ctx, user)
 	}
 
 	if s.isDemoAuthMobile(mobile) || s.isTestAuthMobile(mobile) {
