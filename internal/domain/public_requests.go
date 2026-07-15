@@ -58,11 +58,12 @@ type PublicRequestVoteUpdate struct {
 }
 
 type PublicRequestComment struct {
-	ID         string     `json:"id"`
-	RequestID  string     `json:"request_id"`
-	AuthorID   string     `json:"author_id"`
-	AuthorName string     `json:"author_name"`
-	Body       string     `json:"body"`
-	CreatedAt  time.Time  `json:"created_at"`
-	DeletedAt  *time.Time `json:"deleted_at,omitempty"`
+	ID               string     `json:"id"`
+	RequestID        string     `json:"request_id"`
+	AuthorID         string     `json:"author_id"`
+	AuthorName       string     `json:"author_name"`
+	AuthorAvatarData string     `json:"author_avatar_data,omitempty"`
+	Body             string     `json:"body"`
+	CreatedAt        time.Time  `json:"created_at"`
+	DeletedAt        *time.Time `json:"deleted_at,omitempty"`
 }

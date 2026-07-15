@@ -206,6 +206,7 @@ func (r *Repository) CreatePublicRequestComment(ctx context.Context, comment dom
 		return domain.PublicRequestComment{}, err
 	}
 	comment.AuthorName = user.DisplayName
+	comment.AuthorAvatarData = user.AvatarData
 	return comment, nil
 }
 
@@ -222,7 +223,8 @@ func (r *Repository) ListPublicRequestComments(ctx context.Context, requestID, v
 		return nil, ErrForbidden
 	}
 	rows, err := r.db.Query(ctx, `
-		SELECT c.id, c.request_id, c.author_id, u.display_name, c.body, c.created_at, c.deleted_at
+		SELECT c.id, c.request_id, c.author_id, u.display_name,
+		       COALESCE(u.avatar_data, ''), c.body, c.created_at, c.deleted_at
 		FROM public_request_comments c
 		JOIN users u ON u.id = c.author_id
 		WHERE c.request_id = $1 AND c.deleted_at IS NULL
@@ -235,7 +237,16 @@ func (r *Repository) ListPublicRequestComments(ctx context.Context, requestID, v
 	comments := make([]domain.PublicRequestComment, 0)
 	for rows.Next() {
 		var comment domain.PublicRequestComment
-		if err := rows.Scan(&comment.ID, &comment.RequestID, &comment.AuthorID, &comment.AuthorName, &comment.Body, &comment.CreatedAt, &comment.DeletedAt); err != nil {
+		if err := rows.Scan(
+			&comment.ID,
+			&comment.RequestID,
+			&comment.AuthorID,
+			&comment.AuthorName,
+			&comment.AuthorAvatarData,
+			&comment.Body,
+			&comment.CreatedAt,
+			&comment.DeletedAt,
+		); err != nil {
 			return nil, fmt.Errorf("scan public request comment: %w", err)
 		}
 		comments = append(comments, comment)
