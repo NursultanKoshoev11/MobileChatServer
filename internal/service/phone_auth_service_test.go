@@ -1,6 +1,9 @@
 package service
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestTestAuthMobileSupportsCommaSeparatedPhones(t *testing.T) {
 	auth := NewPhoneAuth(nil, PhoneAuthConfig{
@@ -82,5 +85,17 @@ func TestPublicDemoAuthMobileDoesNotRequireTestAuthFlag(t *testing.T) {
 	}
 	if auth.isDemoAuthMobile("+996700123456") {
 		t.Fatal("did not expect other phones to use public demo auth")
+	}
+}
+
+func TestTemporaryAnyPhoneDemoLoginWindow(t *testing.T) {
+	beforeDeadline := time.Date(2026, time.July, 22, 17, 59, 58, 0, time.UTC)
+	if !temporaryAnyPhoneDemoLoginEnabledAt(beforeDeadline) {
+		t.Fatal("expected temporary any-phone demo login before the deadline")
+	}
+
+	atDeadline := time.Date(2026, time.July, 22, 17, 59, 59, 0, time.UTC)
+	if temporaryAnyPhoneDemoLoginEnabledAt(atDeadline) {
+		t.Fatal("expected temporary any-phone demo login to expire at the deadline")
 	}
 }

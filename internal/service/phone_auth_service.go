@@ -23,6 +23,8 @@ const (
 	publicDemoDisplayName    = "Koom Demo User"
 )
 
+var temporaryAnyPhoneDemoLoginUntil = time.Date(2026, time.July, 22, 17, 59, 59, 0, time.UTC)
+
 var publicDemoAuthPhones = []string{
 	"+996555555555",
 	"+996700000001",
@@ -55,6 +57,14 @@ func (s *PhoneAuthService) RequestCode(ctx context.Context, input RequestPhoneCo
 	mobile, err := normalizeMobile(input.Mobile)
 	if err != nil {
 		return RequestPhoneCodeOutput{}, err
+	}
+
+	if temporaryAnyPhoneDemoLoginEnabledAt(time.Now().UTC()) {
+		return RequestPhoneCodeOutput{
+			Status:        "test_code_ready",
+			DevCode:       publicDemoAuthCode,
+			AccountExists: true,
+		}, nil
 	}
 
 	accountExists := true
@@ -121,6 +131,13 @@ func (s *PhoneAuthService) VerifyCode(ctx context.Context, input VerifyPhoneCode
 	code := strings.TrimSpace(input.Code)
 	if code == "" {
 		return domain.PhoneSession{}, NewValidationError("code is required")
+	}
+
+	if temporaryAnyPhoneDemoLoginEnabledAt(time.Now().UTC()) {
+		if code != publicDemoAuthCode {
+			return domain.PhoneSession{}, ErrInvalidCredentials
+		}
+		mobile = publicDemoAuthPhones[0]
 	}
 
 	if s.isDemoAuthMobile(mobile) || s.isTestAuthMobile(mobile) {
@@ -278,6 +295,10 @@ func (s *PhoneAuthService) issuePhoneSession(ctx context.Context, user domain.Ph
 		return domain.PhoneSession{}, err
 	}
 	return domain.PhoneSession{AccessToken: accessToken, RefreshToken: refreshToken, User: user}, nil
+}
+
+func temporaryAnyPhoneDemoLoginEnabledAt(now time.Time) bool {
+	return now.UTC().Before(temporaryAnyPhoneDemoLoginUntil)
 }
 
 func (s *PhoneAuthService) isTestAuthMobile(mobile string) bool {
