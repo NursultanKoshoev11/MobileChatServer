@@ -74,14 +74,14 @@ func (s *Service) ListMyGroupCreationRequests(ctx context.Context, requester dom
 }
 
 func (s *Service) ListGroupCreationRequestsForAdmin(ctx context.Context, admin domain.User, status string, limit int) ([]domain.GroupCreationRequest, error) {
-	if !isPlatformAdmin(admin) {
+	if !admin.Role.CanReviewGroupCreationRequests() {
 		return nil, storage.ErrForbidden
 	}
 	return s.repo.ListGroupCreationRequestsForAdmin(ctx, strings.TrimSpace(status), limit)
 }
 
 func (s *Service) ApproveGroupCreationRequest(ctx context.Context, admin domain.User, requestID string, input ReviewGroupCreationRequestInput) (domain.GroupCreationRequest, error) {
-	if !isPlatformAdmin(admin) {
+	if !admin.Role.CanReviewGroupCreationRequests() {
 		return domain.GroupCreationRequest{}, storage.ErrForbidden
 	}
 	requestID = strings.TrimSpace(requestID)
@@ -118,7 +118,7 @@ func (s *Service) ApproveGroupCreationRequest(ctx context.Context, admin domain.
 }
 
 func (s *Service) RejectGroupCreationRequest(ctx context.Context, admin domain.User, requestID string, input ReviewGroupCreationRequestInput) (domain.GroupCreationRequest, error) {
-	if !isPlatformAdmin(admin) {
+	if !admin.Role.CanReviewGroupCreationRequests() {
 		return domain.GroupCreationRequest{}, storage.ErrForbidden
 	}
 	requestID = strings.TrimSpace(requestID)
@@ -134,7 +134,7 @@ func (s *Service) RejectGroupCreationRequest(ctx context.Context, admin domain.U
 }
 
 func (s *Service) NeedMoreInfoForGroupCreationRequest(ctx context.Context, admin domain.User, requestID string, input ReviewGroupCreationRequestInput) (domain.GroupCreationRequest, error) {
-	if !isPlatformAdmin(admin) {
+	if !admin.Role.CanReviewGroupCreationRequests() {
 		return domain.GroupCreationRequest{}, storage.ErrForbidden
 	}
 	requestID = strings.TrimSpace(requestID)
@@ -184,8 +184,4 @@ func validateGroupCreationRequest(request domain.GroupCreationRequest) error {
 		return NewValidationError(fmt.Sprintf("documents must be at most %d characters", maxDocumentsLen))
 	}
 	return nil
-}
-
-func isPlatformAdmin(user domain.User) bool {
-	return user.Role == domain.UserRolePlatformAdmin || user.Role == domain.UserRoleSuperAdmin
 }
