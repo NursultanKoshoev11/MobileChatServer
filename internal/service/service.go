@@ -178,6 +178,14 @@ func (s *Service) SearchPublicGroups(ctx context.Context, query string) ([]domai
 }
 
 func (s *Service) CreateGroup(ctx context.Context, ownerID string, input CreateGroupInput) (domain.Group, error) {
+	owner, err := s.repo.GetUserByID(ctx, strings.TrimSpace(ownerID))
+	if err != nil {
+		return domain.Group{}, err
+	}
+	if !owner.Role.CanManageAllGroups() {
+		return domain.Group{}, storage.ErrForbidden
+	}
+
 	title := strings.TrimSpace(input.Title)
 	description := strings.TrimSpace(input.Description)
 	if len(title) < 3 || len(title) > maxGroupTitleLen {
