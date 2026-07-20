@@ -282,7 +282,7 @@ func (s *Service) ensureGroupModerator(ctx context.Context, userID, groupID stri
 		return nil
 	}
 	user, userErr := s.repo.GetUserByID(ctx, userID)
-	if userErr == nil && (user.Role == domain.UserRolePlatformAdmin || user.Role == domain.UserRoleSuperAdmin) {
+	if userErr == nil && user.Role.CanModerateAnyGroup() {
 		return nil
 	}
 	if err != nil {
