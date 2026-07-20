@@ -6,22 +6,25 @@ import (
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/domain"
 )
 
-func TestPlatformAdminHierarchyIncludesSuperAdmin(t *testing.T) {
-	if isPlatformAdmin(domain.User{Role: domain.UserRoleUser}) {
-		t.Fatal("regular user must not have platform administration access")
+func TestGroupRequestReviewCapabilityIncludesPlatformAndSuperAdmin(t *testing.T) {
+	if domain.UserRoleUser.CanReviewGroupCreationRequests() {
+		t.Fatal("regular user must not review group creation requests")
 	}
-	if !isPlatformAdmin(domain.User{Role: domain.UserRolePlatformAdmin}) {
-		t.Fatal("platform admin must have platform administration access")
+	if !domain.UserRolePlatformAdmin.CanReviewGroupCreationRequests() {
+		t.Fatal("platform admin must review group creation requests")
 	}
-	if !isPlatformAdmin(domain.User{Role: domain.UserRoleSuperAdmin}) {
-		t.Fatal("super admin must inherit platform administration access")
+	if !domain.UserRoleSuperAdmin.CanReviewGroupCreationRequests() {
+		t.Fatal("super admin must inherit group request review capability")
 	}
 }
 
-func TestDeleteGroupAsPlatformAdminRequiresPlatformRoleAndGroupID(t *testing.T) {
+func TestGlobalGroupDeletionRequiresSuperAdmin(t *testing.T) {
 	svc := &Service{}
 	if err := svc.DeleteGroupAsPlatformAdmin(t.Context(), domain.User{Role: domain.UserRoleUser}, "G-1"); err == nil {
-		t.Fatal("regular user must not delete groups")
+		t.Fatal("regular user must not delete groups globally")
+	}
+	if err := svc.DeleteGroupAsPlatformAdmin(t.Context(), domain.User{Role: domain.UserRolePlatformAdmin}, "G-1"); err == nil {
+		t.Fatal("platform admin must not delete groups globally")
 	}
 	if err := svc.DeleteGroupAsPlatformAdmin(t.Context(), domain.User{Role: domain.UserRoleSuperAdmin}, ""); err == nil {
 		t.Fatal("super admin deletion still requires a group id")
