@@ -42,7 +42,7 @@ func (r *Repository) CreateUser(ctx context.Context, user domain.User, passwordH
 }
 
 func (r *Repository) GetUserByEmail(ctx context.Context, email string) (UserWithPassword, error) {
-	query := `SELECT id, COALESCE(email, ''), COALESCE(phone, ''), display_name, COALESCE(password_hash, ''), COALESCE(role, 'user'), created_at FROM users WHERE email = $1`
+	query := `SELECT id, COALESCE(email, ''), COALESCE(phone, ''), display_name, COALESCE(password_hash, ''), COALESCE(role, 'user'), COALESCE(avatar_data, ''), created_at FROM users WHERE email = $1`
 	var result UserWithPassword
 	err := r.db.QueryRow(ctx, query, strings.ToLower(strings.TrimSpace(email))).Scan(
 		&result.User.ID,
@@ -51,6 +51,7 @@ func (r *Repository) GetUserByEmail(ctx context.Context, email string) (UserWith
 		&result.User.DisplayName,
 		&result.PasswordHash,
 		&result.User.Role,
+		&result.User.AvatarData,
 		&result.User.CreatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -65,11 +66,11 @@ func (r *Repository) GetUserByEmail(ctx context.Context, email string) (UserWith
 func (r *Repository) GetUserByPhone(ctx context.Context, phone string) (domain.User, error) {
 	phone = normalizeSearchPhone(phone)
 	query := `
-		SELECT id, COALESCE(email, ''), COALESCE(NULLIF(phone, ''), phone_number, '') AS phone, display_name, COALESCE(role, 'user'), created_at
+		SELECT id, COALESCE(email, ''), COALESCE(NULLIF(phone, ''), phone_number, '') AS phone, display_name, COALESCE(role, 'user'), COALESCE(avatar_data, ''), created_at
 		FROM users
 		WHERE phone = $1 OR phone_number = $1`
 	var user domain.User
-	err := r.db.QueryRow(ctx, query, phone).Scan(&user.ID, &user.Email, &user.Phone, &user.DisplayName, &user.Role, &user.CreatedAt)
+	err := r.db.QueryRow(ctx, query, phone).Scan(&user.ID, &user.Email, &user.Phone, &user.DisplayName, &user.Role, &user.AvatarData, &user.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.User{}, ErrNotFound
 	}
@@ -80,9 +81,9 @@ func (r *Repository) GetUserByPhone(ctx context.Context, phone string) (domain.U
 }
 
 func (r *Repository) GetUserByID(ctx context.Context, userID string) (domain.User, error) {
-	query := `SELECT id, COALESCE(email, ''), COALESCE(phone, ''), display_name, COALESCE(role, 'user'), created_at FROM users WHERE id = $1`
+	query := `SELECT id, COALESCE(email, ''), COALESCE(NULLIF(phone, ''), phone_number, '') AS phone, display_name, COALESCE(role, 'user'), COALESCE(avatar_data, ''), created_at FROM users WHERE id = $1`
 	var user domain.User
-	err := r.db.QueryRow(ctx, query, userID).Scan(&user.ID, &user.Email, &user.Phone, &user.DisplayName, &user.Role, &user.CreatedAt)
+	err := r.db.QueryRow(ctx, query, userID).Scan(&user.ID, &user.Email, &user.Phone, &user.DisplayName, &user.Role, &user.AvatarData, &user.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.User{}, ErrNotFound
 	}

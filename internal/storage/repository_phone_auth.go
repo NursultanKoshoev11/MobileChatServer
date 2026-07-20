@@ -96,9 +96,9 @@ func (r *Repository) ConsumePhoneCode(ctx context.Context, codeID string) error 
 }
 
 func (r *Repository) GetPhoneUserByMobile(ctx context.Context, mobile string) (domain.PhoneAuthUser, error) {
-	query := `SELECT id, COALESCE(phone_number, ''), display_name, created_at FROM users WHERE phone_number = $1`
+	query := `SELECT id, COALESCE(phone_number, ''), display_name, COALESCE(role, 'user'), COALESCE(avatar_data, ''), created_at FROM users WHERE phone_number = $1`
 	var user domain.PhoneAuthUser
-	err := r.db.QueryRow(ctx, query, mobile).Scan(&user.ID, &user.Mobile, &user.DisplayName, &user.CreatedAt)
+	err := r.db.QueryRow(ctx, query, mobile).Scan(&user.ID, &user.Mobile, &user.DisplayName, &user.Role, &user.AvatarData, &user.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.PhoneAuthUser{}, ErrNotFound
 	}
@@ -128,20 +128,22 @@ func (r *Repository) MarkPhoneVerified(ctx context.Context, userID string) error
 }
 
 func (r *Repository) GetAuthUserByID(ctx context.Context, userID string) (domain.User, error) {
-	query := `SELECT id, COALESCE(email, ''), COALESCE(phone_number, ''), display_name, created_at FROM users WHERE id = $1`
+	query := `SELECT id, COALESCE(email, ''), COALESCE(NULLIF(phone, ''), phone_number, '') AS phone, display_name, COALESCE(role, 'user'), COALESCE(avatar_data, ''), created_at FROM users WHERE id = $1`
 	var id string
 	var email string
 	var mobile string
 	var displayName string
+	var role domain.UserRole
+	var avatarData string
 	var createdAt time.Time
-	err := r.db.QueryRow(ctx, query, userID).Scan(&id, &email, &mobile, &displayName, &createdAt)
+	err := r.db.QueryRow(ctx, query, userID).Scan(&id, &email, &mobile, &displayName, &role, &avatarData, &createdAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.User{}, ErrNotFound
 	}
 	if err != nil {
 		return domain.User{}, fmt.Errorf("get auth user by id: %w", err)
 	}
-	return domain.User{ID: id, Email: email, DisplayName: displayName, CreatedAt: createdAt}, nil
+	return domain.User{ID: id, Email: email, Phone: mobile, DisplayName: displayName, Role: role, AvatarData: avatarData, CreatedAt: createdAt}, nil
 }
 
 func NormalizePhoneDigits(raw string) string {
