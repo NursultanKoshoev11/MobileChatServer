@@ -32,21 +32,22 @@ const (
 )
 
 type PublicRequest struct {
-	ID              string                       `json:"id"`
-	GroupID         string                       `json:"group_id"`
-	AuthorID        string                       `json:"author_id"`
-	AuthorName      string                       `json:"author_name"`
-	RequestType     PublicRequestType            `json:"request_type"`
-	InteractionMode PublicRequestInteractionMode `json:"interaction_mode"`
-	Title           string                       `json:"title"`
-	Body            string                       `json:"body"`
-	Status          PublicRequestStatus          `json:"status"`
-	SupportCount    int                          `json:"support_count"`
-	OpposeCount     int                          `json:"oppose_count"`
-	CommentCount    int                          `json:"comment_count"`
-	MyVote          *string                      `json:"my_vote,omitempty"`
-	CreatedAt       time.Time                    `json:"created_at"`
-	UpdatedAt       time.Time                    `json:"updated_at"`
+	ID               string                       `json:"id"`
+	GroupID          string                       `json:"group_id"`
+	AuthorID         string                       `json:"author_id"`
+	AuthorName       string                       `json:"author_name"`
+	AuthorAvatarData string                       `json:"author_avatar_data,omitempty"`
+	RequestType      PublicRequestType            `json:"request_type"`
+	InteractionMode  PublicRequestInteractionMode `json:"interaction_mode"`
+	Title            string                       `json:"title"`
+	Body             string                       `json:"body"`
+	Status           PublicRequestStatus          `json:"status"`
+	SupportCount     int                          `json:"support_count"`
+	OpposeCount      int                          `json:"oppose_count"`
+	CommentCount     int                          `json:"comment_count"`
+	MyVote           *string                      `json:"my_vote,omitempty"`
+	CreatedAt        time.Time                    `json:"created_at"`
+	UpdatedAt        time.Time                    `json:"updated_at"`
 }
 
 type PublicRequestVoteUpdate struct {

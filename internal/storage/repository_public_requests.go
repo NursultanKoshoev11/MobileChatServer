@@ -30,6 +30,7 @@ func (r *Repository) CreatePublicRequest(ctx context.Context, request domain.Pub
 		return domain.PublicRequest{}, err
 	}
 	request.AuthorName = user.DisplayName
+	request.AuthorAvatarData = user.AvatarData
 	return request, nil
 }
 
@@ -49,7 +50,7 @@ func (r *Repository) ListPublicRequests(ctx context.Context, groupID, viewerID s
 		beforePtr = &before
 	}
 	query := `
-		SELECT pr.id, pr.group_id, pr.author_id, u.display_name, pr.request_type, pr.interaction_mode, pr.title, pr.body, pr.status,
+		SELECT pr.id, pr.group_id, pr.author_id, u.display_name, COALESCE(u.avatar_data, ''), pr.request_type, pr.interaction_mode, pr.title, pr.body, pr.status,
 		       COALESCE(SUM(CASE WHEN v.vote_type = 'support' THEN 1 ELSE 0 END), 0)::int AS support_count,
 		       COALESCE(SUM(CASE WHEN v.vote_type = 'oppose' THEN 1 ELSE 0 END), 0)::int AS oppose_count,
 		       (SELECT COUNT(*)::int FROM public_request_comments c WHERE c.request_id = pr.id AND c.deleted_at IS NULL) AS comment_count,
@@ -63,7 +64,7 @@ func (r *Repository) ListPublicRequests(ctx context.Context, groupID, viewerID s
 		  AND pr.hidden_at IS NULL
 		  AND ($3::timestamptz IS NULL OR pr.created_at < $3)
 		  AND ($4::boolean = false OR pr.author_id = $2)
-		GROUP BY pr.id, u.display_name, myv.vote_type
+		GROUP BY pr.id, u.display_name, u.avatar_data, myv.vote_type
 		ORDER BY pr.created_at DESC
 		LIMIT $5`
 	rows, err := r.db.Query(ctx, query, groupID, viewerID, beforePtr, mineOnly, limit)
@@ -81,6 +82,7 @@ func (r *Repository) ListPublicRequests(ctx context.Context, groupID, viewerID s
 			&request.GroupID,
 			&request.AuthorID,
 			&request.AuthorName,
+			&request.AuthorAvatarData,
 			&request.RequestType,
 			&request.InteractionMode,
 			&request.Title,

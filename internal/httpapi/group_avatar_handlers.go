@@ -3,6 +3,7 @@ package httpapi
 import (
 	"net/http"
 
+	"github.com/NursultanKoshoev11/MobileChatServer/internal/realtime"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -25,5 +26,6 @@ func (s *Server) updateGroupAvatar(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, err)
 		return
 	}
+	s.broadcastGroupAndUsers(r, group.ID, realtime.Event{Type: "group.avatar_updated", GroupID: group.ID, Payload: group})
 	writeJSON(w, http.StatusOK, group)
 }
