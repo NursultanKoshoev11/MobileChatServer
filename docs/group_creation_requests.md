@@ -1,14 +1,25 @@
 # Official group creation request flow
 
-This server flow replaces direct group creation for normal users.
+This server flow replaces direct group creation for normal users and platform administrators.
 
-## Roles
+## Roles and capabilities
 
 Users have one of these roles:
 
-- `user`
-- `platform_admin`
-- `super_admin`
+- `user` — normal application user.
+- `platform_admin` — reviews only official group creation requests.
+- `super_admin` — project owner with full platform-level privileges.
+
+Capabilities are defined centrally in `internal/domain/permissions.go` instead of repeating raw role comparisons throughout the code. This makes future privileges easier to add safely.
+
+| Capability | user | platform_admin | super_admin |
+| --- | --- | --- | --- |
+| Submit own group creation request | Yes | Yes | Yes |
+| Review, approve, reject, request more information | No | Yes | Yes |
+| Create a group directly | No | No | Yes |
+| Delete any group globally | No | No | Yes |
+| Moderate any group without group membership | No | No | Yes |
+| Moderate a group as its owner/admin | If assigned | If assigned | If assigned or globally |
 
 The authenticated user role is returned from:
 
@@ -22,7 +33,7 @@ Phone auth sessions also return `user.role` after SMS verification.
 
 Admin access is controlled server-side through `admin_phone_allowlist`.
 
-Example:
+Project owner example:
 
 ```sql
 INSERT INTO admin_phone_allowlist (phone, role)
@@ -31,9 +42,18 @@ ON CONFLICT (phone) DO UPDATE
 SET role = EXCLUDED.role, enabled = true, updated_at = now();
 ```
 
-After this phone number passes SMS verification, the server updates the user role from the allowlist.
+Group request reviewer example:
 
-## Normal user endpoints
+```sql
+INSERT INTO admin_phone_allowlist (phone, role)
+VALUES ('+996700000001', 'platform_admin')
+ON CONFLICT (phone) DO UPDATE
+SET role = EXCLUDED.role, enabled = true, updated_at = now();
+```
+
+After a phone number passes SMS verification, the server updates the user role from the allowlist.
+
+## User endpoints
 
 Create a request to open an official group:
 
@@ -67,7 +87,9 @@ GET /api/group-creation-requests
 Authorization: Bearer <token>
 ```
 
-## Admin endpoints
+## Group request review endpoints
+
+These endpoints are available to `platform_admin` and `super_admin`.
 
 List all requests:
 
@@ -106,7 +128,8 @@ Authorization: Bearer <admin-token>
 Content-Type: application/json
 ```
 
-## Direct group creation
+## Super admin operations
 
-`POST /api/groups` is now restricted to `platform_admin` and `super_admin`.
-Normal users must use `POST /api/group-creation-requests`.
+`POST /api/groups` is restricted to `super_admin`. Other users, including `platform_admin`, must use `POST /api/group-creation-requests`.
+
+`DELETE /api/admin/groups/{groupID}` is also restricted to `super_admin`, despite the legacy endpoint and method names containing `platform_admin` for backward compatibility.
