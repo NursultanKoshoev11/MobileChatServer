@@ -19,19 +19,7 @@ const (
 	phoneCodeRateLimitWindow = 10 * time.Minute
 	phoneCodeRateLimitMax    = 3
 	phoneCodeMinRequestGap   = 30 * time.Second
-	publicDemoAuthCode       = "111111"
-	publicDemoDisplayName    = "Koom Demo User"
 )
-
-var temporaryAnyPhoneDemoLoginUntil = time.Date(2026, time.July, 22, 17, 59, 59, 0, time.UTC)
-
-var publicDemoAuthPhones = []string{
-	"+996555555555",
-	"+996700000001",
-	"+996700000002",
-	"+996700000003",
-	"+996700000004",
-}
 
 type PhoneAuthConfig struct {
 	JWTSecret           string
@@ -68,16 +56,8 @@ func (s *PhoneAuthService) RequestCode(ctx context.Context, input RequestPhoneCo
 		}
 	}
 
-	if temporaryAnyPhoneDemoLoginEnabledAt(time.Now().UTC()) {
-		return RequestPhoneCodeOutput{
-			Status:        "test_code_ready",
-			DevCode:       publicDemoAuthCode,
-			AccountExists: accountExists,
-		}, nil
-	}
-
-	if s.isDemoAuthMobile(mobile) || s.isTestAuthMobile(mobile) {
-		return RequestPhoneCodeOutput{Status: "test_code_ready", DevCode: s.expectedTestAuthCode(mobile), AccountExists: accountExists}, nil
+	if s.isTestAuthMobile(mobile) {
+		return RequestPhoneCodeOutput{Status: "test_code_ready", DevCode: s.expectedTestAuthCode(), AccountExists: accountExists}, nil
 	}
 
 	if err := s.enforcePhoneCodeRateLimit(ctx, mobile); err != nil {
@@ -133,27 +113,8 @@ func (s *PhoneAuthService) VerifyCode(ctx context.Context, input VerifyPhoneCode
 		return domain.PhoneSession{}, NewValidationError("code is required")
 	}
 
-	if temporaryAnyPhoneDemoLoginEnabledAt(time.Now().UTC()) {
-		if code != publicDemoAuthCode {
-			return domain.PhoneSession{}, ErrInvalidCredentials
-		}
-		displayName := strings.TrimSpace(input.DisplayName)
-		if displayName == "" {
-			displayName = "Koom Test User"
-		}
-		user, err := s.getOrCreatePhoneUser(ctx, mobile, displayName)
-		if err != nil {
-			return domain.PhoneSession{}, err
-		}
-		_ = s.repo.MarkPhoneVerified(ctx, user.ID)
-		if err := s.repo.UpsertUserRoleFromAllowlist(ctx, user.ID, mobile); err != nil {
-			return domain.PhoneSession{}, err
-		}
-		return s.issuePhoneSession(ctx, user)
-	}
-
-	if s.isDemoAuthMobile(mobile) || s.isTestAuthMobile(mobile) {
-		if code != s.expectedTestAuthCode(mobile) && code != "111111" {
+	if s.isTestAuthMobile(mobile) {
+		if code != s.expectedTestAuthCode() {
 			return domain.PhoneSession{}, ErrInvalidCredentials
 		}
 		displayName := strings.TrimSpace(input.DisplayName)
@@ -309,12 +270,8 @@ func (s *PhoneAuthService) issuePhoneSession(ctx context.Context, user domain.Ph
 	return domain.PhoneSession{AccessToken: accessToken, RefreshToken: refreshToken, User: user}, nil
 }
 
-func temporaryAnyPhoneDemoLoginEnabledAt(now time.Time) bool {
-	return now.UTC().Before(temporaryAnyPhoneDemoLoginUntil)
-}
-
 func (s *PhoneAuthService) isTestAuthMobile(mobile string) bool {
-	if !s.cfg.TestAuthEnabled {
+	if !s.cfg.TestAuthEnabled || !isLocalTestAuthEnvironment(s.cfg.Environment) {
 		return false
 	}
 	for _, part := range strings.Split(s.cfg.TestAuthPhone, ",") {
@@ -335,32 +292,16 @@ func (s *PhoneAuthService) isTestAuthMobile(mobile string) bool {
 	return false
 }
 
-func (s *PhoneAuthService) expectedTestAuthCode(mobile string) string {
-	if s.isDemoAuthMobile(mobile) {
-		return publicDemoAuthCode
-	}
-	code := strings.TrimSpace(s.cfg.TestAuthCode)
-	if code == "" {
-		return "111111"
-	}
-	return code
+func (s *PhoneAuthService) expectedTestAuthCode() string {
+	return strings.TrimSpace(s.cfg.TestAuthCode)
 }
 
-func (s *PhoneAuthService) testAuthDisplayName(mobile string) string {
-	if s.isDemoAuthMobile(mobile) {
-		return publicDemoDisplayName
+func (s *PhoneAuthService) testAuthDisplayName(_ string) string {
+	name := strings.TrimSpace(s.cfg.TestAuthDisplayName)
+	if name == "" {
+		return "Test User"
 	}
-	return strings.TrimSpace(s.cfg.TestAuthDisplayName)
-}
-
-func (s *PhoneAuthService) isDemoAuthMobile(mobile string) bool {
-	normalized := normalizeTestValue(mobile)
-	for _, phone := range publicDemoAuthPhones {
-		if normalized == normalizeTestValue(phone) {
-			return true
-		}
-	}
-	return false
+	return name
 }
 
 func isLocalTestAuthEnvironment(environment string) bool {

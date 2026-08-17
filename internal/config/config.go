@@ -8,8 +8,6 @@ import (
 	"time"
 )
 
-const defaultProjectOwnerPhone = "+996000000000"
-
 type Config struct {
 	Port                           string
 	DatabaseURL                    string
@@ -58,12 +56,12 @@ func Load() (Config, error) {
 		FCMProjectID:                   os.Getenv("FCM_PROJECT_ID"),
 		FCMClientEmail:                 os.Getenv("FCM_CLIENT_EMAIL"),
 		FCMPrivateKey:                  os.Getenv("FCM_PRIVATE_KEY"),
-		SuperAdminPhones:               appendUniquePhone(getEnvList("SUPER_ADMIN_PHONES"), getEnv("PROJECT_OWNER_PHONE", defaultProjectOwnerPhone)),
+		SuperAdminPhones:               appendUniquePhone(getEnvList("SUPER_ADMIN_PHONES"), os.Getenv("PROJECT_OWNER_PHONE")),
 		PlatformAdminPhones:            getEnvList("PLATFORM_ADMIN_PHONES"),
 		TestAuthEnabled:                getEnvBool("TEST_AUTH_ENABLED", false),
-		TestAuthPhone:                  getEnv("TEST_AUTH_PHONE", "+996555555555,+996700000001,+996700000002,+996700000003,+996700000004"),
-		TestAuthCode:                   getEnv("TEST_AUTH_CODE", "111111"),
-		TestAuthDisplayName:            getEnv("TEST_AUTH_DISPLAY_NAME", "Firebase Test User"),
+		TestAuthPhone:                  os.Getenv("TEST_AUTH_PHONE"),
+		TestAuthCode:                   os.Getenv("TEST_AUTH_CODE"),
+		TestAuthDisplayName:            getEnv("TEST_AUTH_DISPLAY_NAME", "Test User"),
 		ContentModerationEnabled:       getEnvBool("CONTENT_MODERATION_ENABLED", true),
 		ContentModerationProvider:      getEnv("CONTENT_MODERATION_PROVIDER", "huggingface"),
 		HuggingFaceModerationToken:     os.Getenv("HF_TOKEN"),
@@ -96,8 +94,8 @@ func Load() (Config, error) {
 	if cfg.Environment == "production" && originListContainsWildcard(cfg.AllowedOrigins) {
 		return Config{}, fmt.Errorf("wildcard CORS origin is not allowed in production")
 	}
-	if cfg.Environment == "production" && (cfg.SMSProvider == "dev" || cfg.SMSProvider == "disabled") {
-		return Config{}, fmt.Errorf("development or disabled SMS provider is not allowed in production")
+	if cfg.Environment == "production" && !strings.EqualFold(cfg.SMSProvider, "twilio") {
+		return Config{}, fmt.Errorf("SMS_PROVIDER must be twilio in production")
 	}
 	if cfg.Environment == "production" && strings.EqualFold(cfg.SMSProvider, "twilio") {
 		if strings.TrimSpace(os.Getenv("TWILIO_ACCOUNT_SID")) == "" || strings.TrimSpace(os.Getenv("TWILIO_AUTH_TOKEN")) == "" {
@@ -107,9 +105,23 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("SMS_FROM or TWILIO_MESSAGING_SERVICE_SID is required when SMS_PROVIDER=twilio in production")
 		}
 	}
-	if cfg.Environment == "production" && cfg.TestAuthEnabled {
-		return Config{}, fmt.Errorf("TEST_AUTH_ENABLED=true is not allowed in production")
+	if cfg.TestAuthEnabled {
+		if !localTestAuthEnvironment(cfg.Environment) {
+			return Config{}, fmt.Errorf("TEST_AUTH_ENABLED=true is allowed only in local, development, or test environments")
+		}
+		if strings.TrimSpace(cfg.TestAuthPhone) == "" || strings.TrimSpace(cfg.TestAuthCode) == "" {
+			return Config{}, fmt.Errorf("TEST_AUTH_PHONE and TEST_AUTH_CODE are required when test auth is enabled")
+		}
 	}
+
+	if cfg.Environment == "production" {
+		for _, phone := range append(append([]string{}, cfg.SuperAdminPhones...), cfg.PlatformAdminPhones...) {
+			if normalizePhoneForValidation(phone) == "+996000000000" {
+				return Config{}, fmt.Errorf("placeholder admin phone +996000000000 is not allowed in production")
+			}
+		}
+	}
+
 	if cfg.Environment == "production" && !cfg.ModerationFailClosed {
 		return Config{}, fmt.Errorf("MODERATION_FAIL_CLOSED=false is not allowed in production")
 	}
@@ -127,6 +139,15 @@ func Load() (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func normalizePhoneForValidation(phone string) string {
+	phone = strings.TrimSpace(phone)
+	phone = strings.ReplaceAll(phone, " ", "")
+	phone = strings.ReplaceAll(phone, "-", "")
+	phone = strings.ReplaceAll(phone, "(", "")
+	phone = strings.ReplaceAll(phone, ")", "")
+	return phone
 }
 
 func appendUniquePhone(phones []string, phone string) []string {

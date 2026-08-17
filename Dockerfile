@@ -1,4 +1,4 @@
-FROM golang:1.25.12-alpine AS builder
+FROM golang:1.26.6-alpine AS builder
 
 WORKDIR /src
 ENV CGO_ENABLED=0 \
@@ -25,3 +25,4 @@ ENV PORT=8080
 EXPOSE 8080
 
 ENTRYPOINT ["/app/mobilechat-server"]
+

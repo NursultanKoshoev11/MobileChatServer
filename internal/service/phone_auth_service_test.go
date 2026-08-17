@@ -1,101 +1,50 @@
 package service
 
-import (
-	"testing"
-	"time"
-)
+import "testing"
 
-func TestTestAuthMobileSupportsCommaSeparatedPhones(t *testing.T) {
+func TestTestAuthMobileSupportsConfiguredPhonesOnlyInLocalEnvironment(t *testing.T) {
 	auth := NewPhoneAuth(nil, PhoneAuthConfig{
-		Environment:     "staging",
+		Environment:     "development",
 		TestAuthEnabled: true,
-		TestAuthPhone:   "+996555555555, +996700000001, +996700000002, +996700000003, +996700000004",
+		TestAuthPhone:   "+996555555555,+996700000001",
+		TestAuthCode:    "654321",
 	}, nil)
 
-	if !auth.isTestAuthMobile("+996555555555") {
-		t.Fatal("expected first configured test phone to be accepted")
-	}
-	if !auth.isTestAuthMobile("+996700000001") {
-		t.Fatal("expected second configured test phone to be accepted")
-	}
-	if !auth.isTestAuthMobile("+996700000002") {
-		t.Fatal("expected third configured test phone to be accepted")
-	}
-	if !auth.isTestAuthMobile("+996700000003") {
-		t.Fatal("expected fourth configured test phone to be accepted")
-	}
-	if !auth.isTestAuthMobile("+996700000004") {
-		t.Fatal("expected fifth configured test phone to be accepted")
+	if !auth.isTestAuthMobile("+996555555555") || !auth.isTestAuthMobile("+996700000001") {
+		t.Fatal("expected configured development test phones to be accepted")
 	}
 	if auth.isTestAuthMobile("+996700123456") {
 		t.Fatal("did not expect unconfigured phone to be accepted")
 	}
+	if got := auth.expectedTestAuthCode(); got != "654321" {
+		t.Fatalf("unexpected test auth code %q", got)
+	}
+}
+
+func TestTestAuthIsDisabledInSharedEnvironmentsEvenForSpecificPhone(t *testing.T) {
+	for _, environment := range []string{"staging", "production"} {
+		auth := NewPhoneAuth(nil, PhoneAuthConfig{
+			Environment:     environment,
+			TestAuthEnabled: true,
+			TestAuthPhone:   "+996555555555",
+			TestAuthCode:    "654321",
+		}, nil)
+		if auth.isTestAuthMobile("+996555555555") {
+			t.Fatalf("did not expect test auth in %s", environment)
+		}
+	}
 }
 
 func TestWildcardTestAuthMobileIsLocalOnly(t *testing.T) {
-	staging := NewPhoneAuth(nil, PhoneAuthConfig{
-		Environment:     "staging",
-		TestAuthEnabled: true,
-		TestAuthPhone:   "*",
-	}, nil)
-	if staging.isTestAuthMobile("+996555555555") {
-		t.Fatal("did not expect wildcard test auth in shared environments")
-	}
-
-	local := NewPhoneAuth(nil, PhoneAuthConfig{
-		Environment:     "development",
-		TestAuthEnabled: true,
-		TestAuthPhone:   "*",
-	}, nil)
+	local := NewPhoneAuth(nil, PhoneAuthConfig{Environment: "test", TestAuthEnabled: true, TestAuthPhone: "*", TestAuthCode: "654321"}, nil)
 	if !local.isTestAuthMobile("+996555555555") {
-		t.Fatal("expected wildcard test auth in local environments")
+		t.Fatal("expected wildcard test auth in test environment")
 	}
 }
 
-func TestExpectedTestAuthCodeDefaultsToSixOnes(t *testing.T) {
+func TestExpectedTestAuthCodeHasNoProductionFallback(t *testing.T) {
 	auth := NewPhoneAuth(nil, PhoneAuthConfig{}, nil)
-
-	if got := auth.expectedTestAuthCode("+996700000001"); got != "111111" {
-		t.Fatalf("expected fallback test auth code 111111, got %q", got)
-	}
-}
-
-func TestPublicDemoAuthMobileDoesNotRequireTestAuthFlag(t *testing.T) {
-	auth := NewPhoneAuth(nil, PhoneAuthConfig{
-		Environment:     "production",
-		TestAuthEnabled: false,
-	}, nil)
-
-	for _, phone := range []string{
-		"+996555555555",
-		"+996700000001",
-		"+996700000002",
-		"+996700000003",
-		"+996700000004",
-	} {
-		if !auth.isDemoAuthMobile(phone) {
-			t.Fatalf("expected public demo auth phone %s to be accepted", phone)
-		}
-		if got := auth.expectedTestAuthCode(phone); got != "111111" {
-			t.Fatalf("expected public demo auth code 111111 for %s, got %q", phone, got)
-		}
-		if got := auth.testAuthDisplayName(phone); got != "Koom Demo User" {
-			t.Fatalf("expected public demo display name for %s, got %q", phone, got)
-		}
-	}
-	if auth.isDemoAuthMobile("+996700123456") {
-		t.Fatal("did not expect other phones to use public demo auth")
-	}
-}
-
-func TestTemporaryAnyPhoneDemoLoginWindow(t *testing.T) {
-	beforeDeadline := time.Date(2026, time.July, 22, 17, 59, 58, 0, time.UTC)
-	if !temporaryAnyPhoneDemoLoginEnabledAt(beforeDeadline) {
-		t.Fatal("expected temporary any-phone demo login before the deadline")
-	}
-
-	atDeadline := time.Date(2026, time.July, 22, 17, 59, 59, 0, time.UTC)
-	if temporaryAnyPhoneDemoLoginEnabledAt(atDeadline) {
-		t.Fatal("expected temporary any-phone demo login to expire at the deadline")
+	if got := auth.expectedTestAuthCode(); got != "" {
+		t.Fatalf("expected no fallback test auth code, got %q", got)
 	}
 }

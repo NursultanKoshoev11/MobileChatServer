@@ -1,0 +1,4 @@
+FROM postgres:16-alpine
+RUN apk add --no-cache rclone
+COPY scripts/backup-postgres.sh /usr/local/bin/backup-postgres.sh
+RUN chmod 0755 /usr/local/bin/backup-postgres.sh

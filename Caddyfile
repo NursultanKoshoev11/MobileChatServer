@@ -5,8 +5,55 @@
         X-Content-Type-Options "nosniff"
         X-Frame-Options "DENY"
         Referrer-Policy "no-referrer"
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
         -Server
     }
 
     reverse_proxy api:8080
 }
+
+# AILUU_STORE_BEGIN
+ailuuclo.com.kg {
+    encode zstd gzip
+
+    header {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        -Server
+    }
+
+    reverse_proxy ailuu-store:3000
+}
+
+www.ailuuclo.com.kg {
+    redir https://ailuuclo.com.kg{uri} permanent
+}
+
+http://16.171.171.191 {
+    redir https://ailuuclo.com.kg{uri} permanent
+}
+# AILUU_STORE_END
+
+# ITTECHLABS_SITE_BEGIN
+ittechlabs.xyz {
+    encode zstd gzip
+
+    header {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+        -Server
+    }
+
+    reverse_proxy ittechlabs-app:3000
+}
+
+www.ittechlabs.xyz {
+    redir https://ittechlabs.xyz{uri} permanent
+}
+# ITTECHLABS_SITE_END

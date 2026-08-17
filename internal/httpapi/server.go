@@ -74,6 +74,9 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 	r.Use(server.cors)
 	r.Use(server.rateLimit)
 
+	r.Get("/", server.homePage)
+	r.Head("/", server.homePage)
+
 	r.Get("/api/health", server.health)
 	r.Get("/privacy", server.privacyPolicy)
 	r.Head("/privacy", server.privacyPolicy)
