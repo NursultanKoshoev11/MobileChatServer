@@ -167,6 +167,7 @@ services:
       AWS_REGION: ${AWS_REGION:-eu-north-1}
     volumes:
       - ./backups:/backups
+      - ./data:/app-data:ro
       - ./scripts:/scripts:ro
     entrypoint:
       - /bin/sh
