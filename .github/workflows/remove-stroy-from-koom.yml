@@ -1,0 +1,68 @@
+name: Remove accidental STROY route from Koom host
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/remove-stroy-from-koom.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: [self-hosted, Linux]
+    timeout-minutes: 10
+    steps:
+      - name: Restore MobileChat proxy config and verify
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd /opt/projects/MobileChatServer
+
+          echo "=== Current edge container ==="
+          docker ps --format '{{.Names}}\t{{.Image}}\t{{.Ports}}' | grep -E '^mobilechat-caddy\b' || true
+
+          echo "=== Restore Caddyfile from MobileChatServer main ==="
+          git fetch origin main
+          git show origin/main:Caddyfile > /tmp/mobilechat-Caddyfile.clean
+
+          if grep -qiE 'stroy-site|stroy-website|OnlineProrab' /tmp/mobilechat-Caddyfile.clean; then
+            echo "Refusing cleanup: repository Caddyfile unexpectedly contains STROY routing"
+            exit 12
+          fi
+
+          cp /tmp/mobilechat-Caddyfile.clean Caddyfile
+
+          echo "=== Reload only MobileChat Caddy ==="
+          if docker ps --format '{{.Names}}' | grep -qx 'mobilechat-caddy'; then
+            docker exec mobilechat-caddy caddy validate --config /etc/caddy/Caddyfile
+            docker exec mobilechat-caddy caddy reload --config /etc/caddy/Caddyfile
+          else
+            docker compose --env-file .env.prod -f docker-compose.prod.yml --profile caddy up -d caddy
+          fi
+
+          sleep 3
+
+          echo "=== Verify MobileChat is alive ==="
+          api_code="$(curl -sS -o /tmp/mobilechat-health.out -w '%{http_code}' https://koommy.duckdns.org/api/health || true)"
+          echo "api_health_http=$api_code"
+          if [ "$api_code" != "200" ]; then
+            echo "MobileChat health check failed"
+            cat /tmp/mobilechat-health.out || true
+            exit 20
+          fi
+
+          echo "=== Verify STROY is no longer served on Koom domain ==="
+          stroy_code="$(curl -sS -o /tmp/stroy-site.out -w '%{http_code}' https://koommy.duckdns.org/stroy-site/ || true)"
+          echo "stroy_site_http=$stroy_code"
+
+          if grep -qiE 'строительство под контролем|stroy|onlineprorab|онлайн прораб' /tmp/stroy-site.out 2>/dev/null; then
+            echo "STROY content is still present on /stroy-site/"
+            head -c 800 /tmp/stroy-site.out || true
+            exit 21
+          fi
+
+          echo "SUCCESS: MobileChat is healthy and STROY content is not served from /stroy-site/."
