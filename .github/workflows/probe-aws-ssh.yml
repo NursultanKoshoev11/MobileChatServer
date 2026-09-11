@@ -1,0 +1,38 @@
+name: Probe existing AWS SSH credentials
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/probe-aws-ssh.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      AWS_SSH_PRIVATE_KEY: ${{ secrets.AWS_SSH_PRIVATE_KEY }}
+      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+      EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+      SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+      AWS_HOST: ${{ secrets.AWS_HOST }}
+      EC2_HOST: ${{ secrets.EC2_HOST }}
+      SERVER_HOST: ${{ secrets.SERVER_HOST }}
+      AWS_USER: ${{ secrets.AWS_USER }}
+      SSH_USER: ${{ secrets.SSH_USER }}
+      SERVER_USER: ${{ secrets.SERVER_USER }}
+    steps:
+      - name: Check secret presence without exposing values
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in AWS_SSH_PRIVATE_KEY SSH_PRIVATE_KEY EC2_SSH_KEY SERVER_SSH_KEY AWS_HOST EC2_HOST SERVER_HOST AWS_USER SSH_USER SERVER_USER; do
+            if [ -n "${!name:-}" ]; then
+              echo "$name=present"
+            else
+              echo "$name=missing"
+            fi
+          done
