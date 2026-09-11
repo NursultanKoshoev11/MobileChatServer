@@ -1,4 +1,4 @@
-name: Probe existing AWS SSH credentials
+name: Probe existing AWS credentials
 
 on:
   push:
@@ -8,28 +8,26 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 jobs:
   probe:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
-      AWS_SSH_PRIVATE_KEY: ${{ secrets.AWS_SSH_PRIVATE_KEY }}
-      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-      EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
-      SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
-      AWS_HOST: ${{ secrets.AWS_HOST }}
-      EC2_HOST: ${{ secrets.EC2_HOST }}
-      SERVER_HOST: ${{ secrets.SERVER_HOST }}
-      AWS_USER: ${{ secrets.AWS_USER }}
-      SSH_USER: ${{ secrets.SSH_USER }}
-      SERVER_USER: ${{ secrets.SERVER_USER }}
+      AWS_ACCESS_KEY_ID_VALUE: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY_VALUE: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN_VALUE: ${{ secrets.AWS_SESSION_TOKEN }}
+      AWS_REGION_VALUE: ${{ secrets.AWS_REGION }}
+      AWS_DEFAULT_REGION_VALUE: ${{ secrets.AWS_DEFAULT_REGION }}
+      AWS_ROLE_ARN_VALUE: ${{ secrets.AWS_ROLE_ARN }}
+      EC2_INSTANCE_ID_VALUE: ${{ secrets.EC2_INSTANCE_ID }}
     steps:
-      - name: Check secret presence without exposing values
+      - name: Check AWS secret presence without exposing values
         shell: bash
         run: |
           set -euo pipefail
-          for name in AWS_SSH_PRIVATE_KEY SSH_PRIVATE_KEY EC2_SSH_KEY SERVER_SSH_KEY AWS_HOST EC2_HOST SERVER_HOST AWS_USER SSH_USER SERVER_USER; do
+          for name in AWS_ACCESS_KEY_ID_VALUE AWS_SECRET_ACCESS_KEY_VALUE AWS_SESSION_TOKEN_VALUE AWS_REGION_VALUE AWS_DEFAULT_REGION_VALUE AWS_ROLE_ARN_VALUE EC2_INSTANCE_ID_VALUE; do
             if [ -n "${!name:-}" ]; then
               echo "$name=present"
             else
