@@ -21,16 +21,46 @@ func TestTestAuthMobileSupportsConfiguredPhonesOnlyInLocalEnvironment(t *testing
 	}
 }
 
-func TestTestAuthIsDisabledInSharedEnvironmentsEvenForSpecificPhone(t *testing.T) {
-	for _, environment := range []string{"staging", "production"} {
-		auth := NewPhoneAuth(nil, PhoneAuthConfig{
-			Environment:     environment,
-			TestAuthEnabled: true,
-			TestAuthPhone:   "+996555555555",
-			TestAuthCode:    "654321",
-		}, nil)
-		if auth.isTestAuthMobile("+996555555555") {
-			t.Fatalf("did not expect test auth in %s", environment)
+func TestTestAuthIsDisabledInProductionEvenForSpecificPhone(t *testing.T) {
+	auth := NewPhoneAuth(nil, PhoneAuthConfig{
+		Environment:     "production",
+		TestAuthEnabled: true,
+		TestAuthPhone:   "+996555555555",
+		TestAuthCode:    "654321",
+	}, nil)
+	if auth.isTestAuthMobile("+996555555555") {
+		t.Fatal("did not expect test auth in production")
+	}
+}
+
+func TestStagingTestAuthAllowsOnlyConfiguredPhones(t *testing.T) {
+	auth := NewPhoneAuth(nil, PhoneAuthConfig{
+		Environment:     "staging",
+		TestAuthEnabled: true,
+		TestAuthPhone:   "+996700000001,+996700000002,+996700000003",
+		TestAuthCode:    "111111",
+	}, nil)
+	for _, phone := range []string{"+996700000001", "+996700000002", "+996700000003"} {
+		if !auth.isTestAuthMobile(phone) {
+			t.Fatalf("expected configured staging phone %s to be accepted", phone)
+		}
+	}
+	if auth.isTestAuthMobile("+996700000004") {
+		t.Fatal("did not expect an unconfigured staging phone to be accepted")
+	}
+}
+
+func TestStagingTestAuthRejectsWildcardMoreThanThreePhonesDuplicatesAndInvalidCode(t *testing.T) {
+	configs := []PhoneAuthConfig{
+		{Environment: "staging", TestAuthEnabled: true, TestAuthPhone: "*", TestAuthCode: "111111"},
+		{Environment: "staging", TestAuthEnabled: true, TestAuthPhone: "+996700000001,+996700000002,+996700000003,+996700000004", TestAuthCode: "111111"},
+		{Environment: "staging", TestAuthEnabled: true, TestAuthPhone: "+996700000001,+996700000001", TestAuthCode: "111111"},
+		{Environment: "staging", TestAuthEnabled: true, TestAuthPhone: "+996700000001,+996700000002", TestAuthCode: "11111x"},
+	}
+	for _, cfg := range configs {
+		auth := NewPhoneAuth(nil, cfg, nil)
+		if auth.isTestAuthMobile("+996700000001") {
+			t.Fatalf("unexpected test auth for unsafe staging config: %#v", cfg)
 		}
 	}
 }
