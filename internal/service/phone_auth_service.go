@@ -271,7 +271,11 @@ func (s *PhoneAuthService) issuePhoneSession(ctx context.Context, user domain.Ph
 }
 
 func (s *PhoneAuthService) isTestAuthMobile(mobile string) bool {
-	if !s.cfg.TestAuthEnabled || !isLocalTestAuthEnvironment(s.cfg.Environment) {
+	if !s.cfg.TestAuthEnabled {
+		return false
+	}
+	isLocal := isLocalTestAuthEnvironment(s.cfg.Environment)
+	if !isLocal && !validStagingTestAuthConfigForService(s.cfg.Environment, s.cfg.TestAuthPhone, s.cfg.TestAuthCode) {
 		return false
 	}
 	for _, part := range strings.Split(s.cfg.TestAuthPhone, ",") {
@@ -280,7 +284,7 @@ func (s *PhoneAuthService) isTestAuthMobile(mobile string) bool {
 			continue
 		}
 		if testPhone == "*" || strings.EqualFold(testPhone, "any") || strings.EqualFold(testPhone, "all") {
-			if isLocalTestAuthEnvironment(s.cfg.Environment) {
+			if isLocal {
 				return true
 			}
 			continue
@@ -311,6 +315,37 @@ func isLocalTestAuthEnvironment(environment string) bool {
 	default:
 		return false
 	}
+}
+
+func validStagingTestAuthConfigForService(environment, rawPhone, code string) bool {
+	if !strings.EqualFold(strings.TrimSpace(environment), "staging") {
+		return false
+	}
+	phones := strings.Split(rawPhone, ",")
+	if len(phones) < 1 || len(phones) > 3 {
+		return false
+	}
+	seen := make(map[string]struct{}, len(phones))
+	for _, part := range phones {
+		phone := normalizeTestValue(part)
+		if !phonePattern.MatchString(phone) {
+			return false
+		}
+		if _, exists := seen[phone]; exists {
+			return false
+		}
+		seen[phone] = struct{}{}
+	}
+	code = strings.TrimSpace(code)
+	if len(code) != 6 {
+		return false
+	}
+	for _, digit := range code {
+		if digit < '0' || digit > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func normalizeTestValue(value string) string {

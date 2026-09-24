@@ -106,11 +106,16 @@ func Load() (Config, error) {
 		}
 	}
 	if cfg.TestAuthEnabled {
-		if !localTestAuthEnvironment(cfg.Environment) {
-			return Config{}, fmt.Errorf("TEST_AUTH_ENABLED=true is allowed only in local, development, or test environments")
+		isLocalTestEnvironment := localTestAuthEnvironment(cfg.Environment)
+		isStagingEnvironment := stagingTestAuthEnvironment(cfg.Environment)
+		if !isLocalTestEnvironment && !isStagingEnvironment {
+			return Config{}, fmt.Errorf("TEST_AUTH_ENABLED=true is allowed only in local, development, test, or restricted staging environments")
 		}
 		if strings.TrimSpace(cfg.TestAuthPhone) == "" || strings.TrimSpace(cfg.TestAuthCode) == "" {
 			return Config{}, fmt.Errorf("TEST_AUTH_PHONE and TEST_AUTH_CODE are required when test auth is enabled")
+		}
+		if isStagingEnvironment && !validStagingTestAuthConfig(cfg.TestAuthPhone, cfg.TestAuthCode) {
+			return Config{}, fmt.Errorf("staging test auth allows up to three exact E.164 phones and requires a six-digit code")
 		}
 	}
 
@@ -255,4 +260,55 @@ func localTestAuthEnvironment(environment string) bool {
 	default:
 		return false
 	}
+}
+
+func stagingTestAuthEnvironment(environment string) bool {
+	return strings.EqualFold(strings.TrimSpace(environment), "staging")
+}
+
+func validStagingTestAuthConfig(rawPhones, code string) bool {
+	if wildcardTestAuthPhone(rawPhones) {
+		return false
+	}
+	parts := strings.Split(rawPhones, ",")
+	if len(parts) < 1 || len(parts) > 3 {
+		return false
+	}
+	seen := make(map[string]struct{}, len(parts))
+	for _, part := range parts {
+		phone := normalizePhoneForValidation(strings.TrimSpace(part))
+		if !validE164TestAuthPhone(phone) {
+			return false
+		}
+		if _, exists := seen[phone]; exists {
+			return false
+		}
+		seen[phone] = struct{}{}
+	}
+	return validSixDigitTestAuthCode(code)
+}
+
+func validE164TestAuthPhone(phone string) bool {
+	if len(phone) < 9 || len(phone) > 16 || phone[0] != '+' || phone[1] < '1' || phone[1] > '9' {
+		return false
+	}
+	for _, digit := range phone[1:] {
+		if digit < '0' || digit > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func validSixDigitTestAuthCode(code string) bool {
+	code = strings.TrimSpace(code)
+	if len(code) != 6 {
+		return false
+	}
+	for _, digit := range code {
+		if digit < '0' || digit > '9' {
+			return false
+		}
+	}
+	return true
 }

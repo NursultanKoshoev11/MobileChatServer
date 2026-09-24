@@ -4,10 +4,10 @@ This checklist is for deploying the Koom backend behind HTTPS.
 
 ## 1. DNS
 
-DuckDNS should point the domain to the server public IP:
+The domain DNS A record should point to the server public IP:
 
 ```text
-koommy.duckdns.org -> 16.171.171.191
+koom.com.kg -> 16.171.171.191
 ```
 
 ## 2. Firewall / Security Group
@@ -31,7 +31,7 @@ ports:
 Install Caddy on the server and use this Caddyfile:
 
 ```caddyfile
-koommy.duckdns.org {
+koom.com.kg {
     reverse_proxy 127.0.0.1:8080
 }
 ```
@@ -46,7 +46,7 @@ sudo systemctl status caddy
 The public healthcheck should be:
 
 ```bash
-curl https://koommy.duckdns.org/api/health
+curl https://koom.com.kg/api/health
 ```
 
 Expected response:
@@ -65,7 +65,7 @@ Required values:
 APP_ENV=production
 DATABASE_URL=postgres://...
 JWT_SECRET=<long random secret, at least 32 chars>
-ALLOWED_ORIGINS=https://koommy.duckdns.org
+ALLOWED_ORIGINS=https://koom.com.kg
 SMS_PROVIDER=<real provider>
 RUN_MIGRATIONS_ON_START=false
 ```
@@ -85,13 +85,13 @@ docker compose -f docker-compose.prod.example.yml run --rm api /app/mobilechat-m
 The Flutter app default API URL is:
 
 ```text
-https://koommy.duckdns.org
+https://koom.com.kg
 ```
 
 For custom builds, override it with:
 
 ```bash
-flutter build apk --dart-define=API_BASE_URL=https://koommy.duckdns.org
+flutter build apk --dart-define=API_BASE_URL=https://koom.com.kg
 ```
 
 ## 7. Security notes

@@ -13,7 +13,7 @@ services:
       api:
         condition: service_healthy
     environment:
-      APP_DOMAIN: koommy.duckdns.org
+      APP_DOMAIN: ${APP_DOMAIN:-koom.com.kg}
     ports:
       - "80:80"
       - "443:443"
@@ -65,7 +65,7 @@ services:
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       ACCESS_TOKEN_TTL_MINUTES: ${ACCESS_TOKEN_TTL_MINUTES:-5}
-      ALLOWED_ORIGINS: https://koommy.duckdns.org
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://koom.com.kg}
       BCRYPT_COST: ${BCRYPT_COST:-12}
       SMS_PROVIDER: ${SMS_PROVIDER:?SMS_PROVIDER is required}
       SMS_FROM: ${SMS_FROM:-Koom}
@@ -109,7 +109,7 @@ services:
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       ACCESS_TOKEN_TTL_MINUTES: ${ACCESS_TOKEN_TTL_MINUTES:-5}
-      ALLOWED_ORIGINS: https://koommy.duckdns.org
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://koom.com.kg}
       BCRYPT_COST: ${BCRYPT_COST:-12}
       SMS_PROVIDER: ${SMS_PROVIDER:?SMS_PROVIDER is required}
       SMS_FROM: ${SMS_FROM:-Koom}
