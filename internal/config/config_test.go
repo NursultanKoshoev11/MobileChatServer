@@ -13,6 +13,30 @@ func TestWildcardTestAuthPhoneRequiresLocalEnvironment(t *testing.T) {
 	if localTestAuthEnvironment("staging") || localTestAuthEnvironment("production") { t.Fatal("shared environments must not allow test auth") }
 }
 
+func TestStagingTestAuthAllowsUpToThreeExactPhones(t *testing.T) {
+	if !stagingTestAuthEnvironment(" staging ") || !validStagingTestAuthConfig("+996 700-000-001", "111111") {
+		t.Fatal("expected one exact staging phone and a six-digit code to be accepted")
+	}
+	if !validStagingTestAuthConfig("+996700000001, +996700000002, +996700000003", "111111") {
+		t.Fatal("expected three exact staging phones to be accepted")
+	}
+	for _, tc := range []struct{ phone, code string }{
+		{"*", "111111"},
+		{"+996700000001,+996700000002,+996700000003,+996700000004", "111111"},
+		{"+996700000001,+996700000001", "111111"},
+		{"996700000001", "111111"},
+		{"+996700000001", "11111x"},
+		{"+996700000001", "11111"},
+	} {
+		if validStagingTestAuthConfig(tc.phone, tc.code) {
+			t.Fatalf("unexpectedly accepted staging test auth config phone=%q", tc.phone)
+		}
+	}
+	if stagingTestAuthEnvironment("production") || stagingTestAuthEnvironment("development") {
+		t.Fatal("expected staging test auth to be limited to staging")
+	}
+}
+
 func TestAppendUniquePhoneIgnoresBlankAndDuplicates(t *testing.T) {
 	phones := appendUniquePhone([]string{"+996700000001"}, "")
 	if len(phones) != 1 { t.Fatalf("blank phone should be ignored: %#v", phones) }
