@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: mobilechat-api
+    container_name: koom-api
     restart: unless-stopped
     environment:
       APP_ENV: production
@@ -14,7 +14,7 @@ services:
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:?ALLOWED_ORIGINS is required}
       BCRYPT_COST: ${BCRYPT_COST:-12}
       SMS_PROVIDER: ${SMS_PROVIDER:?SMS_PROVIDER is required}
-      SMS_FROM: ${SMS_FROM:-MobileChat}
+      SMS_FROM: ${SMS_FROM:-Koom}
       FCM_PROJECT_ID: ${FCM_PROJECT_ID:-}
       FCM_CLIENT_EMAIL: ${FCM_CLIENT_EMAIL:-}
       FCM_PRIVATE_KEY: ${FCM_PRIVATE_KEY:-}

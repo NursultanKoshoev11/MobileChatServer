@@ -2,7 +2,7 @@
 set -eu
 
 if [ "${1:-}" = "" ]; then
-  echo "Usage: ./scripts/restore-postgres.sh /backups/mobilechat-YYYYMMDDTHHMMSSZ.dump" >&2
+  echo "Usage: ./scripts/restore-postgres.sh /backups/koom-YYYYMMDDTHHMMSSZ.dump" >&2
   exit 1
 fi
 

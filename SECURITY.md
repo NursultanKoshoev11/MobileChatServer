@@ -2,7 +2,7 @@
 
 ## Supported Version
 
-The `main` branch is the active development branch for MobileChatServer.
+The `main` branch is the active development branch for Koom Server.
 
 ## Reporting a Vulnerability
 

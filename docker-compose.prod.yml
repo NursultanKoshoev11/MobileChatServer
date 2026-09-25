@@ -2,7 +2,7 @@ services:
   caddy:
     profiles: ["caddy"]
     image: caddy:2.11.4-alpine
-    container_name: mobilechat-caddy
+    container_name: koom-caddy
     restart: unless-stopped
     logging:
       driver: json-file
@@ -22,11 +22,11 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     networks:
-      - mobilechat
+      - koom
 
   postgres:
     image: postgres:16-alpine
-    container_name: mobilechat-postgres
+    container_name: koom-postgres
     restart: unless-stopped
     logging:
       driver: json-file
@@ -46,18 +46,18 @@ services:
       timeout: 5s
       retries: 10
     networks:
-      - mobilechat
+      - koom
 
   migrate:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: mobilechat-migrate
+    container_name: koom-migrate
     restart: "no"
     depends_on:
       postgres:
         condition: service_healthy
-    entrypoint: ["/app/mobilechat-migrate"]
+    entrypoint: ["/app/koom-migrate"]
     environment:
       APP_ENV: ${APP_ENV:-production}
       RUN_MIGRATIONS_ON_START: "false"
@@ -86,13 +86,13 @@ services:
       MODERATION_FAIL_CLOSED: ${MODERATION_FAIL_CLOSED:-true}
       TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-172.16.0.0/12}
     networks:
-      - mobilechat
+      - koom
 
   api:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: mobilechat-api
+    container_name: koom-api
     restart: unless-stopped
     logging:
       driver: json-file
@@ -141,14 +141,14 @@ services:
       retries: 10
       start_period: 20s
     networks:
-      - mobilechat
+      - koom
 
   backup:
     build:
       context: .
       dockerfile: Dockerfile.backup
-    image: mobilechat-backup:prod
-    container_name: mobilechat-backup
+    image: koom-backup:prod
+    container_name: koom-backup
     restart: unless-stopped
     logging:
       driver: json-file
@@ -186,14 +186,14 @@ services:
       test:
         - CMD-SHELL
         - >-
-          test -n "$(find /backups -maxdepth 1 -type f -name 'mobilechat-*.dump' -mmin -1500 -print -quit)" &&
-          test -n "$(find /backups -maxdepth 1 -type f -name 'mobilechat-files-*.tar.gz' -mmin -1500 -print -quit)"
+          test -n "$(find /backups -maxdepth 1 -type f -name 'koom-*.dump' -mmin -1500 -print -quit)" &&
+          test -n "$(find /backups -maxdepth 1 -type f -name 'koom-files-*.tar.gz' -mmin -1500 -print -quit)"
       interval: 1h
       timeout: 10s
       retries: 2
       start_period: 2m
     networks:
-      - mobilechat
+      - koom
 
 volumes:
   postgres_data:
@@ -201,6 +201,6 @@ volumes:
   caddy_config:
 
 networks:
-  mobilechat:
+  koom:
     driver: bridge
 

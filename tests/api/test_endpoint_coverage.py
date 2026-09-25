@@ -1,5 +1,5 @@
 """
-Full API endpoint coverage tests for MobileChatServer.
+Full API endpoint coverage tests for Koom Server.
 
 This suite intentionally has two layers:
 1. route inventory coverage: every chi route declared in internal/httpapi/server.go

@@ -11,7 +11,7 @@ import (
 )
 
 func main() {
-	logger := log.New(os.Stdout, "mobilechat-migrate ", log.LstdFlags|log.LUTC|log.Lmicroseconds)
+	logger := log.New(os.Stdout, "koom-migrate ", log.LstdFlags|log.LUTC|log.Lmicroseconds)
 
 	cfg, err := config.Load()
 	if err != nil {

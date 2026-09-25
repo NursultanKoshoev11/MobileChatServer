@@ -14,7 +14,7 @@ if [ "$ROLE" != "platform_admin" ] && [ "$ROLE" != "super_admin" ]; then
   exit 1
 fi
 
-docker compose exec -T postgres psql -U "${POSTGRES_USER:-mobilechat}" -d "${POSTGRES_DB:-mobilechat}" <<SQL
+docker compose exec -T postgres psql -U "${POSTGRES_USER:-koom}" -d "${POSTGRES_DB:-koom}" <<SQL
 INSERT INTO admin_phone_allowlist (phone, role)
 VALUES ('$PHONE', '$ROLE')
 ON CONFLICT (phone) DO UPDATE

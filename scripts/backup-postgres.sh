@@ -4,9 +4,9 @@ umask 077
 
 BACKUP_DIR="/backups"
 TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-FILE="$BACKUP_DIR/mobilechat-$TIMESTAMP.dump"
+FILE="$BACKUP_DIR/koom-$TIMESTAMP.dump"
 SHA_FILE="$FILE.sha256"
-MEDIA_FILE="$BACKUP_DIR/mobilechat-files-$TIMESTAMP.tar.gz"
+MEDIA_FILE="$BACKUP_DIR/koom-files-$TIMESTAMP.tar.gz"
 MEDIA_SHA_FILE="$MEDIA_FILE.sha256"
 RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-14}"
 BACKUP_S3_URI="${BACKUP_S3_URI:-}"
@@ -60,6 +60,6 @@ else
   echo "warning: BACKUP_S3_URI is empty; backup is local only" >&2
 fi
 
-find "$BACKUP_DIR" -type f \( -name 'mobilechat-*.dump' -o -name 'mobilechat-*.dump.sha256' -o -name 'mobilechat-files-*.tar.gz' -o -name 'mobilechat-files-*.tar.gz.sha256' \) -mtime +"$RETENTION_DAYS" -delete
+find "$BACKUP_DIR" -type f \( -name 'koom-*.dump' -o -name 'koom-*.dump.sha256' -o -name 'koom-files-*.tar.gz' -o -name 'koom-files-*.tar.gz.sha256' \) -mtime +"$RETENTION_DAYS" -delete
 echo "database backup created and validated: $FILE"
 [ ! -f "$MEDIA_FILE" ] || echo "media backup created and validated: $MEDIA_FILE"

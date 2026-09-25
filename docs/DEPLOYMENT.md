@@ -77,7 +77,7 @@ RUN_MIGRATIONS_ON_START=false
 Run migrations before starting or updating the production API:
 
 ```bash
-docker compose -f docker-compose.prod.example.yml run --rm api /app/mobilechat-migrate
+docker compose -f docker-compose.prod.example.yml run --rm api /app/koom-migrate
 ```
 
 ## 6. Mobile app API URL

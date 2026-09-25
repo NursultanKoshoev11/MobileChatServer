@@ -52,7 +52,7 @@ func Load() (Config, error) {
 		Environment:                    getEnv("APP_ENV", "production"),
 		BCryptCost:                     getEnvInt("BCRYPT_COST", 12),
 		SMSProvider:                    getEnv("SMS_PROVIDER", "disabled"),
-		SMSFrom:                        getEnv("SMS_FROM", "MobileChat"),
+		SMSFrom:                        getEnv("SMS_FROM", "Koom"),
 		FCMProjectID:                   os.Getenv("FCM_PROJECT_ID"),
 		FCMClientEmail:                 os.Getenv("FCM_CLIENT_EMAIL"),
 		FCMPrivateKey:                  os.Getenv("FCM_PRIVATE_KEY"),

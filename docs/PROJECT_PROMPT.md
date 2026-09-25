@@ -1,4 +1,4 @@
-# MobileChat Server Product Prompt
+# Koom Server Product Prompt
 
 Original request saved from the user:
 

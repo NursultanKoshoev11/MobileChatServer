@@ -26,7 +26,7 @@ func (s TwilioSender) SendVerificationCode(ctx context.Context, phoneNumber stri
 	}
 	values := url.Values{}
 	values.Set("To", phoneNumber)
-	values.Set("Body", fmt.Sprintf("Your MobileChat verification code is %s", code))
+	values.Set("Body", fmt.Sprintf("Your Koom verification code is %s", code))
 	if serviceSID := strings.TrimSpace(s.MessagingServiceSID); serviceSID != "" {
 		values.Set("MessagingServiceSid", serviceSID)
 	} else if from := strings.TrimSpace(s.From); from != "" {

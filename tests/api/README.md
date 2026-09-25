@@ -1,6 +1,6 @@
 # API endpoint coverage tests
 
-This folder is for full MobileChatServer API endpoint testing.
+This folder is for full Koom Server API endpoint testing.
 
 ## What it checks
 
