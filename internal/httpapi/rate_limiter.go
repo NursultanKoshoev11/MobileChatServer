@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+const maxTrackedRateLimitKeys = 100_000
+
 type RateLimiter struct {
 	mu       sync.Mutex
 	visitors map[string]*visitor
@@ -36,8 +38,16 @@ func (l *RateLimiter) Allow(key string) bool {
 	defer l.mu.Unlock()
 
 	entry, ok := l.visitors[key]
-	if !ok || now.After(entry.resetTime) {
+	if !ok {
+		if len(l.visitors) >= maxTrackedRateLimitKeys {
+			return false
+		}
 		l.visitors[key] = &visitor{count: 1, resetTime: now.Add(l.window)}
+		return true
+	}
+	if now.After(entry.resetTime) {
+		entry.count = 1
+		entry.resetTime = now.Add(l.window)
 		return true
 	}
 	if entry.count >= l.limit {
@@ -81,19 +91,17 @@ func (s *Server) clientIP(r *http.Request) string {
 	}
 	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
 		parts := strings.Split(forwarded, ",")
-		for i := 0; i < len(parts); i++ {
+		for i := len(parts) - 1; i >= 0; i-- {
 			candidate := strings.TrimSpace(parts[i])
 			if candidate == "" {
 				continue
 			}
 			if ip := net.ParseIP(candidate); ip != nil {
+				if ipInNetworks(ip, s.trustedProxies) {
+					continue
+				}
 				return ip.String()
 			}
-		}
-	}
-	if realIP := strings.TrimSpace(r.Header.Get("X-Real-IP")); realIP != "" {
-		if ip := net.ParseIP(realIP); ip != nil {
-			return ip.String()
 		}
 	}
 	return remote

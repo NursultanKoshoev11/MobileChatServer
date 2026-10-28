@@ -34,6 +34,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import pytest
 import requests
@@ -129,11 +130,11 @@ def _body_for(endpoint: Endpoint) -> dict[str, Any]:
     path = endpoint.path
 
     if path == "/api/auth/request-code":
-        return {"mobile": os.getenv("API_TEST_PHONE", "+996700000001")}
+        return {"mobile": "invalid"}
     if path == "/api/auth/verify-code":
         return {
-            "mobile": os.getenv("API_TEST_PHONE", "+996700000001"),
-            "code": os.getenv("API_TEST_CODE", "111111"),
+            "mobile": "invalid",
+            "code": "",
             "display_name": os.getenv("API_TEST_DISPLAY_NAME", "API Test User"),
         }
     if path in {"/api/auth/refresh", "/api/auth/logout"}:
@@ -244,8 +245,14 @@ def _missing_fixture_names(path: str) -> list[str]:
 
 @pytest.fixture(scope="session")
 def token(http_session: requests.Session, base_url: str) -> str:
-    phone = os.getenv("API_TEST_PHONE", "+996700000001")
-    code = os.getenv("API_TEST_CODE", "111111")
+    hostname = urlparse(base_url).hostname
+    if hostname not in {"localhost", "127.0.0.1", "::1"}:
+        pytest.fail("Authenticated API test login is restricted to localhost; do not send test auth to a public server")
+
+    phone = os.getenv("API_TEST_PHONE")
+    code = os.getenv("API_TEST_CODE")
+    if not phone or not code:
+        pytest.skip("Set API_TEST_PHONE and API_TEST_CODE to run the authenticated API flow locally")
     display_name = os.getenv("API_TEST_DISPLAY_NAME", "API Test User")
 
     _request(
@@ -287,6 +294,8 @@ def test_public_endpoints(endpoint: Endpoint, http_session: requests.Session, ba
     body = _body_for(endpoint)
 
     expected = {200}
+    if endpoint.path in {"/api/auth/request-code", "/api/auth/verify-code"}:
+        expected = {400}
     if endpoint.path == "/api/auth/logout":
         expected = {200, 401, 404}
     if endpoint.path == "/api/auth/refresh":

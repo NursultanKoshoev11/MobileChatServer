@@ -19,13 +19,19 @@ func (r *Repository) ListGroupMembers(ctx context.Context, groupID, requesterID 
 	}
 
 	rows, err := r.db.Query(ctx, `
-		SELECT u.id, u.display_name, COALESCE(NULLIF(u.phone, ''), u.phone_number, '') AS phone, gm.role, gm.joined_at
+		SELECT u.id, u.display_name,
+		       CASE WHEN requester.role IN ('owner', 'admin')
+	            THEN COALESCE(NULLIF(u.phone, ''), u.phone_number, '')
+	            ELSE ''
+	       END AS phone,
+	       gm.role, gm.joined_at
 		FROM group_members gm
+		JOIN group_members requester ON requester.group_id = gm.group_id AND requester.user_id = $2
 		JOIN users u ON u.id = gm.user_id
 		WHERE gm.group_id = $1
 		ORDER BY
 			CASE gm.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END,
-			u.display_name ASC`, groupID)
+			u.display_name ASC`, groupID, requesterID)
 	if err != nil {
 		return nil, fmt.Errorf("list group members: %w", err)
 	}

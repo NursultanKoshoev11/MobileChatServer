@@ -5,10 +5,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/domain"
+	"github.com/NursultanKoshoev11/MobileChatServer/internal/storage"
 )
 
 const (
@@ -94,7 +96,7 @@ func (s *Service) createPublicRequest(ctx context.Context, authorID, groupID str
 	if len(title) < 3 || len(title) > maxPublicRequestTitleLen {
 		return domain.PublicRequest{}, NewValidationError(fmt.Sprintf("title must be between 3 and %d characters", maxPublicRequestTitleLen))
 	}
-	bodyMeta, err := validatePublicRequestBody(body)
+	bodyMeta, err := validatePublicRequestBody(body, groupID)
 	if err != nil {
 		return domain.PublicRequest{}, err
 	}
@@ -114,7 +116,7 @@ func (s *Service) createPublicRequest(ctx context.Context, authorID, groupID str
 		}
 		moderationNotice = notice
 	}
-	request, err := s.repo.CreatePublicRequest(ctx, domain.PublicRequest{
+	requestInput := domain.PublicRequest{
 		ID:              "REQ-" + strings.ToUpper(randomHex(12)),
 		GroupID:         groupID,
 		AuthorID:        authorID,
@@ -122,12 +124,23 @@ func (s *Service) createPublicRequest(ctx context.Context, authorID, groupID str
 		InteractionMode: mode,
 		Title:           title,
 		Body:            body,
+	}
+	var request domain.PublicRequest
+	_, err = s.persistModeratedPublicationWithAudit(ctx, moderationNotice, func(repo *storage.Repository) (string, error) {
+		var createErr error
+		request, createErr = repo.CreatePublicRequest(ctx, requestInput)
+		return request.ID, createErr
+	}, storage.AuditEvent{
+		ID:           "EVT-" + strings.ToUpper(randomHex(12)),
+		ActorUserID:  authorID,
+		EventType:    "public_request_created",
+		ResourceType: "group",
+		ResourceID:   groupID,
+		MetadataJSON: "{}",
 	})
 	if err != nil {
 		return domain.PublicRequest{}, err
 	}
-	s.publishModerationReviewNotice(ctx, moderationNotice, request.ID)
-	s.RecordEvent(ctx, authorID, "public_request_created", "group", groupID)
 	go s.notifyGroupAboutNewPublicRequest(context.Background(), authorID, groupID, request.ID, request.Title, bodyMeta.NotificationBody())
 	return request, nil
 }
@@ -157,11 +170,15 @@ func (s *Service) VotePublicRequest(ctx context.Context, userID, requestID, vote
 	if voteType != "support" && voteType != "oppose" {
 		return domain.PublicRequestVoteUpdate{}, NewValidationError("vote_type must be support or oppose")
 	}
-	update, err := s.repo.VotePublicRequest(ctx, requestID, userID, voteType)
+	var update domain.PublicRequestVoteUpdate
+	err := s.recordAuditedMutation(ctx, userID, "public_request_voted", "public_request", requestID, func(repo *storage.Repository) error {
+		var voteErr error
+		update, voteErr = repo.VotePublicRequest(ctx, requestID, userID, voteType)
+		return voteErr
+	})
 	if err != nil {
 		return domain.PublicRequestVoteUpdate{}, err
 	}
-	s.RecordEvent(ctx, userID, "public_request_voted", "public_request", requestID)
 	return update, nil
 }
 
@@ -170,11 +187,15 @@ func (s *Service) ClearPublicRequestVote(ctx context.Context, userID, requestID 
 	if requestID == "" {
 		return domain.PublicRequestVoteUpdate{}, NewValidationError("request_id is required")
 	}
-	update, err := s.repo.ClearPublicRequestVote(ctx, requestID, userID)
+	var update domain.PublicRequestVoteUpdate
+	err := s.recordAuditedMutation(ctx, userID, "public_request_vote_cleared", "public_request", requestID, func(repo *storage.Repository) error {
+		var clearErr error
+		update, clearErr = repo.ClearPublicRequestVote(ctx, requestID, userID)
+		return clearErr
+	})
 	if err != nil {
 		return domain.PublicRequestVoteUpdate{}, err
 	}
-	s.RecordEvent(ctx, userID, "public_request_vote_cleared", "public_request", requestID)
 	return update, nil
 }
 
@@ -212,17 +233,28 @@ func (s *Service) createPublicRequestComment(ctx context.Context, authorID, requ
 		}
 		moderationNotice = notice
 	}
-	comment, err := s.repo.CreatePublicRequestComment(ctx, domain.PublicRequestComment{
+	commentInput := domain.PublicRequestComment{
 		ID:        "COM-" + strings.ToUpper(randomHex(12)),
 		RequestID: requestID,
 		AuthorID:  authorID,
 		Body:      body,
+	}
+	var comment domain.PublicRequestComment
+	_, err := s.persistModeratedPublicationWithAudit(ctx, moderationNotice, func(repo *storage.Repository) (string, error) {
+		var createErr error
+		comment, createErr = repo.CreatePublicRequestComment(ctx, commentInput)
+		return comment.ID, createErr
+	}, storage.AuditEvent{
+		ID:           "EVT-" + strings.ToUpper(randomHex(12)),
+		ActorUserID:  authorID,
+		EventType:    "public_request_commented",
+		ResourceType: "public_request",
+		ResourceID:   requestID,
+		MetadataJSON: "{}",
 	})
 	if err != nil {
 		return domain.PublicRequestComment{}, err
 	}
-	s.publishModerationReviewNotice(ctx, moderationNotice, comment.ID)
-	s.RecordEvent(ctx, authorID, "public_request_commented", "public_request", requestID)
 	return comment, nil
 }
 
@@ -239,11 +271,15 @@ func (s *Service) DeletePublicRequestComment(ctx context.Context, moderatorID, c
 	if commentID == "" {
 		return "", NewValidationError("comment_id is required")
 	}
-	requestID, err := s.repo.DeletePublicRequestComment(ctx, commentID, moderatorID)
+	var requestID string
+	err := s.recordAuditedMutation(ctx, moderatorID, "public_request_comment_deleted", "comment", commentID, func(repo *storage.Repository) error {
+		var deleteErr error
+		requestID, deleteErr = repo.DeletePublicRequestComment(ctx, commentID, moderatorID)
+		return deleteErr
+	})
 	if err != nil {
 		return "", err
 	}
-	s.RecordEvent(ctx, moderatorID, "public_request_comment_deleted", "comment", commentID)
 	return requestID, nil
 }
 
@@ -252,11 +288,9 @@ func (s *Service) HidePublicRequest(ctx context.Context, moderatorID, requestID 
 	if requestID == "" {
 		return NewValidationError("request_id is required")
 	}
-	if err := s.repo.HidePublicRequest(ctx, requestID, moderatorID); err != nil {
-		return err
-	}
-	s.RecordEvent(ctx, moderatorID, "public_request_hidden", "public_request", requestID)
-	return nil
+	return s.recordAuditedMutation(ctx, moderatorID, "public_request_hidden", "public_request", requestID, func(repo *storage.Repository) error {
+		return repo.HidePublicRequest(ctx, requestID, moderatorID)
+	})
 }
 
 func (s *Service) UpdatePublicRequestStatus(ctx context.Context, adminID, requestID string, status domain.PublicRequestStatus) error {
@@ -267,18 +301,16 @@ func (s *Service) UpdatePublicRequestStatus(ctx context.Context, adminID, reques
 	if !validPublicRequestStatus(status) {
 		return NewValidationError("status is invalid")
 	}
-	if err := s.repo.UpdatePublicRequestStatus(ctx, requestID, adminID, status); err != nil {
-		return err
-	}
-	s.RecordEvent(ctx, adminID, "public_request_status_updated", "public_request", requestID)
-	return nil
+	return s.recordAuditedMutation(ctx, adminID, "public_request_status_updated", "public_request", requestID, func(repo *storage.Repository) error {
+		return repo.UpdatePublicRequestStatus(ctx, requestID, adminID, status)
+	})
 }
 
-func validatePublicRequestBody(body string) (publicRequestBodyMeta, error) {
+func validatePublicRequestBody(body, groupID string) (publicRequestBodyMeta, error) {
 	if len(body) > maxPublicRequestPayloadLen {
 		return publicRequestBodyMeta{}, NewValidationError(fmt.Sprintf("body must be less than %d bytes", maxPublicRequestPayloadLen))
 	}
-	meta, isPayload, err := parsePublicRequestBodyPayload(body)
+	meta, isPayload, err := parsePublicRequestBodyPayload(body, groupID)
 	if err != nil {
 		return publicRequestBodyMeta{}, err
 	}
@@ -300,7 +332,7 @@ func validatePublicRequestBody(body string) (publicRequestBodyMeta, error) {
 	return publicRequestBodyMeta{Text: body, ModerationText: body}, nil
 }
 
-func parsePublicRequestBodyPayload(body string) (publicRequestBodyMeta, bool, error) {
+func parsePublicRequestBodyPayload(body, groupID string) (publicRequestBodyMeta, bool, error) {
 	raw := strings.TrimSpace(body)
 	if raw == "" || !strings.HasPrefix(raw, "{") {
 		return publicRequestBodyMeta{}, false, nil
@@ -318,7 +350,7 @@ func parsePublicRequestBodyPayload(body string) (publicRequestBodyMeta, bool, er
 		return publicRequestBodyMeta{}, true, NewValidationError(fmt.Sprintf("only %d video is allowed", maxPublicRequestVideos))
 	}
 	for _, photo := range payload.Photos {
-		if err := validatePublicRequestPhotoPayload(photo); err != nil {
+		if err := validatePublicRequestPhotoPayload(photo, groupID); err != nil {
 			return publicRequestBodyMeta{}, true, err
 		}
 	}
@@ -335,7 +367,7 @@ func parsePublicRequestBodyPayload(body string) (publicRequestBodyMeta, bool, er
 	return publicRequestBodyMeta{Text: text, ModerationText: moderationText, PhotoCount: len(payload.Photos), VideoCount: len(payload.Videos)}, true, nil
 }
 
-func validatePublicRequestPhotoPayload(photo publicRequestPayloadPhoto) error {
+func validatePublicRequestPhotoPayload(photo publicRequestPayloadPhoto, groupID string) error {
 	if photo.SizeBytes > 0 && photo.SizeBytes > maxPublicRequestPhotoBytes {
 		return NewValidationError(fmt.Sprintf("photo must be less than %d bytes", maxPublicRequestPhotoBytes))
 	}
@@ -346,7 +378,7 @@ func validatePublicRequestPhotoPayload(photo publicRequestPayloadPhoto) error {
 		if fileID != "" && !strings.HasPrefix(fileID, "PF-") {
 			return NewValidationError("photo file_id is invalid")
 		}
-		if url != "" && !strings.Contains(url, "/api/public-files/") {
+		if url != "" && !validPublicRequestFileURL(url, groupID) {
 			return NewValidationError("photo url is invalid")
 		}
 		return nil
@@ -373,6 +405,33 @@ func validatePublicRequestPhotoPayload(photo publicRequestPayloadPhoto) error {
 		return NewValidationError(fmt.Sprintf("photo must be less than %d bytes", maxPublicRequestPhotoBytes))
 	}
 	return nil
+}
+
+func validPublicRequestFileURL(value, groupID string) bool {
+	if value == "" || groupID == "" || !strings.HasPrefix(value, "/") || strings.HasPrefix(value, "//") || strings.ContainsAny(value, "%?#\\") {
+		return false
+	}
+	parsed, err := url.ParseRequestURI(value)
+	if err != nil || parsed.IsAbs() || parsed.Host != "" || parsed.User != nil || parsed.Opaque != "" {
+		return false
+	}
+	if parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Path != value {
+		return false
+	}
+	parts := strings.Split(strings.TrimPrefix(value, "/"), "/")
+	if len(parts) != 4 || parts[0] != "api" || parts[1] != "public-files" || parts[2] != groupID {
+		return false
+	}
+	fileID := parts[3]
+	if !strings.HasPrefix(fileID, "PF-") || len(fileID) < 8 || len(fileID) > 80 {
+		return false
+	}
+	for _, char := range fileID {
+		if !((char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || char == '-') {
+			return false
+		}
+	}
+	return true
 }
 
 func validatePublicRequestVideoPayload(video publicRequestPayloadVideo) error {
@@ -428,7 +487,7 @@ func moderationBodyForInput(item domain.ContentModerationItem) string {
 	if item.ContentType != domain.ContentTypePublicRequest {
 		return item.Body
 	}
-	meta, isPayload, err := parsePublicRequestBodyPayload(item.Body)
+	meta, isPayload, err := parsePublicRequestBodyPayload(item.Body, item.GroupID)
 	if err != nil || !isPayload {
 		return item.Body
 	}

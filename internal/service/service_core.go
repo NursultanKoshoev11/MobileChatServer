@@ -16,10 +16,13 @@ import (
 )
 
 func (s *Service) JoinPublicGroup(ctx context.Context, userID, groupID string) error {
+	groupID = strings.TrimSpace(groupID)
 	if groupID == "" {
 		return NewValidationError("group_id is required")
 	}
-	return s.repo.JoinPublicGroup(ctx, groupID, userID)
+	return s.recordAuditedMutation(ctx, userID, "group_joined_public", "group", groupID, func(repo *storage.Repository) error {
+		return repo.JoinPublicGroup(ctx, groupID, userID)
+	})
 }
 
 func (s *Service) UpdateGroupMemberRole(ctx context.Context, actorID, groupID, targetUserID string, role domain.GroupRole) (domain.GroupMember, error) {
@@ -29,7 +32,13 @@ func (s *Service) UpdateGroupMemberRole(ctx context.Context, actorID, groupID, t
 	if role != domain.RoleAdmin && role != domain.RoleMember {
 		return domain.GroupMember{}, NewValidationError("role must be admin or member")
 	}
-	if err := s.repo.SetMemberRole(ctx, groupID, actorID, targetUserID, role); err != nil {
+	eventType := "member_demoted"
+	if role == domain.RoleAdmin {
+		eventType = "member_promoted"
+	}
+	if err := s.recordAuditedMutation(ctx, actorID, eventType, "group", groupID, func(repo *storage.Repository) error {
+		return repo.SetMemberRole(ctx, groupID, actorID, targetUserID, role)
+	}); err != nil {
 		return domain.GroupMember{}, err
 	}
 	members, err := s.repo.ListGroupMembers(ctx, groupID, actorID)
@@ -62,7 +71,12 @@ func (s *Service) EnsureGroupInviteCode(ctx context.Context, userID, groupID str
 	}
 	var lastErr error
 	for attempt := 0; attempt < 8; attempt++ {
-		group, err := s.repo.EnsureGroupInviteCode(ctx, groupID, userID, randomInviteCode())
+		var group domain.Group
+		err := s.recordAuditedMutation(ctx, userID, "group_invite_code_accessed", "group", groupID, func(repo *storage.Repository) error {
+			var ensureErr error
+			group, ensureErr = repo.EnsureGroupInviteCodeInTransaction(ctx, groupID, userID, randomInviteCode())
+			return ensureErr
+		})
 		if err == nil {
 			if pass, passErr := security.MakeQREnv(group.ID, group.InviteCode, 24*time.Hour); passErr == nil {
 				group.QRPass = pass
@@ -90,7 +104,20 @@ func (s *Service) JoinByInviteCode(ctx context.Context, userID, inviteCode strin
 	if inviteCode == "" {
 		return domain.Group{}, NewValidationError("invite_code is required")
 	}
-	return s.repo.JoinByInviteCode(ctx, userID, inviteCode)
+	groupID, err := s.repo.FindGroupIDByInviteCode(ctx, inviteCode)
+	if err != nil {
+		return domain.Group{}, err
+	}
+	var group domain.Group
+	err = s.recordAuditedMutation(ctx, userID, "group_joined_by_invite_code", "group", groupID, func(repo *storage.Repository) error {
+		var joinErr error
+		group, joinErr = repo.JoinByInviteCode(ctx, userID, inviteCode)
+		return joinErr
+	})
+	if err != nil {
+		return domain.Group{}, err
+	}
+	return group, nil
 }
 
 func (s *Service) FindUserByPhone(ctx context.Context, mobile string) (domain.User, error) {
@@ -105,7 +132,9 @@ func (s *Service) InviteUserByID(ctx context.Context, adminID, groupID, targetUs
 	if groupID == "" || targetUserID == "" {
 		return NewValidationError("group_id and target_user_id are required")
 	}
-	return s.repo.InviteUserByID(ctx, groupID, adminID, targetUserID)
+	return s.recordAuditedMutation(ctx, adminID, "group_member_added_by_admin", "group", groupID, func(repo *storage.Repository) error {
+		return repo.InviteUserByID(ctx, groupID, adminID, targetUserID)
+	})
 }
 
 func (s *Service) ListMessages(ctx context.Context, userID, groupID string, limit int, before time.Time) ([]domain.Message, error) {
@@ -142,11 +171,15 @@ func (s *Service) createMessage(ctx context.Context, senderID, groupID string, i
 		moderationNotice = notice
 	}
 	message := domain.Message{ID: "M-" + strings.ToUpper(randomHex(12)), GroupID: groupID, SenderID: senderID, Text: text}
-	created, err := s.repo.CreateMessage(ctx, message)
+	var created domain.Message
+	_, err := s.persistModeratedPublication(ctx, moderationNotice, func(repo *storage.Repository) (string, error) {
+		var createErr error
+		created, createErr = repo.CreateMessage(ctx, message)
+		return created.ID, createErr
+	})
 	if err != nil {
 		return domain.Message{}, err
 	}
-	s.publishModerationReviewNotice(ctx, moderationNotice, created.ID)
 	return created, nil
 }
 

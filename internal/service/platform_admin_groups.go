@@ -16,9 +16,10 @@ func (s *Service) DeleteGroupAsPlatformAdmin(ctx context.Context, admin domain.U
 	if groupID == "" {
 		return NewValidationError("group_id is required")
 	}
-	if err := s.repo.DeleteGroupAsPlatformAdmin(ctx, groupID); err != nil {
+	if err := s.recordAuditedMutation(ctx, admin.ID, "super_admin_group_deleted", "group", groupID, func(repo *storage.Repository) error {
+		return repo.DeleteGroupAsPlatformAdmin(ctx, groupID)
+	}); err != nil {
 		return err
 	}
-	s.RecordEvent(ctx, admin.ID, "super_admin_group_deleted", "group", groupID)
 	return nil
 }

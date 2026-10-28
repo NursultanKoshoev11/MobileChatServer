@@ -15,7 +15,7 @@ func (s *Service) ListGroupMembersPage(ctx context.Context, requesterID, groupID
 	return s.repo.ListGroupMembersPage(ctx, groupID, requesterID, limit, offset)
 }
 
-func (s *Service) SearchUsers(ctx context.Context, query string, limit int) ([]domain.User, error) {
+func (s *Service) SearchUsers(ctx context.Context, query string, limit int) ([]domain.UserSearchResult, error) {
 	query = strings.TrimSpace(query)
 	if len(query) < 2 {
 		return nil, NewValidationError("query must be at least 2 characters")

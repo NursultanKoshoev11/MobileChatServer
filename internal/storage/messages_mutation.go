@@ -49,12 +49,8 @@ func (r *Repository) DeleteMessage(ctx context.Context, groupID, actorID, messag
 		return domain.Message{}, fmt.Errorf("load message for delete: %w", err)
 	}
 	if senderID != actorID {
-		role, err := r.GetMemberRole(ctx, groupID, actorID)
-		if err != nil {
+		if err := r.ensureGroupModerator(ctx, actorID, groupID); err != nil {
 			return domain.Message{}, err
-		}
-		if role != domain.RoleOwner && role != domain.RoleAdmin {
-			return domain.Message{}, ErrForbidden
 		}
 	}
 

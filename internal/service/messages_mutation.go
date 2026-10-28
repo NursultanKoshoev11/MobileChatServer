@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/domain"
+	"github.com/NursultanKoshoev11/MobileChatServer/internal/storage"
 )
 
 type UpdateMessageInput struct {
@@ -29,11 +30,15 @@ func (s *Service) UpdateMessage(ctx context.Context, actorID, groupID, messageID
 	if err != nil {
 		return domain.Message{}, err
 	}
-	message, err := s.repo.UpdateMessage(ctx, groupID, actorID, messageID, text)
+	var message domain.Message
+	_, err = s.persistModeratedPublication(ctx, moderationNotice, func(repo *storage.Repository) (string, error) {
+		var updateErr error
+		message, updateErr = repo.UpdateMessage(ctx, groupID, actorID, messageID, text)
+		return message.ID, updateErr
+	})
 	if err != nil {
 		return domain.Message{}, err
 	}
-	s.publishModerationReviewNotice(ctx, moderationNotice, message.ID)
 	go s.NotifyGroupAboutMessageUpdated(context.Background(), actorID, message)
 	return message, nil
 }
@@ -44,7 +49,12 @@ func (s *Service) DeleteMessage(ctx context.Context, actorID, groupID, messageID
 	if groupID == "" || messageID == "" {
 		return domain.Message{}, NewValidationError("group_id and message_id are required")
 	}
-	message, err := s.repo.DeleteMessage(ctx, groupID, actorID, messageID)
+	var message domain.Message
+	err := s.recordAuditedMutation(ctx, actorID, "message_deleted", "message", messageID, func(repo *storage.Repository) error {
+		var deleteErr error
+		message, deleteErr = repo.DeleteMessage(ctx, groupID, actorID, messageID)
+		return deleteErr
+	})
 	if err != nil {
 		return domain.Message{}, err
 	}

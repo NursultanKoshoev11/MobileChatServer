@@ -37,10 +37,10 @@ python -m pytest tests/api -v
 
 ## Strict 100% business run
 
-For a strict pass across resource-specific endpoints, set `API_STRICT_FULL=1` and provide all fixture IDs:
+For a strict pass across resource-specific endpoints, run against a local/dev/test server with test auth enabled, set `API_STRICT_FULL=1`, and provide all fixture IDs. Authenticated API tests refuse non-local targets. Do not enable test auth on a public staging or production server.
 
 ```bash
-API_BASE_URL=https://your-staging-api.example.com \
+API_BASE_URL=http://127.0.0.1:8080 \
 API_TEST_PHONE=+996700000001 \
 API_TEST_CODE=111111 \
 API_TEST_GROUP_ID=<group-id> \

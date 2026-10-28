@@ -47,21 +47,8 @@ func (s *PhoneAuthService) RequestCode(ctx context.Context, input RequestPhoneCo
 		return RequestPhoneCodeOutput{}, err
 	}
 
-	accountExists := true
-	if _, err := s.repo.GetPhoneUserByMobile(ctx, mobile); err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
-			accountExists = false
-		} else {
-			return RequestPhoneCodeOutput{}, err
-		}
-	}
-
 	if s.isTestAuthMobile(mobile) {
-		return RequestPhoneCodeOutput{Status: "test_code_ready", DevCode: s.expectedTestAuthCode(), AccountExists: accountExists}, nil
-	}
-
-	if err := s.enforcePhoneCodeRateLimit(ctx, mobile); err != nil {
-		return RequestPhoneCodeOutput{}, err
+		return RequestPhoneCodeOutput{Status: "test_code_ready", DevCode: s.expectedTestAuthCode()}, nil
 	}
 
 	code, err := newNumericCode(6)
@@ -69,8 +56,22 @@ func (s *PhoneAuthService) RequestCode(ctx context.Context, input RequestPhoneCo
 		return RequestPhoneCodeOutput{}, err
 	}
 	codeID := "PC-" + strings.ToUpper(randomHex(12))
-	if err := s.repo.CreatePhoneCode(ctx, codeID, mobile, security.HashToken(code), time.Now().UTC().Add(phoneCodeTTL)); err != nil {
+	now := time.Now().UTC()
+	allowed, err := s.repo.CreatePhoneCodeIfWithinLimit(
+		ctx,
+		codeID,
+		mobile,
+		security.HashToken(code),
+		now.Add(phoneCodeTTL),
+		now.Add(-phoneCodeRateLimitWindow),
+		now.Add(-phoneCodeMinRequestGap),
+		phoneCodeRateLimitMax,
+	)
+	if err != nil {
 		return RequestPhoneCodeOutput{}, err
+	}
+	if !allowed {
+		return RequestPhoneCodeOutput{}, NewValidationError("too many code requests; try again later")
 	}
 	if s.sender == nil {
 		return RequestPhoneCodeOutput{}, fmt.Errorf("sms sender is not configured")
@@ -81,28 +82,8 @@ func (s *PhoneAuthService) RequestCode(ctx context.Context, input RequestPhoneCo
 		}
 		return RequestPhoneCodeOutput{}, err
 	}
-	return RequestPhoneCodeOutput{Status: "code_sent", AccountExists: accountExists}, nil
+	return RequestPhoneCodeOutput{Status: "code_sent"}, nil
 }
-
-func (s *PhoneAuthService) enforcePhoneCodeRateLimit(ctx context.Context, mobile string) error {
-	now := time.Now().UTC()
-	count, err := s.repo.CountPhoneCodesSince(ctx, mobile, now.Add(-phoneCodeRateLimitWindow))
-	if err != nil {
-		return err
-	}
-	if count >= phoneCodeRateLimitMax {
-		return NewValidationError("too many code requests; try again later")
-	}
-	latest, err := s.repo.LatestPhoneCodeCreatedAt(ctx, mobile)
-	if err != nil && !errors.Is(err, storage.ErrNotFound) {
-		return err
-	}
-	if err == nil && now.Sub(latest) < phoneCodeMinRequestGap {
-		return NewValidationError("please wait before requesting another code")
-	}
-	return nil
-}
-
 func (s *PhoneAuthService) VerifyCode(ctx context.Context, input VerifyPhoneCodeInput) (domain.PhoneSession, error) {
 	mobile, err := normalizeMobile(input.Mobile)
 	if err != nil {
@@ -125,7 +106,9 @@ func (s *PhoneAuthService) VerifyCode(ctx context.Context, input VerifyPhoneCode
 		if err != nil {
 			return domain.PhoneSession{}, err
 		}
-		_ = s.repo.MarkPhoneVerified(ctx, user.ID)
+		if err := s.repo.MarkPhoneVerified(ctx, user.ID); err != nil {
+			return domain.PhoneSession{}, err
+		}
 		if err := s.repo.UpsertUserRoleFromAllowlist(ctx, user.ID, mobile); err != nil {
 			return domain.PhoneSession{}, err
 		}
@@ -146,18 +129,33 @@ func (s *PhoneAuthService) VerifyCode(ctx context.Context, input VerifyPhoneCode
 		return domain.PhoneSession{}, ErrInvalidCredentials
 	}
 	if security.HashToken(code) != record.CodeHash {
-		_ = s.repo.IncrementPhoneCodeAttempts(ctx, record.ID)
+		if _, err := s.repo.IncrementPhoneCodeAttempts(ctx, record.ID, phoneCodeMaxAttempts); err != nil {
+			return domain.PhoneSession{}, err
+		}
 		return domain.PhoneSession{}, ErrInvalidCredentials
 	}
-	if err := s.repo.ConsumePhoneCode(ctx, record.ID); err != nil {
+	if _, err := s.repo.GetPhoneUserByMobile(ctx, mobile); errors.Is(err, storage.ErrNotFound) {
+		if err := validateNewPhoneUserDisplayName(input.DisplayName); err != nil {
+			return domain.PhoneSession{}, err
+		}
+	} else if err != nil {
 		return domain.PhoneSession{}, err
+	}
+	consumed, err := s.repo.ConsumePhoneCode(ctx, record.ID, phoneCodeMaxAttempts)
+	if err != nil {
+		return domain.PhoneSession{}, err
+	}
+	if !consumed {
+		return domain.PhoneSession{}, ErrInvalidCredentials
 	}
 
 	user, err := s.getOrCreatePhoneUser(ctx, mobile, input.DisplayName)
 	if err != nil {
 		return domain.PhoneSession{}, err
 	}
-	_ = s.repo.MarkPhoneVerified(ctx, user.ID)
+	if err := s.repo.MarkPhoneVerified(ctx, user.ID); err != nil {
+		return domain.PhoneSession{}, err
+	}
 	if err := s.repo.UpsertUserRoleFromAllowlist(ctx, user.ID, mobile); err != nil {
 		return domain.PhoneSession{}, err
 	}
@@ -222,17 +220,13 @@ func (s *PhoneAuthService) Logout(ctx context.Context, input RefreshInput) error
 func (s *PhoneAuthService) getOrCreatePhoneUser(ctx context.Context, mobile string, displayNameInput string) (domain.PhoneAuthUser, error) {
 	user, err := s.repo.GetPhoneUserByMobile(ctx, mobile)
 	if errors.Is(err, storage.ErrNotFound) {
-		displayName := strings.TrimSpace(displayNameInput)
-		if displayName == "" {
-			return domain.PhoneAuthUser{}, NewValidationError("display_name is required for new account")
-		}
-		if len(displayName) < 2 || len(displayName) > maxDisplayNameLen {
-			return domain.PhoneAuthUser{}, NewValidationError(fmt.Sprintf("display_name must be between 2 and %d characters", maxDisplayNameLen))
+		if err := validateNewPhoneUserDisplayName(displayNameInput); err != nil {
+			return domain.PhoneAuthUser{}, err
 		}
 		return s.repo.CreatePhoneUser(ctx, domain.PhoneAuthUser{
 			ID:          "U-" + strings.ToUpper(randomHex(8)),
 			Mobile:      mobile,
-			DisplayName: displayName,
+			DisplayName: strings.TrimSpace(displayNameInput),
 			Role:        domain.UserRoleUser,
 		})
 	}
@@ -240,6 +234,17 @@ func (s *PhoneAuthService) getOrCreatePhoneUser(ctx context.Context, mobile stri
 		return domain.PhoneAuthUser{}, err
 	}
 	return user, nil
+}
+
+func validateNewPhoneUserDisplayName(displayNameInput string) error {
+	displayName := strings.TrimSpace(displayNameInput)
+	if displayName == "" {
+		return NewValidationError("display_name is required for new account")
+	}
+	if len(displayName) < 2 || len(displayName) > maxDisplayNameLen {
+		return NewValidationError(fmt.Sprintf("display_name must be between 2 and %d characters", maxDisplayNameLen))
+	}
+	return nil
 }
 
 func (s *PhoneAuthService) issuePhoneSession(ctx context.Context, user domain.PhoneAuthUser) (domain.PhoneSession, error) {
@@ -271,11 +276,7 @@ func (s *PhoneAuthService) issuePhoneSession(ctx context.Context, user domain.Ph
 }
 
 func (s *PhoneAuthService) isTestAuthMobile(mobile string) bool {
-	if !s.cfg.TestAuthEnabled {
-		return false
-	}
-	isLocal := isLocalTestAuthEnvironment(s.cfg.Environment)
-	if !isLocal && !validStagingTestAuthConfigForService(s.cfg.Environment, s.cfg.TestAuthPhone, s.cfg.TestAuthCode) {
+	if !s.cfg.TestAuthEnabled || !isLocalTestAuthEnvironment(s.cfg.Environment) {
 		return false
 	}
 	for _, part := range strings.Split(s.cfg.TestAuthPhone, ",") {
@@ -284,10 +285,7 @@ func (s *PhoneAuthService) isTestAuthMobile(mobile string) bool {
 			continue
 		}
 		if testPhone == "*" || strings.EqualFold(testPhone, "any") || strings.EqualFold(testPhone, "all") {
-			if isLocal {
-				return true
-			}
-			continue
+			return true
 		}
 		if normalizeTestValue(mobile) == testPhone {
 			return true
@@ -315,37 +313,6 @@ func isLocalTestAuthEnvironment(environment string) bool {
 	default:
 		return false
 	}
-}
-
-func validStagingTestAuthConfigForService(environment, rawPhone, code string) bool {
-	if !strings.EqualFold(strings.TrimSpace(environment), "staging") {
-		return false
-	}
-	phones := strings.Split(rawPhone, ",")
-	if len(phones) < 1 || len(phones) > 3 {
-		return false
-	}
-	seen := make(map[string]struct{}, len(phones))
-	for _, part := range phones {
-		phone := normalizeTestValue(part)
-		if !phonePattern.MatchString(phone) {
-			return false
-		}
-		if _, exists := seen[phone]; exists {
-			return false
-		}
-		seen[phone] = struct{}{}
-	}
-	code = strings.TrimSpace(code)
-	if len(code) != 6 {
-		return false
-	}
-	for _, digit := range code {
-		if digit < '0' || digit > '9' {
-			return false
-		}
-	}
-	return true
 }
 
 func normalizeTestValue(value string) string {

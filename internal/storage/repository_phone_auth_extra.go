@@ -11,9 +11,9 @@ import (
 )
 
 func (r *Repository) GetAuthPhoneUserByID(ctx context.Context, userID string) (domain.PhoneAuthUser, error) {
-	query := `SELECT id, COALESCE(phone_number, ''), display_name, created_at FROM users WHERE id = $1`
+	query := `SELECT id, COALESCE(phone_number, ''), display_name, COALESCE(role, 'user'), COALESCE(avatar_data, ''), created_at FROM users WHERE id = $1`
 	var user domain.PhoneAuthUser
-	err := r.db.QueryRow(ctx, query, userID).Scan(&user.ID, &user.Mobile, &user.DisplayName, &user.CreatedAt)
+	err := r.db.QueryRow(ctx, query, userID).Scan(&user.ID, &user.Mobile, &user.DisplayName, &user.Role, &user.AvatarData, &user.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.PhoneAuthUser{}, ErrNotFound
 	}

@@ -26,6 +26,10 @@ func main() {
 	if err != nil {
 		logger.Fatalf("config error: %v", err)
 	}
+	smsSender, err := newSMSSender(cfg, logger)
+	if err != nil {
+		logger.Fatalf("sms configuration error: %v", err)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -97,7 +101,7 @@ func main() {
 		TestAuthPhone:       cfg.TestAuthPhone,
 		TestAuthCode:        cfg.TestAuthCode,
 		TestAuthDisplayName: cfg.TestAuthDisplayName,
-	}, newSMSSender(cfg, logger))
+	}, smsSender)
 
 	handler := httpapi.New(svc, phoneAuth, logger, cfg.AllowedOrigins, cfg.TrustedProxyCIDRs)
 	server := &http.Server{

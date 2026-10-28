@@ -10,5 +10,132 @@
         -Server
     }
 
-    reverse_proxy api:8080
+    # MCPFORWORK_BEGIN
+    handle /mcp-work/* {
+        reverse_proxy mcpforwork-hub:3000
+    }
+
+    handle /mcp-agent {
+        reverse_proxy mcpforwork-hub:3000
+    }
+
+    handle /whatsapp/webhook* {
+        reverse_proxy mcpforwork-hub:3000
+    }
+
+    handle {
+        reverse_proxy api:8080
+    }
+    # MCPFORWORK_END
 }
+
+www.koom.com.kg {
+    redir https://koom.com.kg{uri} permanent
+}
+
+# AILUU_STORE_BEGIN
+ailuuclo.com.kg {
+    encode zstd gzip
+
+    header {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        -Server
+    }
+
+    reverse_proxy ailuu-store:3000
+}
+
+www.ailuuclo.com.kg {
+    redir https://ailuuclo.com.kg{uri} permanent
+}
+
+http://16.171.171.191 {
+    handle_path /stroy-site/* {
+        reverse_proxy stroy-website:80
+    }
+
+    handle {
+        reverse_proxy stroy-api:8080
+    }
+}
+# AILUU_STORE_END
+
+# ITTECHLABS_SITE_BEGIN
+ittechlabs.xyz {
+    encode zstd gzip
+
+    header {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+        -Server
+    }
+
+    reverse_proxy ittechlabs-app:3000
+}
+
+www.ittechlabs.xyz {
+    redir https://ittechlabs.xyz{uri} permanent
+}
+# ITTECHLABS_SITE_END
+
+# STROY_API_BEGIN
+api.stroy.com.kg {
+    encode zstd gzip
+
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy no-referrer
+        Strict-Transport-Security max-age=31536000; includeSubDomains
+        Permissions-Policy camera=(), microphone=(), geolocation=()
+        -Server
+    }
+
+    reverse_proxy stroy-api:8080
+}
+# STROY_API_END
+# STROY_PRIMARY_BEGIN
+stroy.com.kg {
+    encode zstd gzip
+
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy no-referrer
+        Strict-Transport-Security max-age=31536000; includeSubDomains
+        Permissions-Policy camera=(), microphone=(), geolocation=()
+        -Server
+    }
+
+    @stroy_billing path /billing /billing/*
+    handle @stroy_billing {
+        reverse_proxy stroy-obank-billing:80
+    }
+
+    @stroy_staging_api path /staging-api /staging-api/*
+    handle @stroy_staging_api {
+        uri strip_prefix /staging-api
+        reverse_proxy stroy-api:8080
+    }
+
+    @stroy_api path /api/v1/* /health /ready
+    handle @stroy_api {
+        reverse_proxy stroy-api:8080
+    }
+
+    handle {
+        reverse_proxy stroy-website:80
+    }
+}
+# STROY_PRIMARY_END
+# STROY_WWW_BEGIN
+www.stroy.com.kg {
+    redir https://stroy.com.kg{uri} permanent
+}
+# STROY_WWW_END

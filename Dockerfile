@@ -1,4 +1,4 @@
-FROM golang:1.26.6-alpine AS builder
+FROM golang:1.26.9-alpine3.24 AS builder
 
 WORKDIR /src
 ENV CGO_ENABLED=0 \
@@ -12,7 +12,7 @@ RUN go mod tidy
 RUN go build -p=1 -trimpath -ldflags='-s -w' -o /out/koom-server ./cmd/server
 RUN go build -p=1 -trimpath -ldflags='-s -w' -o /out/koom-migrate ./cmd/migrate
 
-FROM alpine:3.20
+FROM alpine:3.24
 
 RUN adduser -D -H -u 10001 appuser && mkdir -p /app/data && chown -R appuser:appuser /app/data
 WORKDIR /app

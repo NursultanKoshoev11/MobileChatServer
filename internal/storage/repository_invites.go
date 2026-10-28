@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/domain"
 	"github.com/jackc/pgx/v5"
@@ -15,8 +14,8 @@ func (r *Repository) CreateInviteRequest(ctx context.Context, invite domain.Invi
 		INSERT INTO group_invite_requests (id, group_id, inviter_id, target_user_id, status, created_at)
 		VALUES ($1, $2, $3, $4, 'pending', now())
 		ON CONFLICT (group_id, target_user_id, status) DO UPDATE SET created_at = EXCLUDED.created_at
-		RETURNING created_at`
-	if err := r.db.QueryRow(ctx, query, invite.ID, invite.GroupID, invite.InviterID, invite.TargetUserID).Scan(&invite.CreatedAt); err != nil {
+		RETURNING id, created_at`
+	if err := r.db.QueryRow(ctx, query, invite.ID, invite.GroupID, invite.InviterID, invite.TargetUserID).Scan(&invite.ID, &invite.CreatedAt); err != nil {
 		return domain.InviteRequest{}, fmt.Errorf("create invite request: %w", err)
 	}
 	invite.Status = "pending"
@@ -55,23 +54,33 @@ func (r *Repository) AcceptInviteRequest(ctx context.Context, inviteID, userID s
 	}
 	defer tx.Rollback(ctx)
 
+	txRepo := &Repository{db: tx, pool: r.pool}
+	if err := txRepo.AcceptInviteRequestInTransaction(ctx, inviteID, userID); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit accept invite: %w", err)
+	}
+	return nil
+}
+
+// AcceptInviteRequestInTransaction applies the invitation and membership
+// changes using the caller's transaction so an audit event can commit with them.
+func (r *Repository) AcceptInviteRequestInTransaction(ctx context.Context, inviteID, userID string) error {
 	var groupID string
 	query := `
 		UPDATE group_invite_requests
 		SET status = 'accepted', responded_at = now()
 		WHERE id = $1 AND target_user_id = $2 AND status = 'pending'
 		RETURNING group_id`
-	if err := tx.QueryRow(ctx, query, inviteID, userID).Scan(&groupID); err != nil {
+	if err := r.db.QueryRow(ctx, query, inviteID, userID).Scan(&groupID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
 		return fmt.Errorf("accept invite request: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO group_members (group_id, user_id, role) VALUES ($1, $2, 'member') ON CONFLICT (group_id, user_id) DO NOTHING`, groupID, userID); err != nil {
+	if _, err := r.db.Exec(ctx, `INSERT INTO group_members (group_id, user_id, role) VALUES ($1, $2, 'member') ON CONFLICT (group_id, user_id) DO NOTHING`, groupID, userID); err != nil {
 		return fmt.Errorf("add invited member: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit accept invite: %w", err)
 	}
 	return nil
 }
@@ -103,5 +112,3 @@ func (r *Repository) CanInviteToGroup(ctx context.Context, groupID, inviterID, t
 	}
 	return nil
 }
-
-var _ = time.Time{}

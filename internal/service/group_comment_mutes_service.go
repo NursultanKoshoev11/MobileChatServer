@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/domain"
+	"github.com/NursultanKoshoev11/MobileChatServer/internal/storage"
 )
 
 type SetGroupCommentMuteInput struct {
@@ -38,11 +39,15 @@ func (s *Service) SetGroupCommentMute(ctx context.Context, actorID, groupID, tar
 		until := time.Now().UTC().Add(time.Duration(input.DurationMinutes) * time.Minute)
 		mutedUntil = &until
 	}
-	mute, err := s.repo.SetGroupCommentMute(ctx, groupID, actorID, targetUserID, mutedUntil, strings.TrimSpace(input.Reason))
+	var mute domain.GroupCommentMute
+	err := s.recordAuditedMutation(ctx, actorID, "group_comment_muted", "group", groupID, func(repo *storage.Repository) error {
+		var muteErr error
+		mute, muteErr = repo.SetGroupCommentMute(ctx, groupID, actorID, targetUserID, mutedUntil, strings.TrimSpace(input.Reason))
+		return muteErr
+	})
 	if err != nil {
 		return domain.GroupCommentMute{}, err
 	}
-	s.RecordEvent(ctx, actorID, "group_comment_muted", "group", groupID)
 	return mute, nil
 }
 
@@ -55,11 +60,9 @@ func (s *Service) ClearGroupCommentMute(ctx context.Context, actorID, groupID, t
 	if targetUserID == "" {
 		return NewValidationError("user_id is required")
 	}
-	if err := s.repo.ClearGroupCommentMute(ctx, groupID, actorID, targetUserID); err != nil {
-		return err
-	}
-	s.RecordEvent(ctx, actorID, "group_comment_unmuted", "group", groupID)
-	return nil
+	return s.recordAuditedMutation(ctx, actorID, "group_comment_unmuted", "group", groupID, func(repo *storage.Repository) error {
+		return repo.ClearGroupCommentMute(ctx, groupID, actorID, targetUserID)
+	})
 }
 
 func (s *Service) SetGroupCommentMuteByPhone(ctx context.Context, actorID, groupID string, input SetGroupCommentMuteInput) (domain.GroupCommentMute, error) {
@@ -84,11 +87,15 @@ func (s *Service) SetGroupCommentMuteByPhone(ctx context.Context, actorID, group
 		until := time.Now().UTC().Add(time.Duration(input.DurationMinutes) * time.Minute)
 		mutedUntil = &until
 	}
-	mute, err := s.repo.SetGroupCommentMute(ctx, groupID, actorID, user.ID, mutedUntil, strings.TrimSpace(input.Reason))
+	var mute domain.GroupCommentMute
+	err = s.recordAuditedMutation(ctx, actorID, "group_comment_muted", "group", groupID, func(repo *storage.Repository) error {
+		var muteErr error
+		mute, muteErr = repo.SetGroupCommentMute(ctx, groupID, actorID, user.ID, mutedUntil, strings.TrimSpace(input.Reason))
+		return muteErr
+	})
 	if err != nil {
 		return domain.GroupCommentMute{}, err
 	}
-	s.RecordEvent(ctx, actorID, "group_comment_muted", "group", groupID)
 	return mute, nil
 }
 
@@ -106,11 +113,9 @@ func (s *Service) ClearGroupCommentMuteByPhone(ctx context.Context, actorID, gro
 	if err != nil {
 		return err
 	}
-	if err := s.repo.ClearGroupCommentMute(ctx, groupID, actorID, user.ID); err != nil {
-		return err
-	}
-	s.RecordEvent(ctx, actorID, "group_comment_unmuted", "group", groupID)
-	return nil
+	return s.recordAuditedMutation(ctx, actorID, "group_comment_unmuted", "group", groupID, func(repo *storage.Repository) error {
+		return repo.ClearGroupCommentMute(ctx, groupID, actorID, user.ID)
+	})
 }
 
 func (s *Service) ensureCanCommentPublicRequest(ctx context.Context, userID, requestID string) error {

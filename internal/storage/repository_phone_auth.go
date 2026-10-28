@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -21,44 +22,41 @@ type PhoneCodeRecord struct {
 	CreatedAt   time.Time
 }
 
-func (r *Repository) CreatePhoneCode(ctx context.Context, id, phoneNumber, codeHash string, expiresAt time.Time) error {
-	_, err := r.db.Exec(ctx, `
-		INSERT INTO phone_verification_codes (id, phone_number, code_hash, expires_at)
-		VALUES ($1, $2, $3, $4)`, id, phoneNumber, codeHash, expiresAt)
+func (r *Repository) CreatePhoneCodeIfWithinLimit(ctx context.Context, id, phoneNumber, codeHash string, expiresAt, since, nextAllowedAt time.Time, maxRequests int) (bool, error) {
+	tx, err := r.db.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("create phone code: %w", err)
+		return false, fmt.Errorf("begin phone code transaction: %w", err)
 	}
-	return nil
-}
+	defer func() { _ = tx.Rollback(context.Background()) }()
 
-func (r *Repository) CountPhoneCodesSince(ctx context.Context, phoneNumber string, since time.Time) (int, error) {
+	// Serialize issuance checks for a phone number so concurrent requests cannot
+	// all pass the count and minimum-gap checks before any of them inserts a row.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, phoneNumber); err != nil {
+		return false, fmt.Errorf("lock phone code issuance: %w", err)
+	}
+
 	var count int
-	if err := r.db.QueryRow(ctx, `
-		SELECT COUNT(*)::int
-		FROM phone_verification_codes
-		WHERE phone_number = $1 AND created_at >= $2
-	`, phoneNumber, since).Scan(&count); err != nil {
-		return 0, fmt.Errorf("count phone codes: %w", err)
-	}
-	return count, nil
-}
-
-func (r *Repository) LatestPhoneCodeCreatedAt(ctx context.Context, phoneNumber string) (time.Time, error) {
-	var createdAt time.Time
-	err := r.db.QueryRow(ctx, `
-		SELECT created_at
+	var latest sql.NullTime
+	if err := tx.QueryRow(ctx, `
+		SELECT COUNT(*) FILTER (WHERE created_at >= $2)::int, MAX(created_at)
 		FROM phone_verification_codes
 		WHERE phone_number = $1
-		ORDER BY created_at DESC
-		LIMIT 1
-	`, phoneNumber).Scan(&createdAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return time.Time{}, ErrNotFound
+	`, phoneNumber, since).Scan(&count, &latest); err != nil {
+		return false, fmt.Errorf("check phone code issuance limit: %w", err)
 	}
-	if err != nil {
-		return time.Time{}, fmt.Errorf("latest phone code created at: %w", err)
+	if count >= maxRequests || latest.Valid && latest.Time.After(nextAllowedAt) {
+		return false, nil
 	}
-	return createdAt, nil
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO phone_verification_codes (id, phone_number, code_hash, expires_at)
+		VALUES ($1, $2, $3, $4)`, id, phoneNumber, codeHash, expiresAt); err != nil {
+		return false, fmt.Errorf("create phone code: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("commit phone code transaction: %w", err)
+	}
+	return true, nil
 }
 
 func (r *Repository) GetLatestPhoneCode(ctx context.Context, phoneNumber string) (PhoneCodeRecord, error) {
@@ -79,20 +77,28 @@ func (r *Repository) GetLatestPhoneCode(ctx context.Context, phoneNumber string)
 	return code, nil
 }
 
-func (r *Repository) IncrementPhoneCodeAttempts(ctx context.Context, codeID string) error {
-	_, err := r.db.Exec(ctx, `UPDATE phone_verification_codes SET attempts = attempts + 1 WHERE id = $1`, codeID)
+func (r *Repository) IncrementPhoneCodeAttempts(ctx context.Context, codeID string, maxAttempts int) (bool, error) {
+	result, err := r.db.Exec(ctx, `
+		UPDATE phone_verification_codes
+		SET attempts = attempts + 1
+		WHERE id = $1 AND consumed_at IS NULL AND expires_at > now() AND attempts < $2
+	`, codeID, maxAttempts)
 	if err != nil {
-		return fmt.Errorf("increment phone code attempts: %w", err)
+		return false, fmt.Errorf("increment phone code attempts: %w", err)
 	}
-	return nil
+	return result.RowsAffected() == 1, nil
 }
 
-func (r *Repository) ConsumePhoneCode(ctx context.Context, codeID string) error {
-	_, err := r.db.Exec(ctx, `UPDATE phone_verification_codes SET consumed_at = now() WHERE id = $1 AND consumed_at IS NULL`, codeID)
+func (r *Repository) ConsumePhoneCode(ctx context.Context, codeID string, maxAttempts int) (bool, error) {
+	result, err := r.db.Exec(ctx, `
+		UPDATE phone_verification_codes
+		SET consumed_at = now()
+		WHERE id = $1 AND consumed_at IS NULL AND expires_at > now() AND attempts < $2
+	`, codeID, maxAttempts)
 	if err != nil {
-		return fmt.Errorf("consume phone code: %w", err)
+		return false, fmt.Errorf("consume phone code: %w", err)
 	}
-	return nil
+	return result.RowsAffected() == 1, nil
 }
 
 func (r *Repository) GetPhoneUserByMobile(ctx context.Context, mobile string) (domain.PhoneAuthUser, error) {
@@ -120,9 +126,12 @@ func (r *Repository) CreatePhoneUser(ctx context.Context, user domain.PhoneAuthU
 }
 
 func (r *Repository) MarkPhoneVerified(ctx context.Context, userID string) error {
-	_, err := r.db.Exec(ctx, `UPDATE users SET phone_verified_at = now(), updated_at = now() WHERE id = $1`, userID)
+	result, err := r.db.Exec(ctx, `UPDATE users SET phone_verified_at = now(), updated_at = now() WHERE id = $1`, userID)
 	if err != nil {
 		return fmt.Errorf("mark phone verified: %w", err)
+	}
+	if result.RowsAffected() != 1 {
+		return fmt.Errorf("mark phone verified: %w", ErrNotFound)
 	}
 	return nil
 }

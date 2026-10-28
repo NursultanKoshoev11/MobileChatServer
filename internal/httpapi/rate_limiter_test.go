@@ -47,6 +47,7 @@ func TestClientIPIgnoresForwardedHeadersWithoutTrustedProxy(t *testing.T) {
 	}
 	req.RemoteAddr = "198.51.100.10:4321"
 	req.Header.Set("X-Forwarded-For", "203.0.113.20")
+	req.Header.Set("X-Real-IP", "203.0.113.21")
 	server := &Server{}
 
 	if got := server.clientIP(req); got != "198.51.100.10" {
@@ -54,16 +55,16 @@ func TestClientIPIgnoresForwardedHeadersWithoutTrustedProxy(t *testing.T) {
 	}
 }
 
-func TestClientIPUsesForwardedHeaderFromTrustedProxy(t *testing.T) {
+func TestClientIPUsesNearestUntrustedForwardedIP(t *testing.T) {
 	req, err := http.NewRequest(http.MethodGet, "/api/test", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	req.RemoteAddr = "10.0.0.2:4321"
-	req.Header.Set("X-Forwarded-For", "203.0.113.20, 10.0.0.2")
+	req.Header.Set("X-Forwarded-For", "203.0.113.20, 198.51.100.7, 10.0.0.2")
 	server := &Server{trustedProxies: parseTrustedProxyCIDRs("10.0.0.0/8")}
 
-	if got := server.clientIP(req); got != "203.0.113.20" {
-		t.Fatalf("expected forwarded client IP, got %q", got)
+	if got := server.clientIP(req); got != "198.51.100.7" {
+		t.Fatalf("expected nearest untrusted client IP, got %q", got)
 	}
 }

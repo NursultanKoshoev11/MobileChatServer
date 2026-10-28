@@ -66,11 +66,15 @@ APP_ENV=production
 DATABASE_URL=postgres://...
 JWT_SECRET=<long random secret, at least 32 chars>
 ALLOWED_ORIGINS=https://koom.com.kg
-SMS_PROVIDER=<real provider>
+SMS_PROVIDER=<implemented provider>
 RUN_MIGRATIONS_ON_START=false
 ```
 
-`SMS_PROVIDER=dev` is not allowed in production.
+The production API currently has no SMS provider integration. It will fail to start until one is integrated and configured. `SMS_PROVIDER=dev` and `SMS_PROVIDER=disabled` are rejected in production.
+
+Staging also enforces production safety limits for CORS, admin allowlists, moderation, token lifetime, backend instance count, and automatic migrations. Test authentication remains local/dev/test only.
+
+Set `TRUSTED_PROXY_CIDRS` to the narrow private subnet used by the reverse proxy to reach the API. Do not trust all private address ranges; the API uses forwarded IPs for auth rate limiting only when the direct peer is trusted.
 
 ## 5. Migrations
 
@@ -99,6 +103,6 @@ flutter build apk --dart-define=API_BASE_URL=https://koom.com.kg
 - Keep backend port `8080` private.
 - Use exact `ALLOWED_ORIGINS`, not `*`, for production.
 - Store secrets outside Git.
-- Use a real SMS provider before allowing public sign-in.
+- Integrate and configure a real SMS provider before allowing public sign-in.
 - Rotate `JWT_SECRET` if it was ever exposed.
 - Keep Caddy, Docker, and OS packages updated.

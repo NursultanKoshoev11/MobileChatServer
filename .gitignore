@@ -33,8 +33,3 @@ backups/
 *.bak
 *.bak-*
 Caddyfile.backup-*
-
-# Generated local/build artifacts
-coverage
-*.exe
-*.out

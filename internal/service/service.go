@@ -201,5 +201,21 @@ func (s *Service) CreateGroup(ctx context.Context, ownerID string, input CreateG
 	if visibility != domain.VisibilityPrivate && visibility != domain.VisibilityPublic {
 		return domain.Group{}, NewValidationError("visibility must be private or public")
 	}
-	return s.repo.CreateGroup(ctx, domain.Group{ID: "G-" + strings.ToUpper(randomHex(8)), OwnerID: ownerID, Title: title, Description: description, Visibility: visibility})
+	groupInput := domain.Group{ID: "G-" + strings.ToUpper(randomHex(8)), OwnerID: ownerID, Title: title, Description: description, Visibility: visibility}
+	var created domain.Group
+	err = s.recordAuditedMutation(ctx, ownerID, "group_created", "group", groupInput.ID, func(repo *storage.Repository) error {
+		currentOwner, err := repo.GetUserByID(ctx, ownerID)
+		if err != nil {
+			return err
+		}
+		if !currentOwner.Role.CanManageAllGroups() {
+			return storage.ErrForbidden
+		}
+		created, err = repo.CreateGroupInTransaction(ctx, groupInput)
+		return err
+	})
+	if err != nil {
+		return domain.Group{}, err
+	}
+	return created, nil
 }

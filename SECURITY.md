@@ -22,9 +22,10 @@ The server must keep these controls enabled before production use:
 
 - HTTPS only in production
 - Strong `JWT_SECRET` with at least 32 characters
-- Real SMS provider configured; `SMS_PROVIDER=dev` is not allowed in production
+- An implemented production SMS provider configured; `SMS_PROVIDER=dev` and `SMS_PROVIDER=disabled` are rejected in production
 - Passwordless phone verification codes expire after a short TTL
-- Verification code attempts are limited
+- Verification code issuance and attempts are limited atomically in PostgreSQL
+- `TRUSTED_PROXY_CIDRS` is restricted to the reverse proxy's private network
 - Refresh tokens are stored as hashes and rotated
 - CI must run tests, `go vet`, and vulnerability checks
 - Secrets must not be committed to the repository
@@ -35,7 +36,7 @@ Before production deployment:
 
 1. Set `APP_ENV=production`.
 2. Use a production PostgreSQL instance with backups.
-3. Configure a real SMS provider.
+3. Integrate and configure a real SMS provider before enabling production sign-in. No production SMS provider is currently integrated.
 4. Store secrets in environment variables or a secret manager.
 5. Put the API behind HTTPS.
 6. Enable log monitoring and alerting.
