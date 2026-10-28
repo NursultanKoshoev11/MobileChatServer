@@ -59,7 +59,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    entrypoint: ["/app/mobilechat-migrate"]
+    entrypoint: ["/app/koom-migrate"]
     environment:
       APP_ENV: ${APP_ENV:-production}
       RUN_MIGRATIONS_ON_START: "false"
