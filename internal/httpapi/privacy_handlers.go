@@ -4,7 +4,7 @@ import "net/http"
 
 func (s *Server) privacyPolicy(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "public, max-age=3600")
+	w.Header().Set("Cache-Control", "no-cache, must-revalidate")
 	_, _ = w.Write([]byte(privacyPolicyHTML))
 }
 
@@ -79,7 +79,7 @@ const privacyPolicyHTML = `<!doctype html>
     <p>We may update this Privacy Policy from time to time. When we make changes, we will update the date at the top of this page. Continued use of Koom after an update means the updated policy applies.</p>
 
     <h2>11. Contact</h2>
-    <p>For privacy questions or requests, contact us at <a href="mailto:orozobekovanazgul66@gmail.com">orozobekovanazgul66@gmail.com</a>.</p>
+    <p>For privacy questions or requests, contact us at <a href="mailto:nursultankosoev2@gmail.com">nursultankosoev2@gmail.com</a>.</p>
   </article>
 </main>
 </body>

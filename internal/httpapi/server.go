@@ -23,7 +23,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-const maxJSONBodyBytes = 16 * 1024 * 1024
+const maxJSONBodyBytes = 2 * 1024 * 1024
 
 type userContextKey struct{}
 
@@ -494,7 +494,7 @@ func (s *Server) broadcastGroupAndUsers(r *http.Request, groupID string, event r
 	actorID := currentUser(r).ID
 	memberIDs, err := s.svc.ListGroupMemberIDsExcept(r.Context(), groupID, actorID)
 	if err != nil {
-		s.logger.Printf("realtime user broadcast skipped group_id=%s type=%s error=%v", groupID, event.Type, err)
+		s.logger.Printf("realtime user broadcast skipped group_id=%q type=%q error=%q", groupID, event.Type, fmt.Sprint(err))
 		return
 	}
 	for _, memberID := range memberIDs {
@@ -526,7 +526,7 @@ func (s *Server) groupWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		s.logger.Printf("websocket upgrade failed: %v", err)
+		s.logger.Printf("websocket upgrade failed: %q", err.Error())
 		return
 	}
 	client := realtime.NewClient(s.hub, conn, user, groupID, remoteIP)
@@ -549,7 +549,7 @@ func (s *Server) userWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		s.logger.Printf("user websocket upgrade failed: %v", err)
+		s.logger.Printf("user websocket upgrade failed: %q", err.Error())
 		return
 	}
 	client := realtime.NewClient(s.hub, conn, user, "", remoteIP)
@@ -565,7 +565,7 @@ func (s *Server) userWebSocket(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token, fromQuery := bearerTokenFromRequest(r)
+		token, fromWebSocketProtocol := bearerTokenFromRequest(r)
 		if token == "" {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "missing bearer token"})
 			return
@@ -573,7 +573,7 @@ func (s *Server) auth(next http.Handler) http.Handler {
 
 		var user domain.User
 		var err error
-		if fromQuery && strings.HasSuffix(r.URL.Path, "/ws") {
+		if fromWebSocketProtocol && strings.HasSuffix(r.URL.Path, "/ws") {
 			user, err = s.svc.AuthenticateWebSocket(r.Context(), token)
 		} else {
 			user, err = s.svc.Authenticate(r.Context(), token)
@@ -595,9 +595,6 @@ func bearerTokenFromRequest(r *http.Request) (string, bool) {
 	if token := bearerTokenFromWebSocketProtocol(r); token != "" && strings.HasSuffix(r.URL.Path, "/ws") {
 		return token, true
 	}
-	if token := strings.TrimSpace(r.URL.Query().Get("token")); token != "" && strings.HasSuffix(r.URL.Path, "/ws") {
-		return token, true
-	}
 	return "", false
 }
 
@@ -613,7 +610,7 @@ func bearerTokenFromWebSocketProtocol(r *http.Request) string {
 
 func (s *Server) rateLimit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions {
+		if r.Method == http.MethodOptions {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -622,9 +619,9 @@ func (s *Server) rateLimit(next http.Handler) http.Handler {
 			key = user.ID
 		}
 		limiter := s.limiter
-		if isStrictRateLimitedPath(r.URL.Path) {
+		if limitClass := strictRateLimitClass(r.Method, r.URL.Path); limitClass != "" {
 			limiter = s.strictLimiter
-			key = r.URL.Path + ":" + key
+			key = limitClass + ":" + key
 		}
 		if !limiter.Allow(key) {
 			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "rate limit exceeded"})
@@ -634,10 +631,32 @@ func (s *Server) rateLimit(next http.Handler) http.Handler {
 	})
 }
 
-func isStrictRateLimitedPath(path string) bool {
-	return strings.HasPrefix(path, "/api/auth/request-code") ||
-		strings.HasPrefix(path, "/api/auth/verify-code") ||
-		strings.HasPrefix(path, "/api/groups/") && strings.HasSuffix(path, "/messages")
+func strictRateLimitClass(method, path string) string {
+	if method == http.MethodGet && path == "/api/users/search" {
+		return "user-search"
+	}
+	if method == http.MethodGet && path == "/api/groups/search" {
+		return "group-search"
+	}
+	if method != http.MethodPost {
+		return ""
+	}
+	switch path {
+	case "/api/auth/request-code":
+		return "auth-request-code"
+	case "/api/auth/verify-code":
+		return "auth-verify-code"
+	}
+	if strings.HasPrefix(path, "/api/groups/") && strings.HasSuffix(path, "/messages") {
+		return "message-create"
+	}
+	if strings.HasPrefix(path, "/api/groups/") && strings.HasSuffix(path, "/files") {
+		return "file-upload"
+	}
+	if strings.HasPrefix(path, "/api/groups/") && strings.HasSuffix(path, "/invite-user") {
+		return "group-invite"
+	}
+	return ""
 }
 
 func (s *Server) cors(next http.Handler) http.Handler {
@@ -663,7 +682,7 @@ func (s *Server) requestLogger(next http.Handler) http.Handler {
 		started := time.Now()
 		recorder := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(recorder, r)
-		s.logger.Printf("request_id=%s method=%s path=%s status=%d bytes=%d duration_ms=%d remote=%s", middleware.GetReqID(r.Context()), r.Method, r.URL.Path, recorder.status, recorder.bytes, time.Since(started).Milliseconds(), s.clientIP(r))
+		s.logger.Printf("request_id=%q method=%q path=%q status=%d bytes=%d duration_ms=%d remote=%q", middleware.GetReqID(r.Context()), r.Method, r.URL.EscapedPath(), recorder.status, recorder.bytes, time.Since(started).Milliseconds(), s.clientIP(r))
 	})
 }
 
@@ -671,7 +690,7 @@ func (s *Server) recoverer(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if recovered := recover(); recovered != nil {
-				s.logger.Printf("panic request_id=%s method=%s path=%s error=%v", middleware.GetReqID(r.Context()), r.Method, r.URL.Path, recovered)
+				s.logger.Printf("panic request_id=%q method=%q path=%q error=%q", middleware.GetReqID(r.Context()), r.Method, r.URL.EscapedPath(), fmt.Sprint(recovered))
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 			}
 		}()
@@ -685,10 +704,26 @@ func currentUser(r *http.Request) domain.User {
 }
 
 func readJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
 	defer r.Body.Close()
-	decoder := json.NewDecoder(io.LimitReader(r.Body, maxJSONBodyBytes))
+	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(dst); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "request body is too large"})
+			return false
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body"})
+		return false
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "request body is too large"})
+			return false
+		}
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body"})
 		return false
 	}
@@ -731,7 +766,7 @@ func (s *Server) writeError(w http.ResponseWriter, err error) {
 	case errors.Is(err, storage.ErrForbidden):
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 	default:
-		s.logger.Printf("http error: %v", err)
+		s.logger.Printf("http error: %q", fmt.Sprint(err))
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 	}
 }

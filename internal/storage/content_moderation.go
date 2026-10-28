@@ -26,11 +26,11 @@ func (r *Repository) CreateContentModerationItem(ctx context.Context, item domai
 		INSERT INTO content_moderation_items (
 			id, group_id, content_type, author_id, target_id, title, body, request_type,
 			interaction_mode, status, decision, reasons, provider, provider_model,
-			provider_response_id, provider_scores, created_at
+			provider_response_id, provider_scores, published_resource_id, created_at
 		) VALUES (
 			$1, $2, $3, $4, NULLIF($5, ''), NULLIF($6, ''), $7, NULLIF($8, ''),
 			NULLIF($9, ''), $10, $11, $12::jsonb, $13, NULLIF($14, ''),
-			NULLIF($15, ''), $16::jsonb, now()
+			NULLIF($15, ''), $16::jsonb, NULLIF($17, ''), now()
 		)
 		RETURNING created_at`
 	if err := r.db.QueryRow(ctx, query,
@@ -50,6 +50,7 @@ func (r *Repository) CreateContentModerationItem(ctx context.Context, item domai
 		item.ProviderModel,
 		item.ProviderResponseID,
 		item.ProviderScoresJSON,
+		item.PublishedResourceID,
 	).Scan(&item.CreatedAt); err != nil {
 		return domain.ContentModerationItem{}, fmt.Errorf("create content moderation item: %w", err)
 	}
@@ -142,21 +143,16 @@ func (r *Repository) ListContentModerationAdminUserIDs(ctx context.Context, grou
 	return ids, rows.Err()
 }
 
-func (r *Repository) SetContentModerationPublishedResourceID(ctx context.Context, itemID, publishedResourceID string) (domain.ContentModerationItem, error) {
-	tag, err := r.db.Exec(ctx, `
-		UPDATE content_moderation_items
-		SET published_resource_id = NULLIF($2, '')
-		WHERE id = $1 AND status = 'pending'`, itemID, publishedResourceID)
-	if err != nil {
-		return domain.ContentModerationItem{}, fmt.Errorf("set moderation published resource id: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return domain.ContentModerationItem{}, ErrNotFound
-	}
-	return r.GetContentModerationItem(ctx, itemID)
+func (r *Repository) GetContentModerationItem(ctx context.Context, itemID string) (domain.ContentModerationItem, error) {
+	return r.getContentModerationItem(ctx, itemID, false)
 }
 
-func (r *Repository) GetContentModerationItem(ctx context.Context, itemID string) (domain.ContentModerationItem, error) {
+// LockContentModerationItem serializes moderation decisions for one queue row.
+func (r *Repository) LockContentModerationItem(ctx context.Context, itemID string) (domain.ContentModerationItem, error) {
+	return r.getContentModerationItem(ctx, itemID, true)
+}
+
+func (r *Repository) getContentModerationItem(ctx context.Context, itemID string, lock bool) (domain.ContentModerationItem, error) {
 	query := `
 		SELECT c.id, c.group_id, c.content_type, c.author_id, COALESCE(u.display_name, ''),
 		       COALESCE(c.target_id, ''), COALESCE(c.title, ''), c.body,
@@ -168,6 +164,9 @@ func (r *Repository) GetContentModerationItem(ctx context.Context, itemID string
 		FROM content_moderation_items c
 		LEFT JOIN users u ON u.id = c.author_id
 		WHERE c.id = $1`
+	if lock {
+		query += ` FOR UPDATE OF c`
+	}
 	row := r.db.QueryRow(ctx, query, itemID)
 	item, err := scanContentModerationItem(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -177,6 +176,52 @@ func (r *Repository) GetContentModerationItem(ctx context.Context, itemID string
 		return domain.ContentModerationItem{}, err
 	}
 	return item, nil
+}
+
+// LockGroupModerator checks group-scoped moderation permission and locks the
+// matching role row until the surrounding transaction finishes. The project
+// super admin retains their platform-wide moderation capability.
+func (r *Repository) LockGroupModerator(ctx context.Context, userID, groupID string) error {
+	var role domain.GroupRole
+	memberErr := r.db.QueryRow(ctx, `
+		SELECT role FROM group_members WHERE group_id=$1 AND user_id=$2 FOR SHARE`, groupID, userID).Scan(&role)
+	if memberErr != nil && !errors.Is(memberErr, pgx.ErrNoRows) {
+		return fmt.Errorf("lock group moderator role: %w", memberErr)
+	}
+	if memberErr == nil && (role == domain.RoleOwner || role == domain.RoleAdmin) {
+		return nil
+	}
+
+	var userRole domain.UserRole
+	userErr := r.db.QueryRow(ctx, `SELECT role FROM users WHERE id=$1 FOR SHARE`, userID).Scan(&userRole)
+	if userErr != nil {
+		if errors.Is(userErr, pgx.ErrNoRows) {
+			return ErrForbidden
+		}
+		return fmt.Errorf("lock platform moderator role: %w", userErr)
+	}
+	if userRole.CanModerateAnyGroup() {
+		return nil
+	}
+	return ErrForbidden
+}
+
+func (r *Repository) ensureGroupModerator(ctx context.Context, userID, groupID string) error {
+	role, memberErr := r.GetMemberRole(ctx, groupID, userID)
+	if memberErr == nil && (role == domain.RoleOwner || role == domain.RoleAdmin) {
+		return nil
+	}
+	if memberErr != nil && !errors.Is(memberErr, ErrForbidden) {
+		return memberErr
+	}
+	user, userErr := r.GetUserByID(ctx, userID)
+	if userErr == nil && user.Role.CanModerateAnyGroup() {
+		return nil
+	}
+	if userErr != nil && !errors.Is(userErr, ErrNotFound) {
+		return userErr
+	}
+	return ErrForbidden
 }
 
 func (r *Repository) ReviewContentModerationItem(ctx context.Context, itemID string, status domain.ContentModerationStatus, reviewerID string, publishedResourceID string) (domain.ContentModerationItem, error) {

@@ -66,15 +66,15 @@ func (h *Hub) Register(client *Client) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.clientCountLocked() >= maxTotalConnections {
-		h.logger.Printf("websocket rejected: total connection limit reached user_id=%s remote_ip=%s", client.UserID, client.RemoteIP)
+		h.logger.Printf("websocket rejected: total connection limit reached user_id=%q remote_ip=%q", client.UserID, client.RemoteIP)
 		return false
 	}
 	if len(h.users[client.UserID]) >= maxConnectionsPerUser {
-		h.logger.Printf("websocket rejected: per-user connection limit reached user_id=%s remote_ip=%s", client.UserID, client.RemoteIP)
+		h.logger.Printf("websocket rejected: per-user connection limit reached user_id=%q remote_ip=%q", client.UserID, client.RemoteIP)
 		return false
 	}
 	if client.RemoteIP != "" && len(h.remoteIPs[client.RemoteIP]) >= maxConnectionsPerIP {
-		h.logger.Printf("websocket rejected: per-ip connection limit reached user_id=%s remote_ip=%s", client.UserID, client.RemoteIP)
+		h.logger.Printf("websocket rejected: per-ip connection limit reached user_id=%q remote_ip=%q", client.UserID, client.RemoteIP)
 		return false
 	}
 	if client.GroupID != "" {
@@ -162,7 +162,7 @@ func (h *Hub) deliver(client *Client, event Event) {
 	if client.sendEvent(event) {
 		return
 	}
-	h.logger.Printf("websocket delivery dropped type=%s group_id=%s user_id=%s queued=%d", event.Type, client.GroupID, client.UserID, len(client.Send))
+	h.logger.Printf("websocket delivery dropped type=%q group_id=%q user_id=%q queued=%d", event.Type, client.GroupID, client.UserID, len(client.Send))
 	h.Unregister(client)
 }
 
@@ -290,7 +290,7 @@ func (c *Client) ReadPump() {
 			break
 		}
 		if !c.allowClientMessage() {
-			c.Hub.logger.Printf("websocket client message rate limit user_id=%s remote_ip=%s", c.UserID, c.RemoteIP)
+			c.Hub.logger.Printf("websocket client message rate limit user_id=%q remote_ip=%q", c.UserID, c.RemoteIP)
 			break
 		}
 		if !c.handleClientMessage(payload) {
@@ -322,9 +322,9 @@ func (c *Client) handleClientMessage(payload []byte) bool {
 	}
 	switch message.Type {
 	case "ack":
-		c.Hub.logger.Printf("websocket ack event_id=%s user_id=%s group_id=%s", message.EventID, c.UserID, c.GroupID)
+		// Acknowledgements are frequent and client-controlled; keep them out of logs.
 	case "nack":
-		c.Hub.logger.Printf("websocket nack event_id=%s user_id=%s group_id=%s reason=%s", message.EventID, c.UserID, c.GroupID, message.Reason)
+		c.Hub.logger.Printf("websocket nack user_id=%q group_id=%q reason_bytes=%d", c.UserID, c.GroupID, len(message.Reason))
 	case "ping":
 		c.sendEvent(Event{Type: "pong", Payload: map[string]string{"ts": time.Now().UTC().Format(time.RFC3339Nano)}})
 	case "auth_refresh":
@@ -336,12 +336,12 @@ func (c *Client) handleClientMessage(payload []byte) bool {
 func (c *Client) handleAuthRefresh(token string) bool {
 	token = strings.TrimSpace(token)
 	if token == "" {
-		c.Hub.logger.Printf("websocket auth refresh rejected: missing token user_id=%s remote_ip=%s", c.UserID, c.RemoteIP)
+		c.Hub.logger.Printf("websocket auth refresh rejected: missing token user_id=%q remote_ip=%q", c.UserID, c.RemoteIP)
 		return false
 	}
 	validator := c.Hub.authRefreshValidator
 	if validator == nil {
-		c.Hub.logger.Printf("websocket auth refresh rejected: validator is not configured user_id=%s remote_ip=%s", c.UserID, c.RemoteIP)
+		c.Hub.logger.Printf("websocket auth refresh rejected: validator is not configured user_id=%q remote_ip=%q", c.UserID, c.RemoteIP)
 		return false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -361,22 +361,22 @@ func (c *Client) handleAuthRefresh(token string) bool {
 
 	select {
 	case <-ctx.Done():
-		c.Hub.logger.Printf("websocket auth refresh rejected: validation timeout user_id=%s remote_ip=%s", c.UserID, c.RemoteIP)
+		c.Hub.logger.Printf("websocket auth refresh rejected: validation timeout user_id=%q remote_ip=%q", c.UserID, c.RemoteIP)
 		return false
 	case result := <-claimsCh:
 		if result.err != nil {
-			c.Hub.logger.Printf("websocket auth refresh rejected: invalid token user_id=%s remote_ip=%s error=%v", c.UserID, c.RemoteIP, result.err)
+			c.Hub.logger.Printf("websocket auth refresh rejected: invalid token user_id=%q remote_ip=%q error=%q", c.UserID, c.RemoteIP, fmt.Sprint(result.err))
 			return false
 		}
 		if result.userID != c.UserID {
-			c.Hub.logger.Printf("websocket auth refresh rejected: token user mismatch current_user_id=%s token_user_id=%s remote_ip=%s", c.UserID, result.userID, c.RemoteIP)
+			c.Hub.logger.Printf("websocket auth refresh rejected: token user mismatch current_user_id=%q token_user_id=%q remote_ip=%q", c.UserID, result.userID, c.RemoteIP)
 			return false
 		}
 	}
 
 	_ = c.Conn.SetReadDeadline(time.Now().Add(pongWait))
 	c.sendEvent(Event{Type: "auth.refreshed", Payload: map[string]string{"user_id": c.UserID}})
-	c.Hub.logger.Printf("websocket auth refreshed user_id=%s group_id=%s remote_ip=%s", c.UserID, c.GroupID, c.RemoteIP)
+	c.Hub.logger.Printf("websocket auth refreshed user_id=%q group_id=%q remote_ip=%q", c.UserID, c.GroupID, c.RemoteIP)
 	return true
 }
 

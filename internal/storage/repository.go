@@ -9,6 +9,7 @@ import (
 
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/domain"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -17,16 +18,24 @@ type UserWithPassword struct {
 	PasswordHash string
 }
 
+type repositoryDB interface {
+	Begin(context.Context) (pgx.Tx, error)
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
 type Repository struct {
-	db *pgxpool.Pool
+	db   repositoryDB
+	pool *pgxpool.Pool
 }
 
 func NewRepository(db *pgxpool.Pool) *Repository {
-	return &Repository{db: db}
+	return &Repository{db: db, pool: db}
 }
 
 func (r *Repository) Ping(ctx context.Context) error {
-	return r.db.Ping(ctx)
+	return r.pool.Ping(ctx)
 }
 
 func (r *Repository) CreateUser(ctx context.Context, user domain.User, passwordHash string) (domain.User, error) {
@@ -134,7 +143,7 @@ func (r *Repository) ListUserGroups(ctx context.Context, userID string) ([]domai
 func (r *Repository) SearchPublicGroups(ctx context.Context, queryText string) ([]domain.Group, error) {
 	queryText = strings.TrimSpace(queryText)
 	query := `
-		SELECT g.id, g.title, g.description, g.visibility, g.owner_id, COALESCE(g.avatar_data, '') AS avatar_data, COALESCE(g.invite_code, '') AS invite_code, g.created_at,
+		SELECT g.id, g.title, g.description, g.visibility, g.owner_id, COALESCE(g.avatar_data, '') AS avatar_data, ''::text AS invite_code, g.created_at,
 		       COUNT(gm.user_id)::int AS member_count
 		FROM groups g
 		LEFT JOIN group_members gm ON gm.group_id = g.id
@@ -166,16 +175,26 @@ func (r *Repository) CreateGroup(ctx context.Context, group domain.Group) (domai
 		return domain.Group{}, fmt.Errorf("begin create group: %w", err)
 	}
 	defer tx.Rollback(ctx)
-
-	query := `INSERT INTO groups (id, title, description, visibility, owner_id, invite_code, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, now(), now()) RETURNING created_at`
-	if err := tx.QueryRow(ctx, query, group.ID, group.Title, group.Description, group.Visibility, group.OwnerID, nullableInviteCode(group.InviteCode)).Scan(&group.CreatedAt); err != nil {
-		return domain.Group{}, fmt.Errorf("insert group: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `INSERT INTO group_members (group_id, user_id, role) VALUES ($1, $2, 'owner')`, group.ID, group.OwnerID); err != nil {
-		return domain.Group{}, fmt.Errorf("insert group owner: %w", err)
+	txRepo := &Repository{db: tx, pool: r.pool}
+	group, err = txRepo.CreateGroupInTransaction(ctx, group)
+	if err != nil {
+		return domain.Group{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return domain.Group{}, fmt.Errorf("commit create group: %w", err)
+	}
+	return group, nil
+}
+
+// CreateGroupInTransaction creates the group and its owner membership using
+// the caller's transaction so the operation can commit together with its audit event.
+func (r *Repository) CreateGroupInTransaction(ctx context.Context, group domain.Group) (domain.Group, error) {
+	query := `INSERT INTO groups (id, title, description, visibility, owner_id, invite_code, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, now(), now()) RETURNING created_at`
+	if err := r.db.QueryRow(ctx, query, group.ID, group.Title, group.Description, group.Visibility, group.OwnerID, nullableInviteCode(group.InviteCode)).Scan(&group.CreatedAt); err != nil {
+		return domain.Group{}, fmt.Errorf("insert group: %w", err)
+	}
+	if _, err := r.db.Exec(ctx, `INSERT INTO group_members (group_id, user_id, role) VALUES ($1, $2, 'owner')`, group.ID, group.OwnerID); err != nil {
+		return domain.Group{}, fmt.Errorf("insert group owner: %w", err)
 	}
 	role := domain.RoleOwner
 	group.MyRole = &role
@@ -194,7 +213,24 @@ func (r *Repository) EnsureGroupInviteCode(ctx context.Context, groupID, userID,
 		return domain.Group{}, fmt.Errorf("begin ensure group invite code: %w", err)
 	}
 	defer tx.Rollback(ctx)
+	txRepo := &Repository{db: tx, pool: r.pool}
+	group, err := txRepo.EnsureGroupInviteCodeInTransaction(ctx, groupID, userID, generatedCode)
+	if err != nil {
+		return domain.Group{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return domain.Group{}, fmt.Errorf("commit ensure group invite code: %w", err)
+	}
+	return group, nil
+}
 
+// EnsureGroupInviteCodeInTransaction returns the group's invite code and
+// creates one if needed, using the caller's transaction for audit atomicity.
+func (r *Repository) EnsureGroupInviteCodeInTransaction(ctx context.Context, groupID, userID, generatedCode string) (domain.Group, error) {
+	generatedCode = strings.ToUpper(strings.TrimSpace(generatedCode))
+	if generatedCode == "" {
+		return domain.Group{}, fmt.Errorf("generated invite code is empty")
+	}
 	query := `
 		SELECT g.id, g.title, g.description, g.visibility, g.owner_id, COALESCE(g.avatar_data, '') AS avatar_data, COALESCE(g.invite_code, '') AS invite_code, g.created_at,
 		       gm.role,
@@ -205,7 +241,7 @@ func (r *Repository) EnsureGroupInviteCode(ctx context.Context, groupID, userID,
 		FOR UPDATE OF g`
 	var group domain.Group
 	var role domain.GroupRole
-	if err := tx.QueryRow(ctx, query, groupID, userID).Scan(&group.ID, &group.Title, &group.Description, &group.Visibility, &group.OwnerID, &group.AvatarData, &group.InviteCode, &group.CreatedAt, &role, &group.MemberCount); err != nil {
+	if err := r.db.QueryRow(ctx, query, groupID, userID).Scan(&group.ID, &group.Title, &group.Description, &group.Visibility, &group.OwnerID, &group.AvatarData, &group.InviteCode, &group.CreatedAt, &role, &group.MemberCount); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.Group{}, ErrForbidden
 		}
@@ -213,14 +249,11 @@ func (r *Repository) EnsureGroupInviteCode(ctx context.Context, groupID, userID,
 	}
 
 	if strings.TrimSpace(group.InviteCode) == "" {
-		if err := tx.QueryRow(ctx, `UPDATE groups SET invite_code=$2, updated_at=now() WHERE id=$1 RETURNING invite_code`, group.ID, generatedCode).Scan(&group.InviteCode); err != nil {
+		if err := r.db.QueryRow(ctx, `UPDATE groups SET invite_code=$2, updated_at=now() WHERE id=$1 RETURNING invite_code`, group.ID, generatedCode).Scan(&group.InviteCode); err != nil {
 			return domain.Group{}, fmt.Errorf("set group invite code: %w", err)
 		}
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return domain.Group{}, fmt.Errorf("commit ensure group invite code: %w", err)
-	}
 	group.MyRole = &role
 	return group, nil
 }
@@ -263,6 +296,22 @@ func (r *Repository) JoinByInviteCode(ctx context.Context, userID, inviteCode st
 	group.MyRole = &role
 	group.MemberCount, _ = r.CountGroupMembers(ctx, group.ID)
 	return group, nil
+}
+
+func (r *Repository) FindGroupIDByInviteCode(ctx context.Context, inviteCode string) (string, error) {
+	normalizedCode := normalizeStoredInviteCode(inviteCode)
+	var groupID string
+	err := r.db.QueryRow(ctx, `
+		SELECT id
+		FROM groups
+		WHERE REPLACE(UPPER(COALESCE(invite_code, '')), '-', '') = $1`, normalizedCode).Scan(&groupID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("find group id by invite code: %w", err)
+	}
+	return groupID, nil
 }
 
 func (r *Repository) InviteUserByID(ctx context.Context, groupID, adminID, targetUserID string) error {

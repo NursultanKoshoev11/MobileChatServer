@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -17,7 +18,6 @@ type Config struct {
 	BCryptCost                     int
 	Environment                    string
 	SMSProvider                    string
-	SMSFrom                        string
 	FCMProjectID                   string
 	FCMClientEmail                 string
 	FCMPrivateKey                  string
@@ -52,7 +52,6 @@ func Load() (Config, error) {
 		Environment:                    getEnv("APP_ENV", "production"),
 		BCryptCost:                     getEnvInt("BCRYPT_COST", 12),
 		SMSProvider:                    getEnv("SMS_PROVIDER", "disabled"),
-		SMSFrom:                        getEnv("SMS_FROM", "Koom"),
 		FCMProjectID:                   os.Getenv("FCM_PROJECT_ID"),
 		FCMClientEmail:                 os.Getenv("FCM_CLIENT_EMAIL"),
 		FCMPrivateKey:                  os.Getenv("FCM_PRIVATE_KEY"),
@@ -77,7 +76,7 @@ func Load() (Config, error) {
 		TrustedProxyCIDRs:              os.Getenv("TRUSTED_PROXY_CIDRS"),
 	}
 
-	cfg.RunMigrationsOnStart = getEnvBool("RUN_MIGRATIONS_ON_START", cfg.Environment != "production")
+	cfg.RunMigrationsOnStart = getEnvBool("RUN_MIGRATIONS_ON_START", !sharedEnvironment(cfg.Environment))
 
 	accessTokenTTLMinutes := getEnvInt("ACCESS_TOKEN_TTL_MINUTES", 5)
 	cfg.AccessTokenTTL = time.Duration(accessTokenTTLMinutes) * time.Minute
@@ -91,58 +90,41 @@ func Load() (Config, error) {
 	if cfg.BCryptCost < 10 || cfg.BCryptCost > 15 {
 		return Config{}, fmt.Errorf("BCRYPT_COST must be between 10 and 15")
 	}
-	if cfg.Environment == "production" && originListContainsWildcard(cfg.AllowedOrigins) {
-		return Config{}, fmt.Errorf("wildcard CORS origin is not allowed in production")
+	if sharedEnvironment(cfg.Environment) && originListContainsWildcard(cfg.AllowedOrigins) {
+		return Config{}, fmt.Errorf("wildcard CORS origin is not allowed in staging or production")
 	}
-	if cfg.Environment == "production" && !strings.EqualFold(cfg.SMSProvider, "twilio") {
-		return Config{}, fmt.Errorf("SMS_PROVIDER must be twilio in production")
-	}
-	if cfg.Environment == "production" && strings.EqualFold(cfg.SMSProvider, "twilio") {
-		if strings.TrimSpace(os.Getenv("TWILIO_ACCOUNT_SID")) == "" || strings.TrimSpace(os.Getenv("TWILIO_AUTH_TOKEN")) == "" {
-			return Config{}, fmt.Errorf("TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN are required when SMS_PROVIDER=twilio in production")
-		}
-		if strings.TrimSpace(cfg.SMSFrom) == "" && strings.TrimSpace(os.Getenv("TWILIO_MESSAGING_SERVICE_SID")) == "" {
-			return Config{}, fmt.Errorf("SMS_FROM or TWILIO_MESSAGING_SERVICE_SID is required when SMS_PROVIDER=twilio in production")
-		}
+	if sharedEnvironment(cfg.Environment) && !validTrustedProxyCIDRs(cfg.TrustedProxyCIDRs) {
+		return Config{}, fmt.Errorf("TRUSTED_PROXY_CIDRS must contain specific proxy IPs or CIDRs no broader than IPv4 /16 or IPv6 /32 in staging or production")
 	}
 	if cfg.TestAuthEnabled {
-		isLocalTestEnvironment := localTestAuthEnvironment(cfg.Environment)
-		isStagingEnvironment := stagingTestAuthEnvironment(cfg.Environment)
-		if !isLocalTestEnvironment && !isStagingEnvironment {
-			return Config{}, fmt.Errorf("TEST_AUTH_ENABLED=true is allowed only in local, development, test, or restricted staging environments")
+		if !localTestAuthEnvironment(cfg.Environment) {
+			return Config{}, fmt.Errorf("TEST_AUTH_ENABLED=true is allowed only in local, development, or test environments")
 		}
 		if strings.TrimSpace(cfg.TestAuthPhone) == "" || strings.TrimSpace(cfg.TestAuthCode) == "" {
 			return Config{}, fmt.Errorf("TEST_AUTH_PHONE and TEST_AUTH_CODE are required when test auth is enabled")
 		}
-		if isStagingEnvironment && !validStagingTestAuthConfig(cfg.TestAuthPhone, cfg.TestAuthCode) {
-			return Config{}, fmt.Errorf("staging test auth allows up to three exact E.164 phones and requires a six-digit code")
-		}
 	}
 
-	if cfg.Environment == "production" {
+	if sharedEnvironment(cfg.Environment) {
 		for _, phone := range append(append([]string{}, cfg.SuperAdminPhones...), cfg.PlatformAdminPhones...) {
 			if normalizePhoneForValidation(phone) == "+996000000000" {
-				return Config{}, fmt.Errorf("placeholder admin phone +996000000000 is not allowed in production")
+				return Config{}, fmt.Errorf("placeholder admin phone +996000000000 is not allowed in staging or production")
 			}
 		}
 	}
 
-	if cfg.Environment == "production" && !cfg.ModerationFailClosed {
-		return Config{}, fmt.Errorf("MODERATION_FAIL_CLOSED=false is not allowed in production")
+	if sharedEnvironment(cfg.Environment) && !cfg.ModerationFailClosed {
+		return Config{}, fmt.Errorf("MODERATION_FAIL_CLOSED=false is not allowed in staging or production")
 	}
-	if cfg.Environment == "production" && cfg.BackendInstanceCount > 1 {
+	if sharedEnvironment(cfg.Environment) && cfg.BackendInstanceCount > 1 {
 		if cfg.RealtimeBroker == "local" {
-			return Config{}, fmt.Errorf("REALTIME_BROKER=local is not allowed with multiple backend instances in production")
+			return Config{}, fmt.Errorf("REALTIME_BROKER=local is not allowed with multiple backend instances in staging or production")
 		}
-		return Config{}, fmt.Errorf("BACKEND_INSTANCE_COUNT greater than 1 requires a shared Redis rate limiter; the current rate limiter is in-memory")
+		return Config{}, fmt.Errorf("BACKEND_INSTANCE_COUNT greater than 1 requires a shared Redis rate limiter in staging or production; the current rate limiter is in-memory")
 	}
-	if cfg.Environment == "production" && cfg.AccessTokenTTL > 15*time.Minute {
-		return Config{}, fmt.Errorf("ACCESS_TOKEN_TTL_MINUTES must be 15 or less in production")
+	if sharedEnvironment(cfg.Environment) && cfg.AccessTokenTTL > 15*time.Minute {
+		return Config{}, fmt.Errorf("ACCESS_TOKEN_TTL_MINUTES must be 15 or less in staging or production")
 	}
-	if cfg.TestAuthEnabled && wildcardTestAuthPhone(cfg.TestAuthPhone) && !localTestAuthEnvironment(cfg.Environment) {
-		return Config{}, fmt.Errorf("wildcard TEST_AUTH_PHONE is allowed only in local, development, or test environments")
-	}
-
 	return cfg, nil
 }
 
@@ -243,16 +225,6 @@ func originListContainsWildcard(raw string) bool {
 	return false
 }
 
-func wildcardTestAuthPhone(raw string) bool {
-	for _, part := range strings.Split(raw, ",") {
-		value := strings.ToLower(strings.TrimSpace(part))
-		if value == "*" || value == "any" || value == "all" {
-			return true
-		}
-	}
-	return false
-}
-
 func localTestAuthEnvironment(environment string) bool {
 	switch strings.ToLower(strings.TrimSpace(environment)) {
 	case "local", "dev", "development", "test", "testing":
@@ -262,53 +234,39 @@ func localTestAuthEnvironment(environment string) bool {
 	}
 }
 
-func stagingTestAuthEnvironment(environment string) bool {
-	return strings.EqualFold(strings.TrimSpace(environment), "staging")
+func sharedEnvironment(environment string) bool {
+	switch strings.ToLower(strings.TrimSpace(environment)) {
+	case "staging", "production":
+		return true
+	default:
+		return false
+	}
 }
 
-func validStagingTestAuthConfig(rawPhones, code string) bool {
-	if wildcardTestAuthPhone(rawPhones) {
-		return false
-	}
-	parts := strings.Split(rawPhones, ",")
-	if len(parts) < 1 || len(parts) > 3 {
-		return false
-	}
-	seen := make(map[string]struct{}, len(parts))
-	for _, part := range parts {
-		phone := normalizePhoneForValidation(strings.TrimSpace(part))
-		if !validE164TestAuthPhone(phone) {
+func validTrustedProxyCIDRs(raw string) bool {
+	found := false
+	for _, item := range strings.Split(raw, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if net.ParseIP(item) != nil {
+			found = true
+			continue
+		}
+		_, network, err := net.ParseCIDR(item)
+		if err != nil {
 			return false
 		}
-		if _, exists := seen[phone]; exists {
+		prefix, bits := network.Mask.Size()
+		minimumPrefix := 16
+		if bits == 128 {
+			minimumPrefix = 32
+		}
+		if prefix < minimumPrefix {
 			return false
 		}
-		seen[phone] = struct{}{}
+		found = true
 	}
-	return validSixDigitTestAuthCode(code)
-}
-
-func validE164TestAuthPhone(phone string) bool {
-	if len(phone) < 9 || len(phone) > 16 || phone[0] != '+' || phone[1] < '1' || phone[1] > '9' {
-		return false
-	}
-	for _, digit := range phone[1:] {
-		if digit < '0' || digit > '9' {
-			return false
-		}
-	}
-	return true
-}
-
-func validSixDigitTestAuthCode(code string) bool {
-	code = strings.TrimSpace(code)
-	if len(code) != 6 {
-		return false
-	}
-	for _, digit := range code {
-		if digit < '0' || digit > '9' {
-			return false
-		}
-	}
-	return true
+	return found
 }

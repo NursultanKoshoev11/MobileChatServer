@@ -100,7 +100,7 @@ func (s *Server) needMoreInfoForGroupCreationRequest(w http.ResponseWriter, r *h
 func (s *Server) notifyAdminsRealtime(r *http.Request, eventType string, payload any) {
 	adminIDs, err := s.svc.ListPlatformAdminUserIDs(r.Context())
 	if err != nil {
-		s.logger.Printf("admin realtime notification skipped: %v", err)
+		s.logger.Printf("admin realtime notification skipped: %q", err.Error())
 		return
 	}
 	for _, adminID := range adminIDs {

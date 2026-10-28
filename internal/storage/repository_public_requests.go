@@ -270,12 +270,8 @@ func (r *Repository) DeletePublicRequestComment(ctx context.Context, commentID, 
 		}
 		return "", fmt.Errorf("load comment group: %w", err)
 	}
-	role, err := r.GetMemberRole(ctx, groupID, moderatorID)
-	if err != nil {
+	if err := r.ensureGroupModerator(ctx, moderatorID, groupID); err != nil {
 		return "", err
-	}
-	if role != domain.RoleOwner && role != domain.RoleAdmin {
-		return "", ErrForbidden
 	}
 	result, err := r.db.Exec(ctx, `UPDATE public_request_comments SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL`, commentID)
 	if err != nil {
@@ -292,12 +288,8 @@ func (r *Repository) HidePublicRequest(ctx context.Context, requestID, moderator
 	if err != nil {
 		return err
 	}
-	role, err := r.GetMemberRole(ctx, groupID, moderatorID)
-	if err != nil {
+	if err := r.ensureGroupModerator(ctx, moderatorID, groupID); err != nil {
 		return err
-	}
-	if role != domain.RoleOwner && role != domain.RoleAdmin {
-		return ErrForbidden
 	}
 	result, err := r.db.Exec(ctx, `UPDATE public_requests SET hidden_at = now(), hidden_by = $1, updated_at = now() WHERE id = $2 AND hidden_at IS NULL`, moderatorID, requestID)
 	if err != nil {
@@ -321,9 +313,12 @@ func (r *Repository) UpdatePublicRequestStatus(ctx context.Context, requestID, a
 	if role != domain.RoleOwner && role != domain.RoleAdmin {
 		return ErrForbidden
 	}
-	_, err = r.db.Exec(ctx, `UPDATE public_requests SET status = $1, updated_at = now() WHERE id = $2 AND hidden_at IS NULL`, status, requestID)
+	result, err := r.db.Exec(ctx, `UPDATE public_requests SET status = $1, updated_at = now() WHERE id = $2 AND hidden_at IS NULL`, status, requestID)
 	if err != nil {
 		return fmt.Errorf("update public request status: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return ErrNotFound
 	}
 	return nil
 }

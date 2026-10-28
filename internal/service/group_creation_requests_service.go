@@ -61,11 +61,15 @@ func (s *Service) CreateGroupCreationRequest(ctx context.Context, requester doma
 	if err := validateGroupCreationRequest(request); err != nil {
 		return domain.GroupCreationRequest{}, err
 	}
-	created, err := s.repo.CreateGroupCreationRequest(ctx, request)
+	var created domain.GroupCreationRequest
+	err := s.recordAuditedMutation(ctx, requester.ID, "group_creation_request_submitted", "group_creation_request", request.ID, func(repo *storage.Repository) error {
+		var createErr error
+		created, createErr = repo.CreateGroupCreationRequest(ctx, request)
+		return createErr
+	})
 	if err != nil {
 		return domain.GroupCreationRequest{}, err
 	}
-	s.RecordEvent(ctx, requester.ID, "group_creation_request_submitted", "group_creation_request", created.ID)
 	return created, nil
 }
 
@@ -104,9 +108,12 @@ func (s *Service) ApproveGroupCreationRequest(ctx context.Context, admin domain.
 	var lastErr error
 	for attempt := 0; attempt < 8; attempt++ {
 		group.InviteCode = randomInviteCode()
-		approved, err = s.repo.ApproveGroupCreationRequest(ctx, requestID, admin.ID, strings.TrimSpace(input.AdminComment), group)
+		err = s.recordAuditedMutation(ctx, admin.ID, "group_creation_request_approved", "group_creation_request", requestID, func(repo *storage.Repository) error {
+			var approveErr error
+			approved, approveErr = repo.ApproveGroupCreationRequest(ctx, requestID, admin.ID, strings.TrimSpace(input.AdminComment), group)
+			return approveErr
+		})
 		if err == nil {
-			s.RecordEvent(ctx, admin.ID, "group_creation_request_approved", "group_creation_request", approved.ID)
 			return approved, nil
 		}
 		lastErr = err
@@ -125,11 +132,15 @@ func (s *Service) RejectGroupCreationRequest(ctx context.Context, admin domain.U
 	if requestID == "" {
 		return domain.GroupCreationRequest{}, NewValidationError("request_id is required")
 	}
-	request, err := s.repo.RejectGroupCreationRequest(ctx, requestID, admin.ID, strings.TrimSpace(input.AdminComment))
+	var request domain.GroupCreationRequest
+	err := s.recordAuditedMutation(ctx, admin.ID, "group_creation_request_rejected", "group_creation_request", requestID, func(repo *storage.Repository) error {
+		var reviewErr error
+		request, reviewErr = repo.RejectGroupCreationRequest(ctx, requestID, admin.ID, strings.TrimSpace(input.AdminComment))
+		return reviewErr
+	})
 	if err != nil {
 		return domain.GroupCreationRequest{}, err
 	}
-	s.RecordEvent(ctx, admin.ID, "group_creation_request_rejected", "group_creation_request", request.ID)
 	return request, nil
 }
 
@@ -141,11 +152,15 @@ func (s *Service) NeedMoreInfoForGroupCreationRequest(ctx context.Context, admin
 	if requestID == "" {
 		return domain.GroupCreationRequest{}, NewValidationError("request_id is required")
 	}
-	request, err := s.repo.MarkGroupCreationRequestNeedsMoreInfo(ctx, requestID, admin.ID, strings.TrimSpace(input.AdminComment))
+	var request domain.GroupCreationRequest
+	err := s.recordAuditedMutation(ctx, admin.ID, "group_creation_request_needs_more_info", "group_creation_request", requestID, func(repo *storage.Repository) error {
+		var reviewErr error
+		request, reviewErr = repo.MarkGroupCreationRequestNeedsMoreInfo(ctx, requestID, admin.ID, strings.TrimSpace(input.AdminComment))
+		return reviewErr
+	})
 	if err != nil {
 		return domain.GroupCreationRequest{}, err
 	}
-	s.RecordEvent(ctx, admin.ID, "group_creation_request_needs_more_info", "group_creation_request", request.ID)
 	return request, nil
 }
 

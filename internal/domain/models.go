@@ -35,6 +35,11 @@ type User struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
+type UserSearchResult struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"display_name"`
+}
+
 type Group struct {
 	ID                       string          `json:"id"`
 	Title                    string          `json:"title"`

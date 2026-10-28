@@ -51,16 +51,21 @@ func (r *Repository) SetGroupCommentMute(ctx context.Context, groupID, actorID, 
 	return mute, nil
 }
 
-func (r *Repository) SetGroupCommentAutoMute(ctx context.Context, groupID, targetUserID string, mutedUntil *time.Time, reason string) error {
+func (r *Repository) SetGroupCommentAutoMute(ctx context.Context, groupID, targetUserID string, mutedUntil *time.Time, reason string) (bool, error) {
 	if err := r.ensureGroupCommentMutesTable(ctx); err != nil {
-		return err
+		return false, err
 	}
-	targetRole, err := r.GetMemberRole(ctx, groupID, targetUserID)
+	var targetRole domain.GroupRole
+	err := r.db.QueryRow(ctx, `
+		SELECT role FROM group_members WHERE group_id=$1 AND user_id=$2 FOR SHARE`, groupID, targetUserID).Scan(&targetRole)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
 	if err != nil {
-		return err
+		return false, fmt.Errorf("lock auto-mute target role: %w", err)
 	}
 	if targetRole == domain.RoleOwner {
-		return nil
+		return false, nil
 	}
 	_, err = r.db.Exec(ctx, `
 		INSERT INTO group_comment_mutes (group_id, user_id, muted_by, muted_until, reason, created_at, updated_at, unmuted_at)
@@ -68,9 +73,9 @@ func (r *Repository) SetGroupCommentAutoMute(ctx context.Context, groupID, targe
 		ON CONFLICT (group_id, user_id)
 		DO UPDATE SET muted_by = NULL, muted_until = EXCLUDED.muted_until, reason = EXCLUDED.reason, updated_at = now(), unmuted_at = NULL`, groupID, targetUserID, mutedUntil, strings.TrimSpace(reason))
 	if err != nil {
-		return fmt.Errorf("set group comment auto mute: %w", err)
+		return false, fmt.Errorf("set group comment auto mute: %w", err)
 	}
-	return nil
+	return true, nil
 }
 
 func (r *Repository) ClearGroupCommentMute(ctx context.Context, groupID, actorID, targetUserID string) error {

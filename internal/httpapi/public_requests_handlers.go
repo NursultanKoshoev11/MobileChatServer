@@ -132,11 +132,11 @@ func (s *Server) updatePublicRequestStatus(w http.ResponseWriter, r *http.Reques
 func (s *Server) broadcastPublicRequestRefresh(r *http.Request, requestID string, eventType string, payload any) {
 	ctx, err := s.svc.GetPublicRequestRealtimeContext(r.Context(), requestID)
 	if err != nil {
-		s.logger.Printf("public request realtime context failed request_id=%s type=%s error=%v", requestID, eventType, err)
+		s.logger.Printf("public request realtime context failed request_id=%q type=%q error=%q", requestID, eventType, err.Error())
 		return
 	}
 	if ctx.GroupID == "" {
-		s.logger.Printf("public request realtime skipped: empty group_id request_id=%s type=%s", requestID, eventType)
+		s.logger.Printf("public request realtime skipped: empty group_id request_id=%q type=%q", requestID, eventType)
 		return
 	}
 	s.broadcastGroupAndUsers(r, ctx.GroupID, realtime.Event{Type: eventType, GroupID: ctx.GroupID, Payload: payload})

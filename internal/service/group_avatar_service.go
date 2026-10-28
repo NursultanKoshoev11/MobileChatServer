@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/domain"
+	"github.com/NursultanKoshoev11/MobileChatServer/internal/storage"
 )
 
 const maxGroupAvatarBytes = 512 * 1024
@@ -29,7 +30,16 @@ func (s *Service) UpdateGroupAvatar(ctx context.Context, actorID, groupID, avata
 			return domain.Group{}, NewValidationError("group avatar data is invalid")
 		}
 	}
-	return s.repo.UpdateGroupAvatar(ctx, actorID, groupID, avatarData)
+	var group domain.Group
+	err := s.recordAuditedMutation(ctx, actorID, "group_avatar_updated", "group", groupID, func(repo *storage.Repository) error {
+		var updateErr error
+		group, updateErr = repo.UpdateGroupAvatar(ctx, actorID, groupID, avatarData)
+		return updateErr
+	})
+	if err != nil {
+		return domain.Group{}, err
+	}
+	return group, nil
 }
 
 func validateImageDataURL(value string, maxBytes int) ([]byte, error) {
