@@ -18,6 +18,10 @@ type Config struct {
 	BCryptCost                     int
 	Environment                    string
 	SMSProvider                    string
+	TwilioAccountSID               string
+	TwilioAuthToken                string
+	SMSFrom                        string
+	TwilioMessagingServiceSID      string
 	FCMProjectID                   string
 	FCMClientEmail                 string
 	FCMPrivateKey                  string
@@ -52,6 +56,10 @@ func Load() (Config, error) {
 		Environment:                    getEnv("APP_ENV", "production"),
 		BCryptCost:                     getEnvInt("BCRYPT_COST", 12),
 		SMSProvider:                    getEnv("SMS_PROVIDER", "disabled"),
+		TwilioAccountSID:               os.Getenv("TWILIO_ACCOUNT_SID"),
+		TwilioAuthToken:                os.Getenv("TWILIO_AUTH_TOKEN"),
+		SMSFrom:                        os.Getenv("SMS_FROM"),
+		TwilioMessagingServiceSID:      os.Getenv("TWILIO_MESSAGING_SERVICE_SID"),
 		FCMProjectID:                   os.Getenv("FCM_PROJECT_ID"),
 		FCMClientEmail:                 os.Getenv("FCM_CLIENT_EMAIL"),
 		FCMPrivateKey:                  os.Getenv("FCM_PRIVATE_KEY"),

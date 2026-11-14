@@ -66,11 +66,14 @@ APP_ENV=production
 DATABASE_URL=postgres://...
 JWT_SECRET=<long random secret, at least 32 chars>
 ALLOWED_ORIGINS=https://koom.com.kg
-SMS_PROVIDER=<implemented provider>
+SMS_PROVIDER=twilio
+TWILIO_ACCOUNT_SID=<Twilio Account SID>
+TWILIO_AUTH_TOKEN=<Twilio Auth Token>
+SMS_FROM=KOOM
 RUN_MIGRATIONS_ON_START=false
 ```
 
-The production API currently has no SMS provider integration. It will fail to start until one is integrated and configured. `SMS_PROVIDER=dev` and `SMS_PROVIDER=disabled` are rejected in production.
+The API supports Twilio for production phone verification. Configure `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and either an approved `SMS_FROM` sender ID or a Twilio Messaging Service SID in `.env.prod`. `SMS_PROVIDER=dev` and `SMS_PROVIDER=disabled` are rejected in production. Never commit these credentials.
 
 Staging also enforces production safety limits for CORS, admin allowlists, moderation, token lifetime, backend instance count, and automatic migrations. Test authentication remains local/dev/test only.
 

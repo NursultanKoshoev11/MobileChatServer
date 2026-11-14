@@ -22,8 +22,21 @@ func newSMSSender(cfg config.Config, logger *log.Logger) (sms.Sender, error) {
 			return nil, fmt.Errorf("SMS_PROVIDER=disabled is not allowed in production")
 		}
 		return sms.DisabledSender{}, nil
+	case "twilio":
+		if strings.TrimSpace(cfg.TwilioAccountSID) == "" || strings.TrimSpace(cfg.TwilioAuthToken) == "" {
+			return nil, fmt.Errorf("SMS_PROVIDER=twilio requires TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN")
+		}
+		if strings.TrimSpace(cfg.SMSFrom) == "" && strings.TrimSpace(cfg.TwilioMessagingServiceSID) == "" {
+			return nil, fmt.Errorf("SMS_PROVIDER=twilio requires SMS_FROM or TWILIO_MESSAGING_SERVICE_SID")
+		}
+		return sms.TwilioSender{
+			AccountSID:          cfg.TwilioAccountSID,
+			AuthToken:           cfg.TwilioAuthToken,
+			From:                cfg.SMSFrom,
+			MessagingServiceSID: cfg.TwilioMessagingServiceSID,
+		}, nil
 	default:
-		return nil, fmt.Errorf("SMS_PROVIDER is unsupported; integrate a provider before enabling SMS")
+		return nil, fmt.Errorf("SMS_PROVIDER is unsupported; use twilio or a local development provider")
 	}
 }
 
