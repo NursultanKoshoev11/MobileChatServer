@@ -22,7 +22,7 @@ The server must keep these controls enabled before production use:
 
 - HTTPS only in production
 - Strong `JWT_SECRET` with at least 32 characters
-- An implemented production SMS provider configured; `SMS_PROVIDER=dev` and `SMS_PROVIDER=disabled` are rejected in production
+- A production SMS provider configured with credentials stored outside Git; `SMS_PROVIDER=dev` and `SMS_PROVIDER=disabled` are rejected in production
 - Passwordless phone verification codes expire after a short TTL
 - Verification code issuance and attempts are limited atomically in PostgreSQL
 - `TRUSTED_PROXY_CIDRS` is restricted to the reverse proxy's private network

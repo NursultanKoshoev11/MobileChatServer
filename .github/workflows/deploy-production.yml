@@ -14,8 +14,34 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  verify:
+    name: Verify before deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.11'
+          cache: true
+      - name: Run unit and static checks
+        run: |
+          go test ./...
+          go vet ./...
+      - name: Check Go vulnerabilities
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+      - name: Build deployment binaries
+        run: |
+          go build ./cmd/server
+          go build ./cmd/migrate
+
   deploy:
     name: Deploy to the Koom production server
+    needs: verify
+    if: github.ref == 'refs/heads/main'
     runs-on: [self-hosted, linux, x64, koom-production]
     environment: production
     timeout-minutes: 30
@@ -37,6 +63,16 @@ jobs:
 
           cd "$DEPLOY_DIR"
           test -f "$ENV_FILE"
+
+          if ! grep -Eq '^SMS_PROVIDER[[:space:]]*=[[:space:]]*twilio([[:space:]]*(#.*)?)?$' "$ENV_FILE" \
+            || ! grep -Eq '^TWILIO_ACCOUNT_SID[[:space:]]*=[[:space:]]*[^[:space:]#]+' "$ENV_FILE" \
+            || ! grep -Eq '^TWILIO_AUTH_TOKEN[[:space:]]*=[[:space:]]*[^[:space:]#]+' "$ENV_FILE" \
+            || { ! grep -Eq '^SMS_FROM[[:space:]]*=[[:space:]]*[^[:space:]#]+' "$ENV_FILE" \
+                 && ! grep -Eq '^TWILIO_MESSAGING_SERVICE_SID[[:space:]]*=[[:space:]]*[^[:space:]#]+' "$ENV_FILE"; }; then
+            echo "Production SMS is not configured. Set SMS_PROVIDER=twilio, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and SMS_FROM or TWILIO_MESSAGING_SERVICE_SID in .env.prod."
+            exit 1
+          fi
+          echo "Production SMS configuration is present."
 
           previous_sha="$(git rev-parse HEAD 2>/dev/null || true)"
           target_sha="${GITHUB_SHA}"

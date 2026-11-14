@@ -11,11 +11,12 @@ import (
 )
 
 type TwilioSender struct {
-	AccountSID         string
-	AuthToken          string
-	From               string
+	AccountSID          string
+	AuthToken           string
+	From                string
 	MessagingServiceSID string
-	HTTPClient         *http.Client
+	endpoint            string
+	HTTPClient          *http.Client
 }
 
 func (s TwilioSender) SendVerificationCode(ctx context.Context, phoneNumber string, code string) error {
@@ -35,7 +36,11 @@ func (s TwilioSender) SendVerificationCode(ctx context.Context, phoneNumber stri
 		return fmt.Errorf("twilio sender requires SMS_FROM or TWILIO_MESSAGING_SERVICE_SID")
 	}
 
-	endpoint := fmt.Sprintf("https://api.twilio.com/2010-04-01/Accounts/%s/Messages.json", url.PathEscape(accountSID))
+	endpoint := strings.TrimRight(strings.TrimSpace(s.endpoint), "/")
+	if endpoint == "" {
+		endpoint = "https://api.twilio.com/2010-04-01"
+	}
+	endpoint = fmt.Sprintf("%s/Accounts/%s/Messages.json", endpoint, url.PathEscape(accountSID))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(values.Encode()))
 	if err != nil {
 		return err
