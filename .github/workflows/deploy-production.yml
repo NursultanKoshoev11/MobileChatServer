@@ -61,6 +61,20 @@ jobs:
         run: |
           set -Eeuo pipefail
 
+          if [[ ! -d "$DEPLOY_DIR" ]]; then
+            echo "Configured deployment directory is missing: $DEPLOY_DIR"
+            echo "Runner workspace: ${GITHUB_WORKSPACE:-unset}"
+            for base in /opt /srv /etc/koom /var/lib; do
+              if [[ -d "$base" ]]; then
+                find "$base" -maxdepth 5 \
+                  \( -type d -iname 'MobileChatServer' -o -type f -name '.env.prod' \) \
+                  -print 2>/dev/null || true
+              fi
+            done
+            sudo docker ps --format '{{.Names}}|{{.Status}}' || true
+            exit 1
+          fi
+
           cd "$DEPLOY_DIR"
           test -f "$ENV_FILE"
 
