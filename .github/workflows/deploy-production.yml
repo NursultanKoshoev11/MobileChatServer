@@ -71,6 +71,17 @@ jobs:
                   -print 2>/dev/null || true
               fi
             done
+            if [[ -d /opt/backups/mobilechatserver ]]; then
+              echo "KOOM backup inventory (paths and sizes only):"
+              find /opt/backups/mobilechatserver -maxdepth 5 -type f \
+                -printf '%TY-%Tm-%Td %TH:%TM %s bytes %p\n' 2>/dev/null || true
+            fi
+            echo "Docker container inventory (including stopped containers):"
+            sudo docker ps -a --format '{{.Names}}|{{.Status}}|{{.Image}}' || true
+            echo "Docker volume inventory:"
+            sudo docker volume ls --format '{{.Name}}' || true
+            echo "Docker image inventory (repository, tag, age):"
+            sudo docker image ls --format '{{.Repository}}:{{.Tag}}|{{.CreatedSince}}' || true
             sudo docker ps --format '{{.Names}}|{{.Status}}' || true
             exit 1
           fi
