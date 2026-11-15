@@ -333,18 +333,18 @@ func (r *Repository) InviteUserByID(ctx context.Context, groupID, adminID, targe
 }
 
 func (r *Repository) CreateMessage(ctx context.Context, message domain.Message) (domain.Message, error) {
-	isMember, err := r.IsGroupMember(ctx, message.GroupID, message.SenderID)
-	if err != nil {
-		return domain.Message{}, err
-	}
-	if !isMember {
-		return domain.Message{}, ErrForbidden
-	}
 	query := `
 		INSERT INTO messages (id, group_id, sender_id, text, created_at)
-		VALUES ($1, $2, $3, $4, now())
+		SELECT $1, $2, $3, $4, now()
+		WHERE EXISTS (
+			SELECT 1 FROM group_members
+			WHERE group_id = $2 AND user_id = $3 AND role IN ('owner', 'admin')
+		)
 		RETURNING created_at`
 	if err := r.db.QueryRow(ctx, query, message.ID, message.GroupID, message.SenderID, message.Text).Scan(&message.CreatedAt); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.Message{}, ErrForbidden
+		}
 		return domain.Message{}, fmt.Errorf("create message: %w", err)
 	}
 	user, err := r.GetUserByID(ctx, message.SenderID)
@@ -355,7 +355,7 @@ func (r *Repository) CreateMessage(ctx context.Context, message domain.Message) 
 	return message, nil
 }
 
-func (r *Repository) ListMessages(ctx context.Context, groupID, userID string, limit int, before time.Time) ([]domain.Message, error) {
+func (r *Repository) ListMessages(ctx context.Context, groupID, userID string, limit int, before time.Time, beforeIDs ...string) ([]domain.Message, error) {
 	isMember, err := r.IsGroupMember(ctx, groupID, userID)
 	if err != nil {
 		return nil, err
@@ -370,14 +370,23 @@ func (r *Repository) ListMessages(ctx context.Context, groupID, userID string, l
 		SELECT m.id, m.group_id, m.sender_id, u.display_name, m.text, m.created_at
 		FROM messages m
 		JOIN users u ON u.id = m.sender_id
-		WHERE m.group_id = $1 AND m.deleted_at IS NULL AND ($2::timestamptz IS NULL OR m.created_at < $2)
-		ORDER BY m.created_at DESC
-		LIMIT $3`
+		WHERE m.group_id = $1 AND m.deleted_at IS NULL AND (
+			$2::timestamptz IS NULL
+			OR ($3::text IS NULL AND m.created_at < $2)
+			OR ($3::text IS NOT NULL AND (m.created_at, m.id) < ($2, $3))
+		)
+		ORDER BY m.created_at DESC, m.id DESC
+		LIMIT $4`
 	var beforePtr *time.Time
+	var beforeIDPtr *string
 	if !before.IsZero() {
 		beforePtr = &before
+		if len(beforeIDs) > 0 && strings.TrimSpace(beforeIDs[0]) != "" {
+			beforeID := strings.TrimSpace(beforeIDs[0])
+			beforeIDPtr = &beforeID
+		}
 	}
-	rows, err := r.db.Query(ctx, query, groupID, beforePtr, limit)
+	rows, err := r.db.Query(ctx, query, groupID, beforePtr, beforeIDPtr, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list messages: %w", err)
 	}
@@ -387,6 +396,42 @@ func (r *Repository) ListMessages(ctx context.Context, groupID, userID string, l
 		var message domain.Message
 		if err := rows.Scan(&message.ID, &message.GroupID, &message.SenderID, &message.SenderName, &message.Text, &message.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan message: %w", err)
+		}
+		messages = append(messages, message)
+	}
+	return messages, rows.Err()
+}
+
+func (r *Repository) ListMessagesAfter(ctx context.Context, groupID, userID string, limit int, after time.Time, afterID string) ([]domain.Message, error) {
+	isMember, err := r.IsGroupMember(ctx, groupID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !isMember {
+		return nil, ErrForbidden
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 100
+	}
+	query := `
+		SELECT m.id, m.group_id, m.sender_id, u.display_name, m.text, m.created_at
+		FROM messages m
+		JOIN users u ON u.id = m.sender_id
+		WHERE m.group_id = $1
+		  AND m.deleted_at IS NULL
+		  AND (m.created_at, m.id) > ($2, $3)
+		ORDER BY m.created_at ASC, m.id ASC
+		LIMIT $4`
+	rows, err := r.db.Query(ctx, query, groupID, after, afterID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list messages after cursor: %w", err)
+	}
+	defer rows.Close()
+	messages := make([]domain.Message, 0)
+	for rows.Next() {
+		var message domain.Message
+		if err := rows.Scan(&message.ID, &message.GroupID, &message.SenderID, &message.SenderName, &message.Text, &message.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan message after cursor: %w", err)
 		}
 		messages = append(messages, message)
 	}

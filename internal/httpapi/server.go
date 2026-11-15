@@ -453,13 +453,39 @@ func (s *Server) listMessages(w http.ResponseWriter, r *http.Request) {
 			limit = parsed
 		}
 	}
-	var before time.Time
-	if raw := r.URL.Query().Get("before"); raw != "" {
-		if parsed, err := time.Parse(time.RFC3339Nano, raw); err == nil {
-			before = parsed
+	if rawAfter := r.URL.Query().Get("after"); rawAfter != "" {
+		after, err := time.Parse(time.RFC3339Nano, rawAfter)
+		afterID := strings.TrimSpace(r.URL.Query().Get("after_id"))
+		if err != nil || afterID == "" || r.URL.Query().Get("before") != "" || r.URL.Query().Get("before_id") != "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "a valid after cursor is required"})
+			return
 		}
+		messages, err := s.svc.ListMessagesAfter(r.Context(), currentUser(r).ID, chi.URLParam(r, "groupID"), limit, after, afterID)
+		if err != nil {
+			s.writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, messages)
+		return
 	}
-	messages, err := s.svc.ListMessages(r.Context(), currentUser(r).ID, chi.URLParam(r, "groupID"), limit, before)
+	if r.URL.Query().Get("after_id") != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "after timestamp is required with after_id"})
+		return
+	}
+	var before time.Time
+	beforeID := strings.TrimSpace(r.URL.Query().Get("before_id"))
+	if raw := r.URL.Query().Get("before"); raw != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, raw)
+		if err != nil || r.URL.Query().Get("after_id") != "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid message cursor"})
+			return
+		}
+		before = parsed
+	} else if beforeID != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "before timestamp is required with before_id"})
+		return
+	}
+	messages, err := s.svc.ListMessages(r.Context(), currentUser(r).ID, chi.URLParam(r, "groupID"), limit, before, beforeID)
 	if err != nil {
 		s.writeError(w, err)
 		return

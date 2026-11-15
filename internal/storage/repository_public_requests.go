@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/domain"
@@ -34,7 +35,7 @@ func (r *Repository) CreatePublicRequest(ctx context.Context, request domain.Pub
 	return request, nil
 }
 
-func (r *Repository) ListPublicRequests(ctx context.Context, groupID, viewerID string, limit int, before time.Time, mineOnly bool) ([]domain.PublicRequest, error) {
+func (r *Repository) ListPublicRequests(ctx context.Context, groupID, viewerID string, limit int, before time.Time, beforeID string, mineOnly bool) ([]domain.PublicRequest, error) {
 	isMember, err := r.IsGroupMember(ctx, groupID, viewerID)
 	if err != nil {
 		return nil, err
@@ -46,8 +47,13 @@ func (r *Repository) ListPublicRequests(ctx context.Context, groupID, viewerID s
 		limit = 50
 	}
 	var beforePtr *time.Time
+	var beforeIDPtr *string
 	if !before.IsZero() {
 		beforePtr = &before
+		beforeID = strings.TrimSpace(beforeID)
+		if beforeID != "" {
+			beforeIDPtr = &beforeID
+		}
 	}
 	query := `
 		SELECT pr.id, pr.group_id, pr.author_id, u.display_name, COALESCE(u.avatar_data, ''), pr.request_type, pr.interaction_mode, pr.title, pr.body, pr.status,
@@ -62,12 +68,16 @@ func (r *Repository) ListPublicRequests(ctx context.Context, groupID, viewerID s
 		LEFT JOIN public_request_votes myv ON myv.request_id = pr.id AND myv.user_id = $2
 		WHERE pr.group_id = $1
 		  AND pr.hidden_at IS NULL
-		  AND ($3::timestamptz IS NULL OR pr.created_at < $3)
-		  AND ($4::boolean = false OR pr.author_id = $2)
+		  AND (
+			  $3::timestamptz IS NULL
+			  OR ($4::text IS NULL AND pr.created_at < $3)
+			  OR ($4::text IS NOT NULL AND (pr.created_at, pr.id) < ($3, $4))
+		  )
+		  AND ($5::boolean = false OR pr.author_id = $2)
 		GROUP BY pr.id, u.display_name, u.avatar_data, myv.vote_type
-		ORDER BY pr.created_at DESC
-		LIMIT $5`
-	rows, err := r.db.Query(ctx, query, groupID, viewerID, beforePtr, mineOnly, limit)
+		ORDER BY pr.created_at DESC, pr.id DESC
+		LIMIT $6`
+	rows, err := r.db.Query(ctx, query, groupID, viewerID, beforePtr, beforeIDPtr, mineOnly, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list public requests: %w", err)
 	}
