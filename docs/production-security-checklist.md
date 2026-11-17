@@ -29,7 +29,7 @@ Required authorization rules:
 - Use HTTPS in production.
 - Store secrets in environment variables or a secret manager.
 - Keep `.env` and signing keys outside Docker images.
-- Run server CI (`go test`, `go vet`, and `govulncheck`), CodeQL for Go, and
+- Run server CI (`go test`, `go vet`, and pinned `govulncheck`), CodeQL for Go, and
   Trivy image scanning before release. The production package workflow stops
   on HIGH or CRITICAL OS/library vulnerabilities. Add the CodeQL workflow check
   and production image scan as required branch/release checks after they pass
