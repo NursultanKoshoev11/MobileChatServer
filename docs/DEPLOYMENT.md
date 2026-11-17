@@ -17,12 +17,16 @@ and proxies requests to the API container.
   name can point the stack at different data. Confirm the existing volume and
   mount paths before moving the deployment.
 
-The GitHub production workflow currently expects the checkout at
-`/opt/projects/MobileChatServer`. The latest deployment run visible in the
-history reviewed on 2026-11-17 reported that this directory was missing.
-Confirm the actual path against the host before enabling a deployment; do not
-restore an old environment file or switch the Compose working directory until
-the active database volume and data paths are identified.
+The restricted host-side deploy helper uses
+`/opt/projects/MobileChatServer`. Production deploy run 9 reached the host but
+stopped in preflight because Twilio SMS is not configured. That check confirms
+the directory, `.env.prod`, and Compose file exist; it stopped before checking
+container health, loading images, or applying migrations. An earlier runner
+workflow expected the same directory and failed to find it. The current
+workflow uses a pinned SSH host key and a key limited to preflight/deploy
+commands. Verify the active database volume and data mounts before the next
+release; do not change Compose paths or project names until that mapping is
+confirmed.
 
 ## Identify the live Docker project
 
@@ -79,11 +83,20 @@ sudo docker compose -f docker-compose.prod.yml --env-file .env.prod up -d api ca
 
 The GitHub workflow verifies tests, static analysis, vulnerability checks, and
 builds before deployment. Production deployment is manual from `main`: select
-`deploy` only after checking the live Compose directory, project name, and
-PostgreSQL volume. Pushes to `main` do not deploy. On the server the workflow
-builds the API and migration images, runs migrations, then updates the API and
-Caddy. If backup scripts or the backup image change, rebuild and recreate the
-backup service as part of the release too.
+`deploy` only after checking the live Compose directory, project name,
+PostgreSQL volume, and latest backup. Pushes to `main` do not deploy. The
+workflow builds API and migration images on a hosted runner, then transfers a
+short-lived image bundle through the pinned SSH host key and restricted deploy
+key. The server helper checks the commit embedded in the bundle and image
+labels, runs migrations, updates the API, and checks container and public API
+health. If release checks fail, it restores the previous API image; database
+migrations are not reversed. If backup scripts or the backup image change,
+rebuild and recreate the backup service as part of the release too.
+
+The restricted helper installed at `/usr/local/sbin/koom-github-deploy` is
+managed separately from the deployment artifact. Review and install changes to
+that host-side helper through a controlled server-admin procedure; a normal
+application release does not update it.
 
 Before a manual recovery or migration, take a fresh database and media backup.
 Application rollback does not automatically reverse database migrations, so

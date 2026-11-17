@@ -4,20 +4,31 @@ set -Eeuo pipefail
 readonly APP_DIR=/opt/projects/MobileChatServer
 readonly ENV_FILE="$APP_DIR/.env.prod"
 readonly COMPOSE_FILE="$APP_DIR/docker-compose.prod.yml"
-readonly API_URL=http://10.0.0.150:8080/api/health
 readonly PUBLIC_API_URL=https://koom.com.kg/api/health
 readonly API_IMAGE=mobilechatserver-api
 readonly MIGRATE_IMAGE=mobilechatserver-migrate
 
-health_check() {
-  local url="$1"
-  local response
-  response="$(curl --fail --silent --show-error --max-time 12 "$url")"
+assert_health_response() {
+  local response="$1"
+  local url="$2"
   if ! grep -Eq '"database"[[:space:]]*:[[:space:]]*"ok"' <<<"$response" \
     || ! grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' <<<"$response"; then
     echo "Health endpoint returned an unhealthy response: $url" >&2
     return 1
   fi
+}
+
+health_check() {
+  local url="$1"
+  local response
+  response="$(curl --fail --silent --show-error --max-time 12 "$url")"
+  assert_health_response "$response" "$url"
+}
+
+api_container_health_check() {
+  local response
+  response="$(sudo docker exec mobilechat-api wget -qO- -T 8 http://127.0.0.1:8080/api/health)"
+  assert_health_response "$response" "mobilechat-api:8080"
 }
 
 preflight() {
@@ -44,6 +55,7 @@ preflight() {
     echo "Production services must be healthy before deployment (API: ${api_status:-missing}, database: ${postgres_status:-missing})." >&2
     return 1
   fi
+  api_container_health_check
 
   echo "Production prerequisites are ready."
 }
@@ -151,7 +163,7 @@ if [[ "$running_revision" != "$target_sha" ]]; then
   echo "The running API image revision does not match the requested commit." >&2
   exit 1
 fi
-health_check "$API_URL"
+api_container_health_check
 health_check "$PUBLIC_API_URL"
 
 deployment_started=0
