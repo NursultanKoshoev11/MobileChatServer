@@ -80,6 +80,10 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 	r.Head("/kg", server.homePage)
 	r.Get("/assets/*", server.homeAssets)
 	r.Head("/assets/*", server.homeAssets)
+	r.Get("/robots.txt", server.robotsTxt)
+	r.Head("/robots.txt", server.robotsTxt)
+	r.Get("/sitemap.xml", server.sitemapXML)
+	r.Head("/sitemap.xml", server.sitemapXML)
 
 	r.Get("/api/health", server.health)
 	r.Get("/privacy", server.privacyPolicy)
