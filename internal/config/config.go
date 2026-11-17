@@ -73,7 +73,7 @@ func Load() (Config, error) {
 		ContentModerationProvider:      getEnv("CONTENT_MODERATION_PROVIDER", "huggingface"),
 		HuggingFaceModerationToken:     os.Getenv("HF_TOKEN"),
 		HuggingFaceModerationModel:     getEnv("HF_MODERATION_MODEL", "unitary/multilingual-toxic-xlm-roberta"),
-		HuggingFaceModerationEndpoint:  getEnv("HF_MODERATION_ENDPOINT", "https://api-inference.huggingface.co/models"),
+		HuggingFaceModerationEndpoint:  getEnv("HF_MODERATION_ENDPOINT", "https://router.huggingface.co/hf-inference/models"),
 		HuggingFaceModerationThreshold: getEnvFloat("HF_MODERATION_THRESHOLD", 0.72),
 		OpenAIModerationAPIKey:         os.Getenv("OPENAI_API_KEY"),
 		OpenAIModerationModel:          getEnv("OPENAI_MODERATION_MODEL", "omni-moderation-latest"),

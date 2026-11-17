@@ -327,6 +327,9 @@ func (s *Server) listGroupMembers(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, err)
 		return
 	}
+	for i := range members {
+		members[i].Phone = ""
+	}
 	writeJSON(w, http.StatusOK, members)
 }
 
@@ -342,6 +345,7 @@ func (s *Server) updateGroupMemberRole(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, err)
 		return
 	}
+	member.Phone = ""
 	writeJSON(w, http.StatusOK, member)
 }
 
@@ -363,6 +367,7 @@ func (s *Server) updateGroupMemberRoleByPhone(w http.ResponseWriter, r *http.Req
 		s.writeError(w, err)
 		return
 	}
+	member.Phone = ""
 	writeJSON(w, http.StatusOK, member)
 }
 
