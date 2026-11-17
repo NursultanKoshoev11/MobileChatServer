@@ -22,9 +22,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version: '1.26.11'
           cache: true
@@ -57,7 +57,7 @@ jobs:
             mobilechatserver-api:deploy mobilechatserver-migrate:deploy
           tar -C "$bundle_dir" -czf "$RUNNER_TEMP/koom-production.tar.gz" images.tar deploy-sha.txt
       - name: Upload production package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: koom-production-${{ github.sha }}
           path: ${{ runner.temp }}/koom-production.tar.gz
@@ -73,9 +73,9 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Check out pinned server host key
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Download the verified package
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: koom-production-${{ github.sha }}
           path: ${{ runner.temp }}/koom-deploy
