@@ -1,0 +1,27 @@
+services:
+  caddy:
+    image: caddy:2.11.4-alpine
+    container_name: oracle-caddy
+    restart: unless-stopped
+    mem_limit: 96m
+    memswap_limit: 192m
+    cpus: "0.25"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./koom-site:/srv/koom-site:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - mobilechat
+
+volumes:
+  caddy_data:
+  caddy_config:
+
+networks:
+  mobilechat:
+    external: true
+    name: mobilechatserver_mobilechat

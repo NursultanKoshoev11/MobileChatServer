@@ -8,6 +8,16 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - deployment/edge/**
+      - internal/httpapi/home.ru.html
+      - internal/httpapi/home.kg.html
+      - internal/httpapi/site-assets/**
+      - scripts/koom-edge-site-deploy
+      - scripts/koom-edge-ssh-gateway
+      - .github/koom-edge-known-hosts
+      - .github/workflows/deploy-production.yml
+      - .github/workflows/deploy-site.yml
 
 permissions:
   contents: read

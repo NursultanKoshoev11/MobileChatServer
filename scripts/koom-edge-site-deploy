@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+readonly SITE_ROOT=/opt/projects/edge/koom-site
+readonly CADDYFILE=/opt/projects/edge/Caddyfile
+readonly CADDY_CONTAINER=oracle-caddy
+readonly API_HEALTH=https://koom.com.kg/api/health
+readonly HOME_URL=https://koom.com.kg/
+readonly KG_URL=https://koom.com.kg/kg
+readonly CSS_URL=https://koom.com.kg/assets/site.css
+
+health_check() {
+  local response
+  response="$(curl --fail --silent --show-error --max-time 12 "$API_HEALTH")"
+  grep -Eq '"database"[[:space:]]*:[[:space:]]*"ok"' <<<"$response" \
+    && grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' <<<"$response"
+}
+
+preflight() {
+  local caddy_status
+  caddy_status="$(sudo /usr/local/bin/docker inspect --format '{{.State.Status}}' "$CADDY_CONTAINER" 2>/dev/null || true)"
+  if [[ "$caddy_status" != running ]]; then
+    echo "KOOM edge proxy is not running." >&2
+    return 1
+  fi
+  if [[ ! -L "$SITE_ROOT/current" || ! -f "$SITE_ROOT/current/index.html" || ! -f "$SITE_ROOT/current/kg/index.html" ]]; then
+    echo "KOOM static-site release is missing." >&2
+    return 1
+  fi
+  if ! grep -Fq 'root * /srv/koom-site/current' "$CADDYFILE"; then
+    echo "Caddy is not configured to serve the versioned KOOM site directory." >&2
+    return 1
+  fi
+  health_check
+  echo "KOOM static-site deployment prerequisites are ready."
+}
+
+if [[ "${1:-}" == --preflight && $# == 1 ]]; then
+  preflight
+  exit $?
+fi
+
+if [[ $# != 1 || ! "$1" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "Usage: koom-edge-site-deploy --preflight | <full-git-sha>" >&2
+  exit 64
+fi
+
+target_sha="$1"
+preflight
+
+work_dir="$(mktemp -d /tmp/koom-edge-deploy.XXXXXXXX)"
+stage_dir=""
+previous_target="$(readlink "$SITE_ROOT/current")"
+site_switched=0
+
+on_exit() {
+  local status=$?
+  trap - EXIT
+  if (( status != 0 && site_switched == 1 )); then
+    echo "Static-site deployment failed; restoring the previous site release." >&2
+    local rollback_link="$SITE_ROOT/.current-rollback-$$"
+    ln -s "$previous_target" "$rollback_link"
+    mv -Tf "$rollback_link" "$SITE_ROOT/current"
+    curl --fail --silent --show-error --max-time 12 "$HOME_URL" >/dev/null || true
+  fi
+  if [[ -n "$stage_dir" && "$stage_dir" == "$SITE_ROOT/releases/.incoming."* ]]; then
+    rm -rf -- "$stage_dir"
+  fi
+  rm -rf -- "$work_dir"
+  exit "$status"
+}
+trap on_exit EXIT
+
+ulimit -f 524288
+cat > "$work_dir/package.tar.gz"
+if [[ ! -s "$work_dir/package.tar.gz" ]]; then
+  echo "The static-site deployment package is empty." >&2
+  exit 1
+fi
+
+expected_entries=$'assets/koom-icon.png\nassets/og-cover.png\nassets/site.css\ndeploy-sha.txt\nindex.html\nkg/index.html'
+actual_entries="$(tar -tzf "$work_dir/package.tar.gz" | LC_ALL=C sort)"
+if [[ "$actual_entries" != "$expected_entries" ]] \
+  || ! tar -tvzf "$work_dir/package.tar.gz" | awk 'substr($0,1,1) != "-" { bad=1 } END { exit bad }'; then
+  echo "The static-site archive contains unexpected files." >&2
+  exit 1
+fi
+
+mkdir -p "$work_dir/assets" "$work_dir/kg"
+tar -xOzf "$work_dir/package.tar.gz" deploy-sha.txt > "$work_dir/deploy-sha.txt"
+package_sha="$(tr -d '\r\n' < "$work_dir/deploy-sha.txt")"
+if [[ "$package_sha" != "$target_sha" ]]; then
+  echo "The static-site package SHA does not match the requested commit." >&2
+  exit 1
+fi
+for entry in assets/koom-icon.png assets/og-cover.png assets/site.css index.html kg/index.html; do
+  tar -xOzf "$work_dir/package.tar.gz" "$entry" > "$work_dir/$entry"
+done
+if ! grep -Eq 'site\.css\?v=[A-Za-z0-9._-]+' "$work_dir/index.html" \
+  || ! grep -Eq 'site\.css\?v=[A-Za-z0-9._-]+' "$work_dir/kg/index.html"; then
+  echo "The site pages do not reference a versioned stylesheet." >&2
+  exit 1
+fi
+
+mkdir -p "$SITE_ROOT/releases"
+stage_dir="$(mktemp -d "$SITE_ROOT/releases/.incoming.XXXXXXXX")"
+cp -a "$work_dir/index.html" "$stage_dir/index.html"
+cp -a "$work_dir/kg" "$stage_dir/kg"
+cp -a "$work_dir/assets" "$stage_dir/assets"
+chmod 0755 "$stage_dir" "$stage_dir/kg" "$stage_dir/assets"
+chmod 0644 "$stage_dir/index.html" "$stage_dir/kg/index.html" "$stage_dir/assets/koom-icon.png" "$stage_dir/assets/og-cover.png" "$stage_dir/assets/site.css"
+chown -R root:root "$stage_dir"
+
+release_dir="$SITE_ROOT/releases/$target_sha"
+if [[ -d "$release_dir" ]]; then
+  if [[ ! -f "$release_dir/index.html" || ! -f "$release_dir/kg/index.html" || ! -f "$release_dir/assets/site.css" ]]; then
+    echo "An incomplete release for this commit already exists." >&2
+    exit 1
+  fi
+  rm -rf -- "$stage_dir"
+  stage_dir=""
+else
+  mv "$stage_dir" "$release_dir"
+  stage_dir=""
+fi
+new_link="$SITE_ROOT/.current-$target_sha-$$"
+ln -s "releases/$target_sha" "$new_link"
+mv -Tf "$new_link" "$SITE_ROOT/current"
+site_switched=1
+
+home_page="$(curl --fail --silent --show-error --max-time 12 "$HOME_URL")"
+kg_page="$(curl --fail --silent --show-error --max-time 12 "$KG_URL")"
+css_path="$(sed -n 's/.*href="\([^"]*site\.css?v=[^"]*\)".*/\1/p' <<<"$home_page" | head -n 1)"
+if [[ -z "$css_path" ]] || ! grep -Fq 'site.css?v=' <<<"$kg_page"; then
+  echo "The live home pages do not reference the deployed stylesheet." >&2
+  exit 1
+fi
+curl --fail --silent --show-error --max-time 12 "https://koom.com.kg$css_path" >/dev/null
+curl --fail --silent --show-error --max-time 12 https://koom.com.kg/privacy >/dev/null
+health_check
+
+site_switched=0
+echo "KOOM static site deployed for ${target_sha}."
