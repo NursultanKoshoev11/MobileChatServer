@@ -84,7 +84,7 @@ a:focus-visible,summary:focus-visible{outline:3px solid #16b9e5;outline-offset:4
 .visual-note span:last-child{display:grid;gap:3px}
 .visual-note strong{font-size:10px}
 .visual-note small{color:#76849c;font-size:8px}
-.visual-orb{position:absolute;right:0;top:10%;width:46px;height:46px;display:grid;place-items:center;border:1px solid #dce8f9;border-radius:16px;background:#fff;color:#1884f7;font-weight:850;box-shadow:0 12px 32px #10254f14;animation:orb-float 6s ease-in-out infinite}
+.visual-orb{position:absolute;right:0;top:10%;width:46px;height:46px;display:grid;place-items:center;border:0;border-radius:16px;background:transparent;color:#1884f7;font-weight:850;box-shadow:none;animation:orb-float 6s ease-in-out infinite}
 .scroll-cue{position:absolute;bottom:17px;left:50%;display:grid;place-items:center;width:30px;height:42px;border:1px solid #cfddf2;border-radius:22px;color:#6c7d9c}
 .scroll-cue:after{content:"";width:4px;height:8px;border-radius:4px;background:var(--blue);animation:scroll-dot 1.8s ease-in-out infinite}
 .section{padding:94px 0}
@@ -204,8 +204,8 @@ body{font-size:var(--text-base);line-height:1.6}
 .footer-brand{font-size:12px}
 .footer-links a,.copyright{font-size:12px}
 
-/* These symbols are part of the artwork, not buttons. */
-.feature-icon,.post-icon,.proof-mark,.mini-mark,.avatar-mark,.visual-spark,.panel-symbol,.journey-icon,.product-list li span{border-color:transparent;background:transparent;box-shadow:none}
+/* Keep all icon marks free of background tiles. */
+.feature-icon,.post-icon,.proof-mark,.mini-mark,.avatar-mark,.visual-spark,.visual-orb,.panel-symbol,.journey-icon,.product-list li span{border:0!important;background:none!important;box-shadow:none!important}
 .feature-icon svg{width:25px;height:25px}
 .app-window{pointer-events:none;user-select:none}
 .feature-index{font-size:42px}
