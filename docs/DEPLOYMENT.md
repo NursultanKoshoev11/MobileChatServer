@@ -30,10 +30,13 @@ confirmed.
 
 ## GitHub release controls
 
-The repository API reported `main` as unprotected during the 2026-11-17 review.
-Before a municipal pilot, protect `main`, require the backend CI check, and block
-force pushes. Keep production deployment behind the explicit `workflow_dispatch`
-confirmation in this branch; restrict the `production` environment to `main` and
+As of 2026-11-17, the repository requires a pull request and a current `backend`
+CI check for `main`; administrators are covered, and force pushes and branch
+deletion are disabled. The required approving-review count is currently zero,
+so this does not provide independent human review. CodeQL and Trivy are not yet
+required checks. The current GitHub `main` workflow still has a push-triggered
+production deploy; this pilot branch changes it to a manually confirmed release.
+After that change is merged, restrict the `production` environment to `main` and
 require an approver where the GitHub plan supports it.
 
 ## Identify the live Docker project

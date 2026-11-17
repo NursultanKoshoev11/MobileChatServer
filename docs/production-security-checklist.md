@@ -38,10 +38,10 @@ Required authorization rules:
 - Keep `.env` and signing keys outside Docker images.
 - Run server CI (`go test`, `go vet`, and pinned `govulncheck`), CodeQL for Go, and
   Trivy image scanning before release. The production package workflow stops
-  on HIGH or CRITICAL OS/library vulnerabilities. Add the CodeQL workflow check
-  and production image scan as required branch/release checks after they pass
-  on GitHub; CodeQL result upload requires a public repository or GitHub Code
-  Security entitlement.
+  on HIGH or CRITICAL OS/library vulnerabilities. CodeQL and Trivy are present
+  only in the local pilot branch and are not yet required checks. Add them to
+  the gate after their first successful GitHub runs; CodeQL result upload
+  requires a public repository or GitHub Code Security entitlement.
 - Keep deployment, PostgreSQL volume, media directory, and backup paths stable;
   inspect existing host mounts before any recovery or migration.
 - Verify a recent database dump and media archive, checksums, and offsite upload.
