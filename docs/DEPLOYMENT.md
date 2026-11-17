@@ -106,6 +106,11 @@ managed separately from the deployment artifact. Review and install changes to
 that host-side helper through a controlled server-admin procedure; a normal
 application release does not update it.
 
+The static-site helper at `/usr/local/bin/koom-edge-site-deploy` is also
+installed separately from the website package. Install reviewed helper changes
+through the edge server-admin procedure; a static-site workflow does not update
+the helper.
+
 Before a manual recovery or migration, take a fresh database and media backup.
 Application rollback does not automatically reverse database migrations, so
 only deploy schema changes that remain compatible with the previous API image.
@@ -122,6 +127,40 @@ The health endpoint returns `{"status":"ok","database":"ok"}` when the API
 can reach PostgreSQL. Confirm the backup worker is healthy and that the latest
 database and media archives have matching checksum files and were uploaded
 offsite.
+
+## Edge Caddy security headers
+
+The edge Caddy configuration in `deployment/edge/Caddyfile` supplies HSTS,
+`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, and
+`Permissions-Policy` for the full KOOM origin, including reverse-proxied API
+and policy pages. The root and `/kg` pages also have a restrictive CSP.
+This file is bind-mounted by the edge Compose project and is separate from
+both the backend release and the static-site asset workflow; neither workflow
+updates the running Caddy configuration.
+
+Apply a reviewed edge configuration through the server-admin process. Before
+reloading, validate the mounted file; reload only after validation succeeds:
+
+```bash
+sudo docker exec oracle-caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+sudo docker exec oracle-caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+```
+
+Then verify each public HTML route, including `/account-deletion` after the
+backend route has been released:
+
+```bash
+for path in / /kg /privacy /child-safety; do
+  headers="$(curl --fail --silent --show-error --max-time 12 -D - -o /dev/null "https://koom.com.kg$path")"
+  for name in Strict-Transport-Security X-Content-Type-Options X-Frame-Options Referrer-Policy Permissions-Policy; do
+    grep -Fiq "$name:" <<<"$headers" || { echo "Missing $name on $path" >&2; exit 1; }
+  done
+done
+```
+
+The current live edge must be rechecked after its Caddy configuration is
+updated; a successful website asset deployment alone does not apply these
+headers.
 
 ## Mobile API URL
 

@@ -5,6 +5,14 @@
 
 koom.com.kg {
 	encode zstd gzip
+	header {
+		defer
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+	}
 
 	@mcpwork path /mcp-work/*
 	handle @mcpwork {
@@ -26,7 +34,6 @@ koom.com.kg {
 		root * /srv/koom-site/current
 		header Cache-Control "no-cache"
 		header Content-Security-Policy "default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; script-src 'none'"
-		header X-Content-Type-Options "nosniff"
 		rewrite * /index.html
 		file_server
 	}
@@ -36,7 +43,6 @@ koom.com.kg {
 		root * /srv/koom-site/current
 		header Cache-Control "no-cache"
 		header Content-Security-Policy "default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; script-src 'none'"
-		header X-Content-Type-Options "nosniff"
 		rewrite * /kg/index.html
 		file_server
 	}
@@ -45,7 +51,6 @@ koom.com.kg {
 	handle @koom_assets {
 		root * /srv/koom-site/current
 		header Cache-Control "public, max-age=86400"
-		header X-Content-Type-Options "nosniff"
 		file_server
 	}
 
@@ -55,5 +60,13 @@ koom.com.kg {
 }
 
 www.koom.com.kg {
+	header {
+		defer
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+	}
 	redir https://koom.com.kg{uri} permanent
 }

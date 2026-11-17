@@ -27,6 +27,10 @@ Required authorization rules:
 ## Deployment
 
 - Use HTTPS in production.
+- Apply and validate `deployment/edge/Caddyfile` on the edge host separately;
+  backend and static-site deployments do not refresh its bind-mounted Caddy
+  configuration. Confirm all required response headers on each public HTML
+  route after Caddy reload.
 - Verify HSTS, CSP, `X-Content-Type-Options`, `X-Frame-Options`,
   `Referrer-Policy`, and `Permissions-Policy` on each public HTML page after
   deployment; reverse-proxy configuration alone may not match the running server.
