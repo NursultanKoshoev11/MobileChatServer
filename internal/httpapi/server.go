@@ -183,10 +183,12 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteMyAccount(w http.ResponseWriter, r *http.Request) {
-	if err := s.svc.DeleteAccount(r.Context(), currentUser(r).ID); err != nil {
+	userID := currentUser(r).ID
+	if err := s.svc.DeleteAccount(r.Context(), userID); err != nil {
 		s.writeError(w, err)
 		return
 	}
+	s.hub.DisconnectUser(userID)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted", "public_content": "anonymized"})
 }
 
