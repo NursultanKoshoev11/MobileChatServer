@@ -24,6 +24,22 @@ Confirm the actual path against the host before enabling a deployment; do not
 restore an old environment file or switch the Compose working directory until
 the active database volume and data paths are identified.
 
+## Identify the live Docker project
+
+Use read-only Docker metadata to map the running API and PostgreSQL containers
+to their Compose project, working directory, config file, and mounts. Do not
+read container environment variables during this check.
+
+```bash
+sudo docker ps -a --format '{{.ID}} {{.Names}} {{.Image}} {{.Status}}'
+sudo docker inspect --format '{{.Name}} project={{index .Config.Labels "com.docker.compose.project"}} service={{index .Config.Labels "com.docker.compose.service"}} workdir={{index .Config.Labels "com.docker.compose.project.working_dir"}} files={{index .Config.Labels "com.docker.compose.project.config_files"}} mounts={{range .Mounts}}{{.Type}}:{{.Name}}:{{.Source}}->{{.Destination}};{{end}}' <api-container> <postgres-container>
+sudo docker volume inspect <postgres-volume>
+```
+
+Confirm the database volume and uploaded-file mount against the live project
+before setting `DEPLOY_DIR` or running Compose. An old code archive, image tag,
+or volume name alone does not prove which database is serving production.
+
 ## Environment
 
 Start from `.env.prod.example`, write real values to `.env.prod`, and restrict
