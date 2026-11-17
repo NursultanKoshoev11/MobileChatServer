@@ -45,6 +45,9 @@ Required authorization rules:
 ## Privacy and store release
 
 - Group member roster APIs do not return personal phone numbers.
+- Provide an in-app abuse and safety reporting flow, route reports to a monitored
+  queue, and document who reviews them and how actions are recorded before a
+  broader pilot.
 - The app and `/account-deletion` page provide account deletion. Public requests
   and comments are retained without author identity; private messages, votes,
   profile data, and session tokens are removed. Confirm the Play Console web

@@ -47,8 +47,9 @@ const childSafetyStandardsHTML = `<!doctype html>
     <h2>1. Prohibited content and behavior</h2>
     <p>Users must not create, upload, share, request, promote, link to, or distribute any content or activity that involves the sexual exploitation or abuse of children. Users must not use Koom to contact, pressure, manipulate, exploit, or endanger minors.</p>
 
-    <h2>2. Reporting inside the app</h2>
-    <p>Users can report safety concerns, harmful content, suspicious accounts, or abusive behavior from within the app where reporting tools are available. Reports are reviewed and may result in content removal, account restrictions, or other safety actions.</p>
+    <h2>2. How to report a safety concern</h2>
+    <p>The current app release does not include an in-app reporting control. To report a safety concern, contact <a href="mailto:nursultankosoev2@gmail.com?subject=Koom%20child%20safety%20report">nursultankosoev2@gmail.com</a> with a link or enough detail to locate the content and a short description of the concern. Do not email illegal images or videos, or unnecessary sensitive personal information.</p>
+    <p>We review incoming reports and may remove content or restrict accounts under these standards.</p>
 
     <h2>3. Review and enforcement</h2>
     <p>When we identify or receive a report about potential child safety violations, we may take actions including:</p>
