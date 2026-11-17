@@ -62,10 +62,12 @@ sudo docker compose -f docker-compose.prod.yml --env-file .env.prod up -d api ca
 ## Routine backend release
 
 The GitHub workflow verifies tests, static analysis, vulnerability checks, and
-builds before deployment. On the server it builds the API and migration images,
-runs migrations, then updates the API and Caddy. If backup scripts or the
-backup image change, rebuild and recreate the backup service as part of the
-release too.
+builds before deployment. Production deployment is manual from `main`: select
+`deploy` only after checking the live Compose directory, project name, and
+PostgreSQL volume. Pushes to `main` do not deploy. On the server the workflow
+builds the API and migration images, runs migrations, then updates the API and
+Caddy. If backup scripts or the backup image change, rebuild and recreate the
+backup service as part of the release too.
 
 Before a manual recovery or migration, take a fresh database and media backup.
 Application rollback does not automatically reverse database migrations, so
