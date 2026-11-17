@@ -138,8 +138,9 @@ This file is bind-mounted by the edge Compose project and is separate from
 both the backend release and the static-site asset workflow; neither workflow
 updates the running Caddy configuration.
 
-Apply a reviewed edge configuration through the server-admin process. Before
-reloading, validate the mounted file; reload only after validation succeeds:
+Apply a reviewed edge configuration through the server-admin process. Back up
+the host file at `/opt/projects/edge/Caddyfile`, install the reviewed version,
+then validate the mounted file. Reload only after validation succeeds:
 
 ```bash
 sudo docker exec oracle-caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
@@ -160,7 +161,9 @@ done
 
 The current live edge must be rechecked after its Caddy configuration is
 updated; a successful website asset deployment alone does not apply these
-headers.
+headers. Apply and verify the Caddy change before installing the updated
+`koom-edge-site-deploy` helper: its preflight now deliberately rejects a site
+deployment while any of these headers are missing.
 
 ## Mobile API URL
 
