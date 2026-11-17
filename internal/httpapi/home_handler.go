@@ -23,7 +23,8 @@ func (s *Server) homePage(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "public, max-age=300")
-	setSiteSecurityHeaders(w, false)
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; script-src 'none'")
+	setSiteSecurityHeaders(w)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(content)
 }
@@ -48,6 +49,7 @@ func (s *Server) accountDeletionPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache, must-revalidate")
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+	setSiteSecurityHeaders(w)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(content)
 }

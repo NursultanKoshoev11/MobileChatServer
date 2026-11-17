@@ -5,7 +5,8 @@ import "net/http"
 func (s *Server) privacyPolicy(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache, must-revalidate")
-	setSiteSecurityHeaders(w, true)
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; script-src 'none'")
+	setSiteSecurityHeaders(w)
 	_, _ = w.Write([]byte(privacyPolicyHTML))
 }
 
