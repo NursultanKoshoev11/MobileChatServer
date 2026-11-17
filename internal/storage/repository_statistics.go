@@ -165,13 +165,13 @@ func (r *Repository) statisticsTimeline(ctx context.Context, groupID string, fro
 
 func (r *Repository) recentOpenPublicRequests(ctx context.Context, groupID string, from, to time.Time) ([]domain.PublicRequest, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT pr.id, pr.group_id, pr.author_id, u.display_name, pr.request_type, pr.interaction_mode, pr.title, pr.body, pr.status,
+		SELECT pr.id, pr.group_id, COALESCE(pr.author_id, ''), COALESCE(u.display_name, ''), pr.request_type, pr.interaction_mode, pr.title, pr.body, pr.status,
 			COALESCE(SUM(CASE WHEN v.vote_type = 'support' THEN 1 ELSE 0 END), 0)::int AS support_count,
 			COALESCE(SUM(CASE WHEN v.vote_type = 'oppose' THEN 1 ELSE 0 END), 0)::int AS oppose_count,
 			(SELECT COUNT(*)::int FROM public_request_comments c WHERE c.request_id = pr.id AND c.deleted_at IS NULL) AS comment_count,
 			pr.created_at, pr.updated_at
 		FROM public_requests pr
-		JOIN users u ON u.id = pr.author_id
+		LEFT JOIN users u ON u.id = pr.author_id
 		LEFT JOIN public_request_votes v ON v.request_id = pr.id
 		WHERE pr.group_id = $1 AND pr.hidden_at IS NULL AND pr.created_at >= $2 AND pr.created_at < $3 AND pr.status NOT IN ('resolved', 'rejected')
 		GROUP BY pr.id, u.display_name

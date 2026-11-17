@@ -115,7 +115,7 @@ func (r *Repository) ListUserGroups(ctx context.Context, userID string) ([]domai
 		           FROM public_requests pr
 		           LEFT JOIN public_request_reads prr ON prr.group_id = pr.group_id AND prr.user_id = $1
 		           WHERE pr.group_id = g.id
-		             AND pr.author_id <> $1
+		             AND pr.author_id IS DISTINCT FROM $1
 		             AND pr.created_at > COALESCE(prr.last_read_at, 'epoch'::timestamptz)
 		       ) AS unread_public_request_count
 		FROM groups g
@@ -515,8 +515,9 @@ func nullableString(value string) any {
 }
 
 var (
-	ErrNotFound  = errors.New("not found")
-	ErrForbidden = errors.New("forbidden")
+	ErrNotFound                       = errors.New("not found")
+	ErrForbidden                      = errors.New("forbidden")
+	ErrGroupOwnershipTransferRequired = errors.New("group ownership transfer required")
 )
 
 func (r *Repository) ensurePublicRequestReadsTable(ctx context.Context) error {

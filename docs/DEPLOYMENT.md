@@ -41,6 +41,10 @@ The backup health check requires a recent validated database dump and media
 archive plus `offsite=uploaded`. Configure `BACKUP_S3_URI` and AWS credentials
 or a working instance role before treating backups as healthy. The script can
 create local-only backups, but those do not pass the production health check.
+It prunes expired Koom backup objects from the configured S3 prefix according
+to `BACKUP_RETENTION_DAYS`. For versioned S3 buckets, add a lifecycle rule to
+expire noncurrent object versions as well; the script cannot remove those
+versions through ordinary object deletion.
 
 ## First deployment
 

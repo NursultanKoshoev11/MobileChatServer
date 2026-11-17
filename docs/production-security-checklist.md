@@ -37,10 +37,13 @@ Required authorization rules:
 ## Privacy and store release
 
 - Group member roster APIs do not return personal phone numbers.
-- The mobile app and an external web page must provide an account-deletion flow.
-  The current app has no deletion endpoint or in-app control, and the current
-  privacy page describes email requests instead. Define which user data is
-  deleted or retained before implementing the data-removal operation.
+- The app and `/account-deletion` page provide account deletion. Public requests
+  and comments are retained without author identity; private messages, votes,
+  profile data, and session tokens are removed. Confirm the Play Console web
+  deletion URL and test the flow after the database migration is deployed.
+- Set S3 lifecycle retention for current objects and noncurrent versions. The
+  backup script prunes expired current objects, while S3 versioning requires a
+  bucket lifecycle rule to expire historical versions too.
 - Publish privacy and child-safety information in the languages used by the
   target audience and keep the store data-safety declarations consistent with
   actual collection, sharing, and retention.

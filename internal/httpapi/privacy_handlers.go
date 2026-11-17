@@ -72,8 +72,9 @@ const privacyPolicyHTML = `<!doctype html>
     <h2>6. Security</h2>
     <p>We use reasonable technical and organizational measures to protect information against unauthorized access, loss, misuse, alteration, or disclosure. No online service can be guaranteed to be completely secure, but we work to protect user accounts, app data, and service infrastructure.</p>
 
-    <h2>7. User choices and requests</h2>
-    <p>You may contact us to request access, correction, or deletion of your personal information where applicable. Some information may need to be retained when required for legal, security, fraud prevention, backup, dispute resolution, or operational reasons.</p>
+    <h2>7. User choices and account deletion</h2>
+    <p>You can delete your account from Profile settings in the Koom app or start deletion at <a href="/account-deletion">koom.com.kg/account-deletion</a>. Deletion removes your profile, phone number, active sessions, push tokens, votes, group chat messages, and other account-linked records. Public requests and comments remain with the author identity removed; their text and attached media remain part of the public record. Groups you own are transferred to an existing group admin or member. If you are the only member of a group, invite another member before deleting your account.</p>
+    <p>Account deletion from the live service may not immediately remove information from protected backups. Backup copies are removed according to their configured retention schedule. For access or correction requests, or if you cannot access the phone number on your account, contact us at <a href="mailto:nursultankosoev2@gmail.com">nursultankosoev2@gmail.com</a>.</p>
 
     <h2>8. Children</h2>
     <p>Koom is not intended for children under the minimum age required by applicable law. If we learn that personal information from a child was collected without appropriate consent where consent is required, we will take reasonable steps to delete it.</p>

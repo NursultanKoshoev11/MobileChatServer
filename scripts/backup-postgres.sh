@@ -115,6 +115,12 @@ EOF
   MEDIA_DEST="offsite:${S3_PATH%/}/$(basename "$MEDIA_FILE")"
   rclone --config "$RCLONE_CONFIG_FILE" copyto "$MEDIA_FILE" "$MEDIA_DEST" --s3-no-check-bucket
   rclone --config "$RCLONE_CONFIG_FILE" copyto "$MEDIA_SHA_FILE" "$MEDIA_DEST.sha256" --s3-no-check-bucket
+  rclone --config "$RCLONE_CONFIG_FILE" delete "offsite:${S3_PATH%/}" \
+    --min-age "${RETENTION_DAYS}d" \
+    --include "$BACKUP_PREFIX-*.dump" \
+    --include "$BACKUP_PREFIX-*.dump.sha256" \
+    --include "$BACKUP_PREFIX-files-*.tar.gz" \
+    --include "$BACKUP_PREFIX-files-*.tar.gz.sha256"
   OFFSITE_STATUS="uploaded"
 else
   echo "warning: BACKUP_S3_URI is empty; backup is local only" >&2

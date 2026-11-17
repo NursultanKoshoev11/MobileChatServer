@@ -56,14 +56,14 @@ func (r *Repository) ListPublicRequests(ctx context.Context, groupID, viewerID s
 		}
 	}
 	query := `
-		SELECT pr.id, pr.group_id, pr.author_id, u.display_name, COALESCE(u.avatar_data, ''), pr.request_type, pr.interaction_mode, pr.title, pr.body, pr.status,
+		SELECT pr.id, pr.group_id, COALESCE(pr.author_id, ''), COALESCE(u.display_name, ''), COALESCE(u.avatar_data, ''), pr.request_type, pr.interaction_mode, pr.title, pr.body, pr.status,
 		       COALESCE(SUM(CASE WHEN v.vote_type = 'support' THEN 1 ELSE 0 END), 0)::int AS support_count,
 		       COALESCE(SUM(CASE WHEN v.vote_type = 'oppose' THEN 1 ELSE 0 END), 0)::int AS oppose_count,
 		       (SELECT COUNT(*)::int FROM public_request_comments c WHERE c.request_id = pr.id AND c.deleted_at IS NULL) AS comment_count,
 		       COALESCE(myv.vote_type, '') AS my_vote,
 		       pr.created_at, pr.updated_at
 		FROM public_requests pr
-		JOIN users u ON u.id = pr.author_id
+		LEFT JOIN users u ON u.id = pr.author_id
 		LEFT JOIN public_request_votes v ON v.request_id = pr.id
 		LEFT JOIN public_request_votes myv ON myv.request_id = pr.id AND myv.user_id = $2
 		WHERE pr.group_id = $1
@@ -235,10 +235,10 @@ func (r *Repository) ListPublicRequestComments(ctx context.Context, requestID, v
 		return nil, ErrForbidden
 	}
 	rows, err := r.db.Query(ctx, `
-		SELECT c.id, c.request_id, c.author_id, u.display_name,
+		SELECT c.id, c.request_id, COALESCE(c.author_id, ''), COALESCE(u.display_name, ''),
 		       COALESCE(u.avatar_data, ''), c.body, c.created_at, c.deleted_at
 		FROM public_request_comments c
-		JOIN users u ON u.id = c.author_id
+		LEFT JOIN users u ON u.id = c.author_id
 		WHERE c.request_id = $1 AND c.deleted_at IS NULL
 		ORDER BY c.created_at ASC`, requestID)
 	if err != nil {

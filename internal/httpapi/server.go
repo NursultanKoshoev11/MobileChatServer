@@ -88,6 +88,8 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 	r.Get("/api/health", server.health)
 	r.Get("/privacy", server.privacyPolicy)
 	r.Head("/privacy", server.privacyPolicy)
+	r.Get("/account-deletion", server.accountDeletionPage)
+	r.Head("/account-deletion", server.accountDeletionPage)
 	r.Get("/child-safety", server.childSafetyStandards)
 	r.Head("/child-safety", server.childSafetyStandards)
 	r.Get("/api/health/ws", server.websocketHealth)
@@ -102,6 +104,7 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 	r.Group(func(r chi.Router) {
 		r.Use(server.auth)
 		r.Get("/api/me", server.me)
+		r.Delete("/api/me", server.deleteMyAccount)
 		r.Put("/api/me/avatar", server.updateMyAvatar)
 		r.Post("/api/ws-token", server.issueWebSocketToken)
 		r.Get("/api/ws", server.userWebSocket)
@@ -177,6 +180,14 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "database": "ok"})
+}
+
+func (s *Server) deleteMyAccount(w http.ResponseWriter, r *http.Request) {
+	if err := s.svc.DeleteAccount(r.Context(), currentUser(r).ID); err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted", "public_content": "anonymized"})
 }
 
 func (s *Server) websocketHealth(w http.ResponseWriter, r *http.Request) {
@@ -795,6 +806,8 @@ func (s *Server) writeError(w http.ResponseWriter, err error) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 	case errors.Is(err, storage.ErrForbidden):
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+	case errors.Is(err, storage.ErrGroupOwnershipTransferRequired):
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "group_ownership_transfer_required"})
 	default:
 		s.logger.Printf("http error: %q", fmt.Sprint(err))
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
