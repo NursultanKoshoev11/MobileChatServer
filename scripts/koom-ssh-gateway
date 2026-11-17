@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly DEPLOY_SCRIPT=/usr/local/sbin/koom-github-deploy
+readonly request="${SSH_ORIGINAL_COMMAND:-}"
+
+case "$request" in
+  preflight)
+    exec sudo -n "$DEPLOY_SCRIPT" --preflight
+    ;;
+  deploy\ *)
+    sha="${request#deploy }"
+    if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+      echo "Only a deploy request with a full Git commit SHA is allowed." >&2
+      exit 64
+    fi
+    exec sudo -n "$DEPLOY_SCRIPT" "$sha"
+    ;;
+  *)
+    echo "This SSH key only allows KOOM deployment commands." >&2
+    exit 64
+    ;;
+esac

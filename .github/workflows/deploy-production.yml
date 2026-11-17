@@ -2,6 +2,9 @@ name: Deploy Koom production
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - main
@@ -15,7 +18,7 @@ concurrency:
 
 jobs:
   verify:
-    name: Verify before deploy
+    name: Verify and package production image
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -33,105 +36,66 @@ jobs:
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
-      - name: Build deployment binaries
-        run: |
-          go build ./cmd/server
-          go build ./cmd/migrate
-
-  deploy:
-    name: Deploy to the Koom production server
-    needs: verify
-    if: github.ref == 'refs/heads/main'
-    runs-on: [self-hosted, linux, x64, koom-production]
-    environment: production
-    timeout-minutes: 30
-
-    steps:
-      - name: Check out the requested commit
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Deploy MobileChatServer
+      - name: Build Linux production binaries
         shell: bash
-        env:
-          DEPLOY_DIR: /opt/projects/MobileChatServer
-          COMPOSE_FILE: docker-compose.prod.yml
-          ENV_FILE: .env.prod
         run: |
           set -Eeuo pipefail
+          build_dir="$RUNNER_TEMP/koom-image"
+          bundle_dir="$RUNNER_TEMP/koom-deploy"
+          mkdir -p "$build_dir/migrations" "$bundle_dir"
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -p=1 -trimpath -ldflags='-s -w' -o "$build_dir/koom-server" ./cmd/server
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -p=1 -trimpath -ldflags='-s -w' -o "$build_dir/koom-migrate" ./cmd/migrate
+          cp -R migrations/. "$build_dir/migrations/"
+          printf '%s\n' "$GITHUB_SHA" > "$bundle_dir/deploy-sha.txt"
+          docker build --pull \
+            --build-arg "BUILD_SHA=$GITHUB_SHA" \
+            --file deployment/Dockerfile.runtime \
+            --tag mobilechatserver-api:deploy \
+            --tag mobilechatserver-migrate:deploy \
+            "$build_dir"
+          docker save --output "$bundle_dir/images.tar" \
+            mobilechatserver-api:deploy mobilechatserver-migrate:deploy
+          tar -C "$bundle_dir" -czf "$RUNNER_TEMP/koom-production.tar.gz" images.tar deploy-sha.txt
+      - name: Upload production package
+        uses: actions/upload-artifact@v4
+        with:
+          name: koom-production-${{ github.sha }}
+          path: ${{ runner.temp }}/koom-production.tar.gz
+          if-no-files-found: error
+          retention-days: 2
 
-          if [[ ! -d "$DEPLOY_DIR" ]]; then
-            echo "Configured deployment directory is missing: $DEPLOY_DIR"
-            echo "Runner workspace: ${GITHUB_WORKSPACE:-unset}"
-            for base in /opt /srv /etc/koom /var/lib; do
-              if [[ -d "$base" ]]; then
-                find "$base" -maxdepth 5 \
-                  \( -type d -iname 'MobileChatServer' -o -type f -name '.env.prod' \) \
-                  -print 2>/dev/null || true
-              fi
-            done
-            if [[ -d /opt/backups/mobilechatserver ]]; then
-              echo "KOOM backup inventory (paths and sizes only):"
-              find /opt/backups/mobilechatserver -maxdepth 5 -type f \
-                -printf '%TY-%Tm-%Td %TH:%TM %s bytes %p\n' 2>/dev/null || true
-            fi
-            echo "Docker container inventory (including stopped containers):"
-            sudo docker ps -a --format '{{.Names}}|{{.Status}}|{{.Image}}' || true
-            echo "Docker volume inventory:"
-            sudo docker volume ls --format '{{.Name}}' || true
-            echo "Docker image inventory (repository, tag, age):"
-            sudo docker image ls --format '{{.Repository}}:{{.Tag}}|{{.CreatedSince}}' || true
-            sudo docker ps --format '{{.Names}}|{{.Status}}' || true
-            exit 1
-          fi
-
-          cd "$DEPLOY_DIR"
-          test -f "$ENV_FILE"
-
-          if ! grep -Eq '^SMS_PROVIDER[[:space:]]*=[[:space:]]*twilio([[:space:]]*(#.*)?)?$' "$ENV_FILE" \
-            || ! grep -Eq '^TWILIO_ACCOUNT_SID[[:space:]]*=[[:space:]]*[^[:space:]#]+' "$ENV_FILE" \
-            || ! grep -Eq '^TWILIO_AUTH_TOKEN[[:space:]]*=[[:space:]]*[^[:space:]#]+' "$ENV_FILE" \
-            || { ! grep -Eq '^SMS_FROM[[:space:]]*=[[:space:]]*[^[:space:]#]+' "$ENV_FILE" \
-                 && ! grep -Eq '^TWILIO_MESSAGING_SERVICE_SID[[:space:]]*=[[:space:]]*[^[:space:]#]+' "$ENV_FILE"; }; then
-            echo "Production SMS is not configured. Set SMS_PROVIDER=twilio, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and SMS_FROM or TWILIO_MESSAGING_SERVICE_SID in .env.prod."
-            exit 1
-          fi
-          echo "Production SMS configuration is present."
-
-          previous_sha="$(git rev-parse HEAD 2>/dev/null || true)"
-          target_sha="${GITHUB_SHA}"
-
-          git fetch --prune origin "${GITHUB_REF_NAME:-main}"
-          git checkout --force "$target_sha"
-
-          rollback() {
-            if [[ -n "$previous_sha" && "$previous_sha" != "$target_sha" ]]; then
-              echo "Deployment failed; restoring $previous_sha"
-              git checkout --force "$previous_sha" || true
-              sudo docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build api migrate || true
-              sudo docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d api caddy || true
-            fi
-          }
-          trap rollback ERR
-
-          sudo docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build api migrate
-          sudo docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" run --rm migrate
-          sudo docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d api caddy
-
-          for attempt in {1..30}; do
-            if curl --fail --silent --show-error http://127.0.0.1:8080/api/health >/dev/null; then
-              break
-            fi
-            if [[ "$attempt" == 30 ]]; then
-              echo "Koom API health check failed"
-              exit 1
-            fi
-            sleep 2
-          done
-
-          curl --fail --silent --show-error --resolve koom.com.kg:443:127.0.0.1 https://koom.com.kg/api/health >/dev/null
-          sudo docker ps --format '{{.Names}}|{{.Status}}' | grep -E '^mobilechat-(api|caddy|postgres)\\|'
-
-          trap - ERR
-          echo "Koom deployment completed at ${target_sha}"
+  deploy:
+    name: Deploy to the Koom Oracle server
+    needs: verify
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+    steps:
+      - name: Check out pinned server host key
+        uses: actions/checkout@v4
+      - name: Download the verified package
+        uses: actions/download-artifact@v4
+        with:
+          name: koom-production-${{ github.sha }}
+          path: ${{ runner.temp }}/koom-deploy
+      - name: Configure restricted SSH access
+        shell: bash
+        env:
+          KOOM_PROD_DEPLOY_KEY: ${{ secrets.KOOM_PROD_DEPLOY_KEY }}
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$KOOM_PROD_DEPLOY_KEY" > "$HOME/.ssh/koom-production"
+          chmod 600 "$HOME/.ssh/koom-production"
+          install -m 600 .github/koom-production-known-hosts "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/koom-production" >/dev/null
+      - name: Check production prerequisites and deploy
+        shell: bash
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
+          ssh_opts=(-i "$HOME/.ssh/koom-production" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts" -o ConnectTimeout=10)
+          ssh "${ssh_opts[@]}" opc@139.185.44.178 preflight
+          ssh "${ssh_opts[@]}" opc@139.185.44.178 "deploy $GITHUB_SHA" < "$RUNNER_TEMP/koom-deploy/koom-production.tar.gz"
