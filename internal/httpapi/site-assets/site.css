@@ -158,3 +158,57 @@ a:focus-visible,summary:focus-visible{outline:3px solid #16b9e5;outline-offset:4
 @media(max-width:740px){html{scroll-padding-top:76px}.wrap{width:calc(100% - 36px)}.nav{height:70px;gap:8px}.brand{font-size:21px}.brand img{width:37px;height:37px}.navlinks{display:none}.nav-end{gap:8px}.nav-cta{display:none}.mobile-nav{display:block}.language a{padding:7px 9px}.hero{grid-template-columns:1fr;min-height:auto;gap:0;padding-top:48px;padding-bottom:62px}.hero h1{max-width:600px;font-size:clamp(46px,10vw,68px)}.lead{font-size:16px}.hero-art{height:min(112vw,490px);margin-top:24px;overflow:hidden}.hero-art:before{width:min(76vw,340px)}.app-window{width:min(94%,430px);padding:13px;border-radius:22px}.visual-note{left:0;bottom:5%;padding:10px 12px}.visual-orb{right:0;top:5%;width:38px;height:38px}.scroll-cue{display:none}.section{padding:72px 0}.research-grid,.product-grid{grid-template-columns:1fr;gap:32px}.research h2,.section-heading h2,.product-copy h2{font-size:38px}.research-stat{padding:22px}.research-stat>span{font-size:14px}.section-heading{margin-bottom:30px}.feature{min-height:205px;padding:20px 17px}.feature-icon{margin-bottom:18px}.product-panel{padding:23px}.closing-section{padding-bottom:66px}.closing-inner{align-items:flex-start;flex-direction:column;padding:35px 27px;border-radius:23px}.closing-inner h2{font-size:36px}.closing-inner .button{width:auto}.footer-inner{align-items:flex-start;flex-direction:column}.footer-brand{flex-wrap:wrap}.footer-links{gap:12px 17px}}
 @media(max-width:430px){.wrap{width:calc(100% - 30px)}.hero{padding-top:40px}.eyebrow{font-size:9px;letter-spacing:.1em}.hero h1{font-size:clamp(43px,11vw,56px)}.actions{align-items:stretch;flex-direction:column}.button{width:100%}.hero-art{height:405px;margin-inline:-4px}.app-window{width:calc(100% - 14px);padding:11px;border-radius:20px}.app-top{gap:7px}.app-location{font-size:8px}.app-filter{gap:5px}.app-filter span{padding:7px 7px;font-size:7px}.post-card{padding:11px}.post-card h3{font-size:12px}.visual-note{bottom:3%;padding:9px 10px}.research h2,.section-heading h2,.product-copy h2{font-size:34px}.research-stat{gap:14px;padding:19px}.research-stat strong{font-size:56px}.research-stat>span{font-size:12px}.features{grid-template-columns:1fr;gap:10px}.feature{min-height:0}.feature-icon{margin-bottom:13px}.feature-index{font-size:38px}.product-list li{font-size:12px}.product-panel{padding:18px}.closing-inner{padding:30px 22px}.closing-inner h2{font-size:32px}.closing-inner .button{width:100%}.footer-brand{align-items:flex-start;flex-direction:column}.footer-links{gap:12px 15px}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;transition-delay:0ms!important}}
+
+/* Shared type sizes and clear click targets across both language versions. */
+:root{--text-xs:12px;--text-sm:14px;--text-base:16px;--text-lg:18px}
+body{font-size:var(--text-base);line-height:1.6}
+.navlinks a,.language a{font-size:var(--text-sm)}
+.nav-cta,.button{font-size:var(--text-sm)}
+.navlinks a,.language a,.nav-cta,.button,.mobile-nav summary,.mobile-nav nav a,.scroll-cue,.footer-links a{position:relative;z-index:1;pointer-events:auto}
+.mobile-nav{z-index:12}
+.mobile-nav nav{z-index:21}
+.hero-proof{font-size:var(--text-sm);line-height:1.55}
+.eyebrow,.section-kicker,.panel-kicker{font-size:var(--text-xs)}
+.hero h1{font-size:clamp(44px,6vw,72px);line-height:1.04}
+.lead{font-size:var(--text-lg);line-height:1.65}
+.app-brand{font-size:13px}
+.app-location{font-size:11px}
+.app-overline{font-size:12px}
+.app-welcome h2{font-size:24px}
+.app-welcome p{font-size:13px}
+.app-filter{gap:14px;overflow-x:auto;scrollbar-width:none}
+.app-filter::-webkit-scrollbar{display:none}
+.app-filter span{padding:4px 0;border:0;border-radius:0;color:#61718d;font-size:11px}
+.app-filter .filter-active{border:0;background:transparent;color:#61718d}
+.post-head strong{font-size:12px}
+.post-head small{font-size:11px}
+.post-card h3{font-size:15px;line-height:1.4}
+.post-card>p{font-size:12px;line-height:1.55}
+.post-status{font-size:11px}
+.post-meta{display:flex;align-items:center;gap:7px;margin-top:12px;padding-top:10px;border-top:1px solid #edf1f7;color:#687891;font-size:11px;font-weight:600}
+.visual-note strong{font-size:12px}
+.visual-note small{font-size:11px}
+.research h2,.section-heading h2,.product-copy h2{font-size:clamp(34px,4.2vw,52px);line-height:1.1}
+.research-copy>p:last-child,.section-heading>p:last-child,.product-copy>p{font-size:var(--text-base);line-height:1.7}
+.research-stat>span{font-size:var(--text-base);line-height:1.5}
+.research-note{font-size:13px;line-height:1.65}
+.feature h3{font-size:17px}
+.feature p{font-size:15px;line-height:1.6}
+.product-list li{font-size:15px}
+.panel-header strong{font-size:18px}
+.journey-step strong{font-size:14px}
+.journey-step p{font-size:13px;line-height:1.55}
+.panel-footer{font-size:13px}
+.closing-inner h2{font-size:clamp(32px,3.8vw,44px);line-height:1.12}
+.closing-inner>div>p:last-child{font-size:var(--text-sm);line-height:1.65}
+.footer-brand{font-size:12px}
+.footer-links a,.copyright{font-size:12px}
+
+/* These symbols are part of the artwork, not buttons. */
+.feature-icon,.post-icon,.proof-mark,.mini-mark,.avatar-mark,.visual-spark,.panel-symbol,.journey-icon,.product-list li span{border-color:transparent;background:transparent;box-shadow:none}
+.feature-icon svg{width:25px;height:25px}
+.app-window{pointer-events:none;user-select:none}
+.feature-index{font-size:42px}
+section[id]{scroll-margin-top:96px}
+@media(max-width:740px){html{scroll-padding-top:80px}.hero h1{font-size:clamp(42px,9vw,60px)}.research h2,.section-heading h2,.product-copy h2{font-size:clamp(34px,7vw,40px)}.closing-inner h2{font-size:36px}}
+@media(max-width:430px){.hero h1{font-size:clamp(42px,10.5vw,54px)}.app-location{font-size:11px}.app-filter{gap:10px}.app-filter span{font-size:11px}.post-card h3{font-size:14px}.research h2,.section-heading h2,.product-copy h2{font-size:34px}.closing-inner h2{font-size:32px}section[id]{scroll-margin-top:80px}}
