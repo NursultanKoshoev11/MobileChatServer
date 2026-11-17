@@ -28,6 +28,14 @@ commands. Verify the active database volume and data mounts before the next
 release; do not change Compose paths or project names until that mapping is
 confirmed.
 
+## GitHub release controls
+
+The repository API reported `main` as unprotected during the 2026-11-17 review.
+Before a municipal pilot, protect `main`, require the backend CI check, and block
+force pushes. Keep production deployment behind the explicit `workflow_dispatch`
+confirmation in this branch; restrict the `production` environment to `main` and
+require an approver where the GitHub plan supports it.
+
 ## Identify the live Docker project
 
 Use read-only Docker metadata to map the running API and PostgreSQL containers
