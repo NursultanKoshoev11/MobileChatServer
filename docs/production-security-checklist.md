@@ -30,3 +30,17 @@ Required authorization rules:
 - Store secrets in environment variables or a secret manager.
 - Keep `.env` and signing keys outside Docker images.
 - Run server CI, CodeQL, dependency checks, and container scanning before release.
+- Keep deployment, PostgreSQL volume, media directory, and backup paths stable;
+  inspect existing host mounts before any recovery or migration.
+- Verify a recent database dump and media archive, checksums, and offsite upload.
+
+## Privacy and store release
+
+- Group member roster APIs do not return personal phone numbers.
+- The mobile app and an external web page must provide an account-deletion flow.
+  The current app has no deletion endpoint or in-app control, and the current
+  privacy page describes email requests instead. Define which user data is
+  deleted or retained before implementing the data-removal operation.
+- Publish privacy and child-safety information in the languages used by the
+  target audience and keep the store data-safety declarations consistent with
+  actual collection, sharing, and retention.

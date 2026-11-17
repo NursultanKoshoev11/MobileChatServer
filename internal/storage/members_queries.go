@@ -23,8 +23,7 @@ func (r *Repository) ListGroupMembersPage(ctx context.Context, groupID, requeste
 		offset = 0
 	}
 	rows, err := r.db.Query(ctx, `
-		-- Group rosters should not disclose members' contact numbers.
-		SELECT u.id, u.display_name, ''::text AS phone, gm.role, gm.joined_at
+		SELECT u.id, u.display_name, gm.role, gm.joined_at
 		FROM group_members gm
 		JOIN users u ON u.id = gm.user_id
 		WHERE gm.group_id = $1
@@ -39,7 +38,7 @@ func (r *Repository) ListGroupMembersPage(ctx context.Context, groupID, requeste
 	members := make([]domain.GroupMember, 0)
 	for rows.Next() {
 		var member domain.GroupMember
-		if err := rows.Scan(&member.UserID, &member.DisplayName, &member.Phone, &member.Role, &member.JoinedAt); err != nil {
+		if err := rows.Scan(&member.UserID, &member.DisplayName, &member.Role, &member.JoinedAt); err != nil {
 			return nil, fmt.Errorf("scan group member page: %w", err)
 		}
 		members = append(members, member)

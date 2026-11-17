@@ -1,111 +1,86 @@
-# Production Deployment Checklist
+# Koom production deployment
 
-This checklist is for deploying the Koom backend behind HTTPS.
+The production stack is defined in `docker-compose.prod.yml`. It runs the API,
+PostgreSQL, Caddy, and a database/media backup worker. Caddy terminates HTTPS
+and proxies requests to the API container.
 
-## 1. DNS
+## Server prerequisites
 
-The domain DNS A record should point to the server public IP:
+- Point `koom.com.kg` to the production server and expose TCP ports 80 and 443.
+- Keep API port 8080 bound to `127.0.0.1`; do not expose PostgreSQL.
+- Create the external Docker networks `stroy_default` and
+  `stroy-website_default` before starting Caddy. They are shared with other
+  services on the host.
+- Keep the repository in a stable directory with a protected `.env.prod` file.
+  The compose file uses relative `./data` and `./backups` bind mounts and a
+  project-scoped PostgreSQL volume. Changing the directory or Compose project
+  name can point the stack at different data. Confirm the existing volume and
+  mount paths before moving the deployment.
 
-```text
-koom.com.kg -> 16.171.171.191
-```
+The GitHub production workflow currently expects the checkout at
+`/opt/projects/MobileChatServer`. The latest deployment run visible in the
+history reviewed on 2026-11-17 reported that this directory was missing.
+Confirm the actual path against the host before enabling a deployment; do not
+restore an old environment file or switch the Compose working directory until
+the active database volume and data paths are identified.
 
-## 2. Firewall / Security Group
+## Environment
 
-Expose only the public web ports:
+Start from `.env.prod.example`, write real values to `.env.prod`, and restrict
+the file to the deployment account. Never commit it. Production requires:
 
-```text
-80/tcp   HTTP, used by Caddy for certificate issuance and redirects
-443/tcp  HTTPS, used by mobile clients
-```
+- `APP_ENV=production`, `DATABASE_URL`, and a random `JWT_SECRET` of at least
+  32 characters;
+- exact `ALLOWED_ORIGINS=https://koom.com.kg`;
+- `SMS_PROVIDER=twilio` with a valid account token and sender ID or messaging
+  service;
+- `TRUSTED_PROXY_CIDRS` set to the actual private proxy subnet;
+- `TEST_AUTH_ENABLED=false` and `MODERATION_FAIL_CLOSED=true`.
 
-Do not expose the backend port directly to the internet in production. Bind the API to localhost through Docker Compose:
+The backup health check requires a recent validated database dump and media
+archive plus `offsite=uploaded`. Configure `BACKUP_S3_URI` and AWS credentials
+or a working instance role before treating backups as healthy. The script can
+create local-only backups, but those do not pass the production health check.
 
-```yaml
-ports:
-  - "127.0.0.1:8080:8080"
-```
+## First deployment
 
-## 3. HTTPS reverse proxy
-
-Install Caddy on the server and use this Caddyfile:
-
-```caddyfile
-koom.com.kg {
-    reverse_proxy 127.0.0.1:8080
-}
-```
-
-Then reload Caddy:
-
-```bash
-sudo systemctl reload caddy
-sudo systemctl status caddy
-```
-
-The public healthcheck should be:
-
-```bash
-curl https://koom.com.kg/api/health
-```
-
-Expected response:
-
-```json
-{"status":"ok"}
-```
-
-## 4. Production environment
-
-Use `APP_ENV=production` and do not use development secrets.
-
-Required values:
-
-```env
-APP_ENV=production
-DATABASE_URL=postgres://...
-JWT_SECRET=<long random secret, at least 32 chars>
-ALLOWED_ORIGINS=https://koom.com.kg
-SMS_PROVIDER=twilio
-TWILIO_ACCOUNT_SID=<Twilio Account SID>
-TWILIO_AUTH_TOKEN=<Twilio Auth Token>
-SMS_FROM=KOOM
-RUN_MIGRATIONS_ON_START=false
-```
-
-The API supports Twilio for production phone verification. Configure `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and either an approved `SMS_FROM` sender ID or a Twilio Messaging Service SID in `.env.prod`. `SMS_PROVIDER=dev` and `SMS_PROVIDER=disabled` are rejected in production. Never commit these credentials.
-
-Staging also enforces production safety limits for CORS, admin allowlists, moderation, token lifetime, backend instance count, and automatic migrations. Test authentication remains local/dev/test only.
-
-Set `TRUSTED_PROXY_CIDRS` to the narrow private subnet used by the reverse proxy to reach the API. Do not trust all private address ranges; the API uses forwarded IPs for auth rate limiting only when the direct peer is trusted.
-
-## 5. Migrations
-
-Run migrations before starting or updating the production API:
+Run these commands from the stable production repository directory after
+creating `.env.prod` and the external Docker networks:
 
 ```bash
-docker compose -f docker-compose.prod.example.yml run --rm api /app/koom-migrate
+sudo docker compose -f docker-compose.prod.yml --env-file .env.prod config -q
+sudo docker compose -f docker-compose.prod.yml --env-file .env.prod build api migrate backup
+sudo docker compose -f docker-compose.prod.yml --env-file .env.prod up -d postgres
+sudo docker compose -f docker-compose.prod.yml --env-file .env.prod run --rm migrate
+sudo docker compose -f docker-compose.prod.yml --env-file .env.prod up -d api caddy backup
 ```
 
-## 6. Mobile app API URL
+## Routine backend release
 
-The Flutter app default API URL is:
+The GitHub workflow verifies tests, static analysis, vulnerability checks, and
+builds before deployment. On the server it builds the API and migration images,
+runs migrations, then updates the API and Caddy. If backup scripts or the
+backup image change, rebuild and recreate the backup service as part of the
+release too.
 
-```text
-https://koom.com.kg
-```
+Before a manual recovery or migration, take a fresh database and media backup.
+Application rollback does not automatically reverse database migrations, so
+only deploy schema changes that remain compatible with the previous API image.
 
-For custom builds, override it with:
+## Post-deployment checks
 
 ```bash
-flutter build apk --dart-define=API_BASE_URL=https://koom.com.kg
+curl --fail https://koom.com.kg/api/health
+sudo docker compose -f docker-compose.prod.yml --env-file .env.prod ps
+sudo docker compose -f docker-compose.prod.yml --env-file .env.prod logs --tail=100 api caddy backup
 ```
 
-## 7. Security notes
+The health endpoint returns `{"status":"ok","database":"ok"}` when the API
+can reach PostgreSQL. Confirm the backup worker is healthy and that the latest
+database and media archives have matching checksum files and were uploaded
+offsite.
 
-- Keep backend port `8080` private.
-- Use exact `ALLOWED_ORIGINS`, not `*`, for production.
-- Store secrets outside Git.
-- Integrate and configure a real SMS provider before allowing public sign-in.
-- Rotate `JWT_SECRET` if it was ever exposed.
-- Keep Caddy, Docker, and OS packages updated.
+## Mobile API URL
+
+Android and iOS production builds should use `https://koom.com.kg`. The mobile
+workflows use that value by default and require HTTPS for manual overrides.
