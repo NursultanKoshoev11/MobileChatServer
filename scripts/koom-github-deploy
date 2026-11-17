@@ -1,0 +1,158 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+readonly APP_DIR=/opt/projects/MobileChatServer
+readonly ENV_FILE="$APP_DIR/.env.prod"
+readonly COMPOSE_FILE="$APP_DIR/docker-compose.prod.yml"
+readonly API_URL=http://10.0.0.150:8080/api/health
+readonly PUBLIC_API_URL=https://koom.com.kg/api/health
+readonly API_IMAGE=mobilechatserver-api
+readonly MIGRATE_IMAGE=mobilechatserver-migrate
+
+health_check() {
+  local url="$1"
+  local response
+  response="$(curl --fail --silent --show-error --max-time 12 "$url")"
+  if ! grep -Eq '"database"[[:space:]]*:[[:space:]]*"ok"' <<<"$response" \
+    || ! grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' <<<"$response"; then
+    echo "Health endpoint returned an unhealthy response: $url" >&2
+    return 1
+  fi
+}
+
+preflight() {
+  if [[ ! -d "$APP_DIR" || ! -f "$ENV_FILE" || ! -f "$COMPOSE_FILE" ]]; then
+    echo "KOOM production files are missing from the configured server directory." >&2
+    return 1
+  fi
+
+  local provider
+  provider="$(sed -n 's/^SMS_PROVIDER[[:space:]]*=[[:space:]]*\([^[:space:]#]*\).*/\1/p' "$ENV_FILE" | tail -n 1)"
+  if [[ "$provider" != twilio ]] \
+    || ! grep -Eq '^TWILIO_ACCOUNT_SID[[:space:]]*=[[:space:]]*[^[:space:]#]+' "$ENV_FILE" \
+    || ! grep -Eq '^TWILIO_AUTH_TOKEN[[:space:]]*=[[:space:]]*[^[:space:]#]+' "$ENV_FILE" \
+    || { ! grep -Eq '^SMS_FROM[[:space:]]*=[[:space:]]*[^[:space:]#]+' "$ENV_FILE" \
+         && ! grep -Eq '^TWILIO_MESSAGING_SERVICE_SID[[:space:]]*=[[:space:]]*[^[:space:]#]+' "$ENV_FILE"; }; then
+    echo "Production SMS is not configured. Set SMS_PROVIDER=twilio, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and SMS_FROM or TWILIO_MESSAGING_SERVICE_SID in .env.prod." >&2
+    return 1
+  fi
+
+  local api_status postgres_status
+  api_status="$(sudo docker inspect --format '{{.State.Health.Status}}' mobilechat-api 2>/dev/null || true)"
+  postgres_status="$(sudo docker inspect --format '{{.State.Health.Status}}' mobilechat-postgres 2>/dev/null || true)"
+  if [[ "$api_status" != healthy || "$postgres_status" != healthy ]]; then
+    echo "Production services must be healthy before deployment (API: ${api_status:-missing}, database: ${postgres_status:-missing})." >&2
+    return 1
+  fi
+
+  echo "Production prerequisites are ready."
+}
+
+if [[ "${1:-}" == --preflight && $# == 1 ]]; then
+  preflight
+  exit $?
+fi
+
+if [[ $# != 1 || ! "$1" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "Usage: koom-github-deploy --preflight | <full-git-sha>" >&2
+  exit 64
+fi
+
+target_sha="$1"
+preflight
+
+work_dir="$(mktemp -d /tmp/koom-github-deploy.XXXXXXXX)"
+chmod 700 "$work_dir"
+deployment_started=0
+previous_api=""
+previous_migrate=""
+
+on_exit() {
+  local status=$?
+  trap - EXIT
+  if (( status != 0 && deployment_started == 1 )); then
+    echo "Deployment failed; restoring the previous API and migration images." >&2
+    set +e
+    if [[ -n "$previous_api" && -n "$previous_migrate" ]]; then
+      sudo docker tag "$previous_api" "$API_IMAGE:latest"
+      sudo docker tag "$previous_migrate" "$MIGRATE_IMAGE:latest"
+      cd "$APP_DIR"
+      sudo docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --no-deps --no-build api
+      sleep 4
+      health_check "$API_URL"
+      health_check "$PUBLIC_API_URL"
+    fi
+  fi
+  rm -rf -- "$work_dir"
+  exit "$status"
+}
+trap on_exit EXIT
+
+# The payload is expected to be a small image bundle; keep a malformed stream
+# from filling the server's root filesystem.
+ulimit -f 524288
+cat > "$work_dir/package.tar.gz"
+if [[ ! -s "$work_dir/package.tar.gz" ]]; then
+  echo "The deployment package is empty." >&2
+  exit 1
+fi
+
+expected_entries=$'deploy-sha.txt\nimages.tar'
+actual_entries="$(tar -tzf "$work_dir/package.tar.gz" | LC_ALL=C sort)"
+if [[ "$actual_entries" != "$expected_entries" ]] \
+  || ! tar -tvzf "$work_dir/package.tar.gz" | awk 'substr($0, 1, 1) != "-" { bad=1 } END { exit bad }'; then
+  echo "The deployment archive contains unexpected entries." >&2
+  exit 1
+fi
+
+tar -xOzf "$work_dir/package.tar.gz" deploy-sha.txt > "$work_dir/deploy-sha.txt"
+package_sha="$(tr -d '\r\n' < "$work_dir/deploy-sha.txt")"
+if [[ "$package_sha" != "$target_sha" ]]; then
+  echo "The package commit does not match the requested deployment commit." >&2
+  exit 1
+fi
+tar -xOzf "$work_dir/package.tar.gz" images.tar > "$work_dir/images.tar"
+
+sudo docker load --input "$work_dir/images.tar"
+api_revision="$(sudo docker image inspect --format='{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$API_IMAGE:deploy")"
+migrate_revision="$(sudo docker image inspect --format='{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$MIGRATE_IMAGE:deploy")"
+if [[ "$api_revision" != "$target_sha" || "$migrate_revision" != "$target_sha" ]]; then
+  echo "The image revision does not match the requested deployment commit." >&2
+  exit 1
+fi
+
+previous_api="$(sudo docker image inspect --format='{{.Id}}' "$API_IMAGE:latest")"
+previous_migrate="$(sudo docker image inspect --format='{{.Id}}' "$MIGRATE_IMAGE:latest")"
+deployment_started=1
+sudo docker tag "$previous_api" "$API_IMAGE:rollback"
+sudo docker tag "$previous_migrate" "$MIGRATE_IMAGE:rollback"
+sudo docker tag "$API_IMAGE:deploy" "$API_IMAGE:latest"
+sudo docker tag "$MIGRATE_IMAGE:deploy" "$MIGRATE_IMAGE:latest"
+sudo docker image rm "$API_IMAGE:deploy" "$MIGRATE_IMAGE:deploy" >/dev/null
+
+cd "$APP_DIR"
+sudo docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" run --rm --no-deps --no-build migrate
+sudo docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --no-deps --no-build api
+
+for attempt in {1..30}; do
+  status="$(sudo docker inspect --format '{{.State.Health.Status}}' mobilechat-api 2>/dev/null || true)"
+  if [[ "$status" == healthy ]]; then
+    break
+  fi
+  if [[ "$attempt" == 30 ]]; then
+    echo "The updated API did not become healthy." >&2
+    exit 1
+  fi
+  sleep 2
+done
+
+running_revision="$(sudo docker inspect --format='{{ index .Config.Labels "org.opencontainers.image.revision" }}' mobilechat-api)"
+if [[ "$running_revision" != "$target_sha" ]]; then
+  echo "The running API image revision does not match the requested commit." >&2
+  exit 1
+fi
+health_check "$API_URL"
+health_check "$PUBLIC_API_URL"
+
+deployment_started=0
+echo "KOOM API deployment completed for ${target_sha}."
