@@ -37,7 +37,7 @@ const childSafetyStandardsHTML = `<!doctype html>
 <main>
   <article class="card">
     <h1>Koom Child Safety Standards</h1>
-    <p class="muted">Last updated: July 9, 2026</p>
+    <p class="muted">Last updated: November 17, 2026</p>
     <p>Koom is committed to protecting children and providing a safe communication environment for communities. These standards describe our rules and enforcement approach for child safety.</p>
 
     <div class="notice">

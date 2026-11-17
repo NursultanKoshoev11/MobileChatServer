@@ -37,7 +37,7 @@ const privacyPolicyHTML = `<!doctype html>
 <main>
   <article class="card">
     <h1>Koom Privacy Policy</h1>
-    <p class="muted">Last updated: July 9, 2026</p>
+    <p class="muted">Last updated: November 17, 2026</p>
     <p>Koom is a community communication application for groups, posts, comments, voting, public requests, media sharing, notifications, and related community features. This Privacy Policy explains what information we collect, how we use it, and what choices users have.</p>
 
     <h2>1. Information we collect</h2>
