@@ -1,0 +1,90 @@
+name: Deploy KOOM website
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - internal/httpapi/home.ru.html
+      - internal/httpapi/home.kg.html
+      - internal/httpapi/site-assets/**
+  push:
+    branches:
+      - main
+    paths:
+      - internal/httpapi/home.ru.html
+      - internal/httpapi/home.kg.html
+      - internal/httpapi/site-assets/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: koom-static-site
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: Package static website
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+      - name: Prepare static site bundle
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          bundle_dir="$RUNNER_TEMP/koom-site"
+          mkdir -p "$bundle_dir/assets" "$bundle_dir/kg"
+          cp internal/httpapi/home.ru.html "$bundle_dir/index.html"
+          cp internal/httpapi/home.kg.html "$bundle_dir/kg/index.html"
+          cp internal/httpapi/site-assets/koom-icon.png "$bundle_dir/assets/koom-icon.png"
+          cp internal/httpapi/site-assets/og-cover.png "$bundle_dir/assets/og-cover.png"
+          cp internal/httpapi/site-assets/site.css "$bundle_dir/assets/site.css"
+          printf '%s\n' "$GITHUB_SHA" > "$bundle_dir/deploy-sha.txt"
+          tar -C "$bundle_dir" -czf "$RUNNER_TEMP/koom-site.tar.gz" \
+            assets/koom-icon.png assets/og-cover.png assets/site.css deploy-sha.txt index.html kg/index.html
+      - name: Upload static site package
+        uses: actions/upload-artifact@v7
+        with:
+          name: koom-site-${{ github.sha }}
+          path: ${{ runner.temp }}/koom-site.tar.gz
+          if-no-files-found: error
+          retention-days: 2
+
+  deploy:
+    name: Publish to the Koom edge server
+    needs: package
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 10
+    steps:
+      - name: Check out pinned edge host key
+        uses: actions/checkout@v7
+      - name: Download static site package
+        uses: actions/download-artifact@v8
+        with:
+          name: koom-site-${{ github.sha }}
+          path: ${{ runner.temp }}/koom-site
+      - name: Configure restricted SSH access
+        shell: bash
+        env:
+          KOOM_PROD_DEPLOY_KEY: ${{ secrets.KOOM_PROD_DEPLOY_KEY }}
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$KOOM_PROD_DEPLOY_KEY" > "$HOME/.ssh/koom-production"
+          chmod 600 "$HOME/.ssh/koom-production"
+          install -m 600 .github/koom-edge-known-hosts "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/koom-production" >/dev/null
+      - name: Verify edge and deploy website
+        shell: bash
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
+          ssh_opts=(-i "$HOME/.ssh/koom-production" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts" -o ConnectTimeout=10)
+          ssh "${ssh_opts[@]}" opc@139.185.53.169 preflight
+          ssh "${ssh_opts[@]}" opc@139.185.53.169 "deploy $GITHUB_SHA" < "$RUNNER_TEMP/koom-site/koom-site.tar.gz"

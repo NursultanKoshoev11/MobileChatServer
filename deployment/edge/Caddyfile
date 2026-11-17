@@ -1,0 +1,59 @@
+{
+	email nursultankosoev2@gmail.com
+	acme_ca https://acme-v02.api.letsencrypt.org/directory
+}
+
+koom.com.kg {
+	encode zstd gzip
+
+	@mcpwork path /mcp-work/*
+	handle @mcpwork {
+		reverse_proxy mcpforwork-hub:3000
+	}
+
+	@mcpagent path /mcp-agent
+	handle @mcpagent {
+		reverse_proxy mcpforwork-hub:3000
+	}
+
+	@whatsapp path /whatsapp/webhook*
+	handle @whatsapp {
+		reverse_proxy 10.0.0.150:8080
+	}
+
+	@koom_home path /
+	handle @koom_home {
+		root * /srv/koom-site/current
+		header Cache-Control "no-cache"
+		header Content-Security-Policy "default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; script-src 'none'"
+		header X-Content-Type-Options "nosniff"
+		rewrite * /index.html
+		file_server
+	}
+
+	@koom_kg path /kg /kg/
+	handle @koom_kg {
+		root * /srv/koom-site/current
+		header Cache-Control "no-cache"
+		header Content-Security-Policy "default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; script-src 'none'"
+		header X-Content-Type-Options "nosniff"
+		rewrite * /kg/index.html
+		file_server
+	}
+
+	@koom_assets path /assets/*
+	handle @koom_assets {
+		root * /srv/koom-site/current
+		header Cache-Control "public, max-age=86400"
+		header X-Content-Type-Options "nosniff"
+		file_server
+	}
+
+	handle {
+		reverse_proxy 10.0.0.150:8080
+	}
+}
+
+www.koom.com.kg {
+	redir https://koom.com.kg{uri} permanent
+}
