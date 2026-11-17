@@ -23,7 +23,7 @@ func (s *Server) homePage(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "public, max-age=300")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; script-src 'none'")
+	setSiteSecurityHeaders(w, false)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(content)
 }
