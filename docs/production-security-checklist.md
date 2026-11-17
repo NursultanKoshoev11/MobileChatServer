@@ -27,6 +27,9 @@ Required authorization rules:
 ## Deployment
 
 - Use HTTPS in production.
+- Verify HSTS, CSP, `X-Content-Type-Options`, `X-Frame-Options`,
+  `Referrer-Policy`, and `Permissions-Policy` on each public HTML page after
+  deployment; reverse-proxy configuration alone may not match the running server.
 - Store secrets in environment variables or a secret manager.
 - Keep `.env` and signing keys outside Docker images.
 - Run server CI (`go test`, `go vet`, and pinned `govulncheck`), CodeQL for Go, and
