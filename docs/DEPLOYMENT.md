@@ -18,7 +18,7 @@ and proxies requests to the API container.
   mount paths before moving the deployment.
 
 The restricted host-side deploy helper uses
-`/opt/projects/MobileChatServer`. Production deploy run 9 reached the host but
+`/opt/projects/MobileChatServer`. Production deploy run 11 reached the host but
 stopped in preflight because Twilio SMS is not configured. That check confirms
 the directory, `.env.prod`, and Compose file exist; it stopped before checking
 container health, loading images, or applying migrations. An earlier runner
