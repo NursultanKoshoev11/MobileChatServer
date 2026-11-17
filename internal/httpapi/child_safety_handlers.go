@@ -15,17 +15,23 @@ const childSafetyStandardsHTML = `<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Koom Child Safety Standards</title>
   <style>
-    :root{color-scheme:light;--bg:#f6f8fb;--card:#ffffff;--text:#172033;--muted:#5f6b7a;--line:#d9e1ec;--brand:#0b66d8;}
+    :root{color-scheme:light;--bg:#f7f9ff;--card:#ffffff;--text:#10254f;--muted:#617191;--line:#dce6f5;--brand:#0878f9;}
     *{box-sizing:border-box}
-    body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;line-height:1.65}
-    main{max-width:980px;margin:0 auto;padding:32px 18px 56px}
-    .card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:30px;box-shadow:0 8px 30px rgba(17,24,39,.06)}
-    h1{font-size:34px;line-height:1.2;margin:0 0 8px}
-    h2{font-size:22px;margin:34px 0 10px;border-top:1px solid var(--line);padding-top:22px}
-    p,li{font-size:16px} ul{padding-left:22px} .muted{color:var(--muted)} a{color:var(--brand)} .notice{background:#eef6ff;border:1px solid #cfe4ff;border-radius:14px;padding:14px 16px;margin:18px 0}
+    body{margin:0;background:linear-gradient(180deg,#edf5ff 0,#f7f9ff 280px);color:var(--text);font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;line-height:1.7}
+    .policy-top{height:72px;display:flex;align-items:center;justify-content:space-between;padding:0 max(22px,calc((100% - 980px)/2));border-bottom:1px solid #dce6f5;background:#f7f9ffeb}
+    .policy-brand{display:flex;align-items:center;gap:10px;color:var(--text);font-size:20px;font-weight:850;letter-spacing:-.04em;text-decoration:none}
+    .policy-brand img{width:36px;height:36px;border-radius:12px}
+    .policy-home{color:#506383;font-size:13px;font-weight:700;text-decoration:none}.policy-home:hover{color:var(--brand)}
+    main{max-width:980px;margin:0 auto;padding:38px 18px 64px}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:22px;padding:clamp(24px,5vw,46px);box-shadow:0 18px 55px rgba(17,45,86,.08)}
+    h1{font-size:clamp(30px,5vw,40px);line-height:1.15;letter-spacing:-.045em;margin:0 0 8px}
+    h2{font-size:21px;letter-spacing:-.025em;margin:32px 0 10px;border-top:1px solid var(--line);padding-top:22px}
+    p,li{font-size:15px} ul{padding-left:22px} li{padding-left:3px;margin:6px 0}.muted{color:var(--muted)} a{color:var(--brand)} .notice{background:#eef6ff;border:1px solid #cfe4ff;border-radius:14px;padding:14px 16px;margin:18px 0}
+    @media(max-width:600px){.policy-top{height:64px;padding:0 18px}main{padding:22px 14px 40px}.card{border-radius:17px}p,li{font-size:14px}}
   </style>
 </head>
 <body>
+<header class="policy-top"><a class="policy-brand" href="/"><img src="/assets/koom-icon.png" alt="">KOOM</a><a class="policy-home" href="/">Back to KOOM ↗</a></header>
 <main>
   <article class="card">
     <h1>Koom Child Safety Standards</h1>
