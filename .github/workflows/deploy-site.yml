@@ -40,11 +40,12 @@ jobs:
           cp internal/httpapi/home.ru.html "$bundle_dir/index.html"
           cp internal/httpapi/home.kg.html "$bundle_dir/kg/index.html"
           cp internal/httpapi/site-assets/koom-icon.png "$bundle_dir/assets/koom-icon.png"
+          cp internal/httpapi/site-assets/koom-icon.svg "$bundle_dir/assets/koom-icon.svg"
           cp internal/httpapi/site-assets/og-cover.png "$bundle_dir/assets/og-cover.png"
           cp internal/httpapi/site-assets/site.css "$bundle_dir/assets/site.css"
           printf '%s\n' "$GITHUB_SHA" > "$bundle_dir/deploy-sha.txt"
           tar -C "$bundle_dir" -czf "$RUNNER_TEMP/koom-site.tar.gz" \
-            assets/koom-icon.png assets/og-cover.png assets/site.css deploy-sha.txt index.html kg/index.html
+            assets/koom-icon.png assets/koom-icon.svg assets/og-cover.png assets/site.css deploy-sha.txt index.html kg/index.html
       - name: Upload static site package
         uses: actions/upload-artifact@v7
         with:

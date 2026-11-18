@@ -10,7 +10,7 @@ a:focus-visible,summary:focus-visible{outline:3px solid #16b9e5;outline-offset:4
 .top{position:sticky;top:0;z-index:10;background:#f7f9ffeb;border-bottom:1px solid #dce6f5b3;backdrop-filter:blur(18px)}
 .nav{height:82px;display:flex;align-items:center;justify-content:space-between;gap:28px}
 .brand{display:flex;align-items:center;gap:11px;text-decoration:none;font-weight:850;font-size:23px;letter-spacing:-.045em}
-.brand img{width:42px;height:42px;border-radius:14px}
+.brand img{width:42px;height:42px;clip-path:circle(42.7% at 50% 50%)}
 .navlinks{display:flex;align-items:center;gap:34px}
 .navlinks a,.language a{font-size:14px;font-weight:650;text-decoration:none;color:#506383;transition:color .2s}
 .navlinks a:hover,.language a:hover,.footer-links a:hover{color:var(--blue)}
