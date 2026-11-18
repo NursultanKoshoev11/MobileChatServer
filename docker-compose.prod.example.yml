@@ -5,6 +5,16 @@ services:
       dockerfile: Dockerfile
     container_name: koom-api
     restart: unless-stopped
+    mem_limit: ${API_MEM_LIMIT:-768m}
+    cpus: ${API_CPUS:-1.0}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # Opt-in; the API writes only to PUBLIC_FILE_DIR and /tmp.
+    read_only: ${API_READ_ONLY_ROOTFS:-false}
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=${API_TMPFS_SIZE:-128m}
     environment:
       APP_ENV: production
       PORT: 8080
@@ -17,6 +27,8 @@ services:
       SMSPRO_LOGIN: ${SMSPRO_LOGIN:-}
       SMSPRO_PASSWORD: ${SMSPRO_PASSWORD:-}
       SMSPRO_SENDER: ${SMSPRO_SENDER:-}
+      SMS_ALLOWED_COUNTRY_PREFIXES: ${SMS_ALLOWED_COUNTRY_PREFIXES:-+996}
+      SMS_GLOBAL_HOURLY_MAX: ${SMS_GLOBAL_HOURLY_MAX:-500}
       FCM_PROJECT_ID: ${FCM_PROJECT_ID:-}
       FCM_CLIENT_EMAIL: ${FCM_CLIENT_EMAIL:-}
       FCM_PRIVATE_KEY: ${FCM_PRIVATE_KEY:-}
