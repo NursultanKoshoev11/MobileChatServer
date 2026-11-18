@@ -25,6 +25,15 @@ func (s *Service) CreateInviteRequest(ctx context.Context, inviterID, groupID, t
 		if err := repo.CanInviteToGroup(ctx, groupID, inviterID, targetUserID); err != nil {
 			return err
 		}
+		// Inviting an existing member only produced a dangling invite and a
+		// misleading push notification.
+		isMember, err := repo.IsGroupMember(ctx, groupID, targetUserID)
+		if err != nil {
+			return err
+		}
+		if isMember {
+			return NewValidationError("user is already a member of this group")
+		}
 		var createErr error
 		invite, createErr = repo.CreateInviteRequest(ctx, inviteInput)
 		return createErr

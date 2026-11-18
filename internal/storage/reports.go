@@ -267,6 +267,24 @@ func (r *Repository) BlockUser(ctx context.Context, blockerID, blockedID string)
 	return nil
 }
 
+// ListUserIDsBlocking returns the users who blocked blockedID.
+func (r *Repository) ListUserIDsBlocking(ctx context.Context, blockedID string) ([]string, error) {
+	rows, err := r.db.Query(ctx, `SELECT blocker_id FROM user_blocks WHERE blocked_id = $1`, strings.TrimSpace(blockedID))
+	if err != nil {
+		return nil, fmt.Errorf("list users blocking: %w", err)
+	}
+	defer rows.Close()
+	ids := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan blocker id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 func (r *Repository) UnblockUser(ctx context.Context, blockerID, blockedID string) error {
 	if _, err := r.db.Exec(ctx, `DELETE FROM user_blocks WHERE blocker_id = $1 AND blocked_id = $2`, blockerID, blockedID); err != nil {
 		return fmt.Errorf("unblock user: %w", err)

@@ -10,12 +10,33 @@ import (
 )
 
 func (r *Repository) CreateInviteRequest(ctx context.Context, invite domain.InviteRequest) (domain.InviteRequest, error) {
+	// One pending invite per user and group: refresh it if it exists, otherwise
+	// insert. Answered (accepted/declined) invites are history and must not
+	// block a new invite (see migration 0029). The statement does not name a
+	// conflict target so it works both before and after that migration.
 	query := `
-		INSERT INTO group_invite_requests (id, group_id, inviter_id, target_user_id, status, created_at)
-		VALUES ($1, $2, $3, $4, 'pending', now())
-		ON CONFLICT (group_id, target_user_id, status) DO UPDATE SET created_at = EXCLUDED.created_at
-		RETURNING id, created_at`
-	if err := r.db.QueryRow(ctx, query, invite.ID, invite.GroupID, invite.InviterID, invite.TargetUserID).Scan(&invite.ID, &invite.CreatedAt); err != nil {
+		WITH refreshed AS (
+			UPDATE group_invite_requests SET created_at = now()
+			WHERE group_id = $2 AND target_user_id = $4 AND status = 'pending'
+			RETURNING id, created_at
+		), inserted AS (
+			INSERT INTO group_invite_requests (id, group_id, inviter_id, target_user_id, status, created_at)
+			SELECT $1, $2, $3, $4, 'pending', now()
+			WHERE NOT EXISTS (SELECT 1 FROM refreshed)
+			ON CONFLICT DO NOTHING
+			RETURNING id, created_at
+		)
+		SELECT id, created_at FROM refreshed
+		UNION ALL
+		SELECT id, created_at FROM inserted`
+	err := r.db.QueryRow(ctx, query, invite.ID, invite.GroupID, invite.InviterID, invite.TargetUserID).Scan(&invite.ID, &invite.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// A concurrent request inserted the pending invite first.
+		err = r.db.QueryRow(ctx, `
+			SELECT id, created_at FROM group_invite_requests
+			WHERE group_id = $1 AND target_user_id = $2 AND status = 'pending'`, invite.GroupID, invite.TargetUserID).Scan(&invite.ID, &invite.CreatedAt)
+	}
+	if err != nil {
 		return domain.InviteRequest{}, fmt.Errorf("create invite request: %w", err)
 	}
 	invite.Status = "pending"

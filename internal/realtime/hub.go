@@ -217,6 +217,41 @@ func (h *Hub) BroadcastGroup(groupID string, event Event) {
 	}
 }
 
+// BroadcastGroupAndUsers delivers event exactly once to every socket that is
+// subscribed to groupID or belongs to one of userIDs. A user's group socket is
+// also registered as one of that user's sockets, so delivering to the group and
+// then to each user separately would send the same event twice. Sockets of
+// skipUserIDs receive nothing (for example members who blocked the author).
+func (h *Hub) BroadcastGroupAndUsers(groupID string, userIDs []string, skipUserIDs []string, event Event) {
+	skip := make(map[string]bool, len(skipUserIDs))
+	for _, userID := range skipUserIDs {
+		skip[userID] = true
+	}
+	h.mu.RLock()
+	seen := make(map[*Client]bool)
+	clients := make([]*Client, 0, len(h.groups[groupID]))
+	add := func(client *Client) {
+		if seen[client] || skip[client.UserID] {
+			return
+		}
+		seen[client] = true
+		clients = append(clients, client)
+	}
+	for client := range h.groups[groupID] {
+		add(client)
+	}
+	for _, userID := range userIDs {
+		for client := range h.users[userID] {
+			add(client)
+		}
+	}
+	h.mu.RUnlock()
+	event = h.prepareEvent(event)
+	for _, client := range clients {
+		h.deliver(client, event)
+	}
+}
+
 func (h *Hub) NotifyUser(userID string, event Event) {
 	h.mu.RLock()
 	clients := make([]*Client, 0, len(h.users[userID]))
