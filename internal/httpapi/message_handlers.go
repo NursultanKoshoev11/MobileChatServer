@@ -19,7 +19,7 @@ func (s *Server) updateMessage(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, err)
 		return
 	}
-	s.broadcastGroupAndUsers(r, groupID, realtime.Event{Type: "message.updated", GroupID: groupID, Payload: message})
+	s.broadcastAuthoredContent(r, groupID, message.SenderID, realtime.Event{Type: "message.updated", GroupID: groupID, Payload: message})
 	writeJSON(w, http.StatusOK, message)
 }
 

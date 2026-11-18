@@ -23,7 +23,7 @@ func (s *Server) createPublicRequest(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, err)
 		return
 	}
-	s.broadcastGroupAndUsers(r, groupID, realtime.Event{Type: "public_request.created", GroupID: groupID, Payload: request})
+	s.broadcastAuthoredContent(r, groupID, request.AuthorID, realtime.Event{Type: "public_request.created", GroupID: groupID, Payload: request})
 	writeJSON(w, http.StatusCreated, request)
 }
 
@@ -100,7 +100,7 @@ func (s *Server) createPublicRequestComment(w http.ResponseWriter, r *http.Reque
 		s.writeError(w, err)
 		return
 	}
-	s.broadcastPublicRequestRefresh(r, requestID, "public_request.comment_created", map[string]any{"request_id": requestID, "comment": comment})
+	s.broadcastPublicRequestRefresh(r, requestID, comment.AuthorID, "public_request.comment_created", map[string]any{"request_id": requestID, "comment": comment})
 	writeJSON(w, http.StatusCreated, comment)
 }
 
@@ -120,7 +120,7 @@ func (s *Server) deletePublicRequestComment(w http.ResponseWriter, r *http.Reque
 		s.writeError(w, err)
 		return
 	}
-	s.broadcastPublicRequestRefresh(r, requestID, "public_request.comment_deleted", map[string]string{"request_id": requestID, "comment_id": commentID})
+	s.broadcastPublicRequestRefresh(r, requestID, "", "public_request.comment_deleted", map[string]string{"request_id": requestID, "comment_id": commentID})
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
@@ -134,7 +134,7 @@ func (s *Server) updatePublicRequestStatus(w http.ResponseWriter, r *http.Reques
 		s.writeError(w, err)
 		return
 	}
-	s.broadcastPublicRequestRefresh(r, requestID, "public_request.status_updated", map[string]string{"request_id": requestID, "status": string(input.Status)})
+	s.broadcastPublicRequestRefresh(r, requestID, "", "public_request.status_updated", map[string]string{"request_id": requestID, "status": string(input.Status)})
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }
 
@@ -161,7 +161,10 @@ func (s *Server) broadcastVoteUpdate(r *http.Request, eventType string, update d
 	s.hub.NotifyUser(currentUser(r).ID, realtime.Event{Type: eventType, GroupID: ctx.GroupID, Payload: update})
 }
 
-func (s *Server) broadcastPublicRequestRefresh(r *http.Request, requestID string, eventType string, payload any) {
+// broadcastPublicRequestRefresh broadcasts an event about requestID to its
+// group. contentAuthorID is set for authored content (a new comment) so that
+// members who blocked the author do not receive it.
+func (s *Server) broadcastPublicRequestRefresh(r *http.Request, requestID string, contentAuthorID string, eventType string, payload any) {
 	ctx, err := s.svc.GetPublicRequestRealtimeContext(r.Context(), requestID)
 	if err != nil {
 		s.logger.Printf("public request realtime context failed request_id=%q type=%q error=%q", requestID, eventType, err.Error())
@@ -171,7 +174,7 @@ func (s *Server) broadcastPublicRequestRefresh(r *http.Request, requestID string
 		s.logger.Printf("public request realtime skipped: empty group_id request_id=%q type=%q", requestID, eventType)
 		return
 	}
-	s.broadcastGroupAndUsers(r, ctx.GroupID, realtime.Event{Type: eventType, GroupID: ctx.GroupID, Payload: payload})
+	s.broadcastAuthoredContent(r, ctx.GroupID, contentAuthorID, realtime.Event{Type: eventType, GroupID: ctx.GroupID, Payload: payload})
 }
 
 func (s *Server) markPublicRequestsRead(w http.ResponseWriter, r *http.Request) {

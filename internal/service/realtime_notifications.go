@@ -108,8 +108,35 @@ func (s *Service) cleanupInvalidPushTokens(ctx context.Context, tokens []string)
 }
 
 
-func (s *Service) NotifyGroupAboutMessageUpdated(ctx context.Context, actorID string, message domain.Message) {
+// messageAudience lists the members to notify about message: everyone but the
+// actor and the members who blocked the message's sender.
+func (s *Service) messageAudience(ctx context.Context, actorID string, message domain.Message) ([]string, error) {
 	memberIDs, err := s.ListGroupMemberIDsExcept(ctx, message.GroupID, actorID)
+	if err != nil {
+		return nil, err
+	}
+	blockers, err := s.repo.ListUserIDsBlocking(ctx, message.SenderID)
+	if err != nil {
+		return nil, err
+	}
+	if len(blockers) == 0 {
+		return memberIDs, nil
+	}
+	blocked := make(map[string]bool, len(blockers))
+	for _, id := range blockers {
+		blocked[id] = true
+	}
+	audience := make([]string, 0, len(memberIDs))
+	for _, id := range memberIDs {
+		if !blocked[id] {
+			audience = append(audience, id)
+		}
+	}
+	return audience, nil
+}
+
+func (s *Service) NotifyGroupAboutMessageUpdated(ctx context.Context, actorID string, message domain.Message) {
+	memberIDs, err := s.messageAudience(ctx, actorID, message)
 	if err != nil {
 		log.Printf("message.updated notification skipped group_id=%s message_id=%s error=%v", message.GroupID, message.ID, err)
 		return
@@ -126,7 +153,7 @@ func (s *Service) NotifyGroupAboutMessageUpdated(ctx context.Context, actorID st
 }
 
 func (s *Service) NotifyGroupAboutMessageDeleted(ctx context.Context, actorID string, message domain.Message) {
-	memberIDs, err := s.ListGroupMemberIDsExcept(ctx, message.GroupID, actorID)
+	memberIDs, err := s.messageAudience(ctx, actorID, message)
 	if err != nil {
 		log.Printf("message.deleted notification skipped group_id=%s message_id=%s error=%v", message.GroupID, message.ID, err)
 		return
