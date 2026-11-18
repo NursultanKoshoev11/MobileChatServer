@@ -25,6 +25,9 @@ import (
 
 const maxJSONBodyBytes = 2 * 1024 * 1024
 
+// backgroundNotifyTimeout bounds push notifications sent after a response.
+const backgroundNotifyTimeout = 30 * time.Second
+
 type userContextKey struct{}
 
 type Server struct {
@@ -463,7 +466,13 @@ func (s *Server) inviteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.hub.NotifyUser(target, realtime.Event{Type: "invite.created", GroupID: invite.GroupID, Payload: invite})
-	go s.svc.NotifyUserAboutInvite(r.Context(), target, invite)
+	// The request context is cancelled as soon as this handler returns, which
+	// would abort the push send; detach it but keep a bound on the work.
+	notifyCtx, cancelNotify := context.WithTimeout(context.WithoutCancel(r.Context()), backgroundNotifyTimeout)
+	go func() {
+		defer cancelNotify()
+		s.svc.NotifyUserAboutInvite(notifyCtx, target, invite)
+	}()
 	writeJSON(w, http.StatusCreated, invite)
 }
 
