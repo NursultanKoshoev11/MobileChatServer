@@ -34,3 +34,16 @@ backups/
 *.bak
 *.bak-*
 Caddyfile.backup-*
+
+# Secrets and key material
+*.pem
+*.key
+*.p12
+*.p8
+
+# Database dumps, archives and encrypted backups (migrations/*.sql stay tracked)
+*.dump
+*.dump.sha256
+*.sql.gz
+*.age
+backups/
