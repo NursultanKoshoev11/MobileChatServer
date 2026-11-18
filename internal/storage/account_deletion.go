@@ -15,8 +15,8 @@ func (r *Repository) DeleteAccount(ctx context.Context, userID, auditEventID str
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
 
-	var lockedUserID string
-	if err := tx.QueryRow(ctx, `SELECT id FROM users WHERE id = $1 FOR UPDATE`, userID).Scan(&lockedUserID); err != nil {
+	var lockedUserID, phone, phoneNumber string
+	if err := tx.QueryRow(ctx, `SELECT id, COALESCE(phone, ''), COALESCE(phone_number, '') FROM users WHERE id = $1 FOR UPDATE`, userID).Scan(&lockedUserID, &phone, &phoneNumber); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -72,6 +72,20 @@ func (r *Repository) DeleteAccount(ctx context.Context, userID, auditEventID str
 		INSERT INTO audit_events (id, actor_user_id, event_type, resource_type, metadata)
 		VALUES ($1, $2, 'account_deleted', 'account', '{"public_content":"anonymized"}'::jsonb)`, auditEventID, userID); err != nil {
 		return fmt.Errorf("record account deletion: %w", err)
+	}
+
+	// Verification codes are keyed by phone number, not user, so they are not
+	// covered by the users FK cascade.
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM phone_verification_codes
+		WHERE phone_number = ANY(ARRAY_REMOVE(ARRAY[NULLIF($1, ''), NULLIF($2, '')], NULL))`, phone, phoneNumber); err != nil {
+		return fmt.Errorf("delete phone verification codes: %w", err)
+	}
+	// Reports about this user as a person are moot once the account is gone.
+	// Reports about their (anonymized) content stay so moderators can still act.
+	// user_blocks rows in both directions are removed by the users FK cascade.
+	if _, err := tx.Exec(ctx, `DELETE FROM content_reports WHERE target_type = 'user' AND target_id = $1`, userID); err != nil {
+		return fmt.Errorf("delete reports about deleted user: %w", err)
 	}
 
 	result, err := tx.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)

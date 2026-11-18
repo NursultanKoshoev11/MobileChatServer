@@ -70,7 +70,9 @@ func (r *Repository) MatchLearnedModerationRules(ctx context.Context, groupID, n
 		FROM learned_moderation_rules
 		WHERE group_id IN ($1, '*')
 		  AND length(pattern) >= 4
-		  AND $2 LIKE '%' || pattern || '%'
+		  -- strpos is a literal substring test: '%' or '_' in a learned
+		  -- pattern must not act as LIKE wildcards and match unrelated text.
+		  AND strpos($2, pattern) > 0
 		ORDER BY weight DESC, updated_at DESC
 		LIMIT $3
 	`, groupID, normalizedText, limit)

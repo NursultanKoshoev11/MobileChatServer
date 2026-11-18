@@ -166,6 +166,13 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 		r.Post("/api/admin/group-creation-requests/{requestID}/reject", server.rejectGroupCreationRequest)
 		r.Post("/api/admin/group-creation-requests/{requestID}/need-more-info", server.needMoreInfoForGroupCreationRequest)
 		r.Delete("/api/admin/groups/{groupID}", server.deleteGroupAsPlatformAdmin)
+		r.Post("/api/reports", server.createReport)
+		r.Post("/api/reports/{reportID}/resolve", server.resolveReport)
+		r.Get("/api/groups/{groupID}/reports", server.listGroupReports)
+		r.Get("/api/admin/reports", server.listAdminReports)
+		r.Post("/api/users/{userID}/block", server.blockUser)
+		r.Delete("/api/users/{userID}/block", server.unblockUser)
+		r.Get("/api/me/blocks", server.listMyBlocks)
 	})
 
 	server.router = r
@@ -710,6 +717,10 @@ func strictRateLimitClass(method, path string) string {
 		// Invite codes are short; joining by code must not be guessable at the
 		// general API rate.
 		return "group-join-code"
+	case "/api/reports":
+		// Reports notify moderators; keep them off the general rate so they
+		// cannot be used to flood moderation queues.
+		return "report-create"
 	}
 	if strings.HasPrefix(path, "/api/groups/") && strings.HasSuffix(path, "/messages") {
 		return "message-create"
