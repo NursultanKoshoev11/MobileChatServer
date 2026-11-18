@@ -38,9 +38,11 @@ type Server struct {
 	// joinCodeLimiter caps invite-code attempts per account, on top of the
 	// per-IP strict limit, so rotating IPs does not help brute-force codes.
 	joinCodeLimiter *RateLimiter
-	trustedProxies  []net.IPNet
-	router          http.Handler
-	upgrader        websocket.Upgrader
+	// userLimiter limits authenticated requests per account.
+	userLimiter    *RateLimiter
+	trustedProxies []net.IPNet
+	router         http.Handler
+	upgrader       websocket.Upgrader
 }
 
 func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.Logger, allowedOrigins string, trustedProxyCIDRs ...string) http.Handler {
@@ -59,6 +61,7 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 		limiter:         NewRateLimiter(600, time.Minute),
 		strictLimiter:   NewRateLimiter(20, time.Minute),
 		joinCodeLimiter: NewRateLimiter(joinCodeAttemptsPerAccount, joinCodeAttemptWindow),
+		userLimiter:     NewRateLimiter(perUserRequestsPerWindow, perUserRequestWindow),
 		trustedProxies:  parseTrustedProxyCIDRs(strings.Join(trustedProxyCIDRs, ",")),
 	}
 	server.upgrader = websocket.Upgrader{
@@ -109,6 +112,7 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 
 	r.Group(func(r chi.Router) {
 		r.Use(server.auth)
+		r.Use(server.userRateLimit)
 		r.Get("/api/me", server.me)
 		r.Delete("/api/me", server.deleteMyAccount)
 		r.Put("/api/me/avatar", server.updateMyAvatar)
@@ -577,7 +581,7 @@ func (s *Server) groupWebSocket(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
 	groupID := chi.URLParam(r, "groupID")
 	remoteIP := s.clientIP(r)
-	if !s.strictLimiter.Allow("ws:" + remoteIP) {
+	if !s.strictLimiter.Allow("ws:" + rateLimitKeyForIP(remoteIP)) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many websocket connection attempts"})
 		return
 	}
@@ -604,7 +608,7 @@ func (s *Server) groupWebSocket(w http.ResponseWriter, r *http.Request) {
 func (s *Server) userWebSocket(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
 	remoteIP := s.clientIP(r)
-	if !s.strictLimiter.Allow("ws:" + remoteIP) {
+	if !s.strictLimiter.Allow("ws:" + rateLimitKeyForIP(remoteIP)) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many websocket connection attempts"})
 		return
 	}
@@ -675,7 +679,7 @@ func (s *Server) rateLimit(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		key := s.clientIP(r)
+		key := rateLimitKeyForIP(s.clientIP(r))
 		if user := currentUser(r); user.ID != "" {
 			key = user.ID
 		}
