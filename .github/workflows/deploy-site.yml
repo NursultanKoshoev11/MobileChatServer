@@ -2,13 +2,11 @@ name: Deploy KOOM website
 
 on:
   workflow_dispatch:
+  # No path filter on PRs: "Package static website" is a required check on
+  # main, so it must report on every PR. The deploy job only runs on main.
   pull_request:
     branches:
       - main
-    paths:
-      - internal/httpapi/home.ru.html
-      - internal/httpapi/home.kg.html
-      - internal/httpapi/site-assets/**
   push:
     branches:
       - main
