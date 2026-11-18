@@ -145,6 +145,49 @@ Before a manual recovery or migration, take a fresh database and media backup.
 Application rollback does not automatically reverse database migrations, so
 only deploy schema changes that remain compatible with the previous API image.
 
+## Pre-deployment backup and rollback
+
+The host-side helper (`scripts/koom-github-deploy`, installed at
+`/usr/local/sbin/koom-github-deploy`) dumps the live database into
+`backups/pre-deploy/` and validates it **before** switching images or running
+migrations; a failed or invalid dump aborts the release with nothing changed.
+It keeps the newest five dumps. If `BACKUP_AGE_RECIPIENT` is set in
+`.env.prod`, the dump is age-encrypted and `age` must be installed on the host
+(otherwise the deploy aborts). It checks that free disk space exceeds the
+database size plus 1 GiB. If the new API fails its health checks, the helper
+re-tags and starts the previous API image and reports whether the rollback is
+healthy; migrations are not reversed, so restore from the pre-deploy dump
+(`docs/BACKUPS.md`) only if a migration itself caused the failure.
+
+This behaviour only exists after the reviewed helper has been installed on
+the host (see docs/SECURITY-OPERATIONS.md, section 4).
+
+## Server changes required by the 2026-11 infrastructure hardening
+
+None of these are applied by a normal release; the running production keeps
+working without them.
+
+1. Install the updated `/usr/local/sbin/koom-github-deploy` helper (pre-deploy
+   backup, fixed rollback). Ensure `backups/` has room for an extra dump.
+2. Update the server checkout's `docker-compose.prod.yml` and `scripts/` to
+   this revision. The new compose file adds resource limits,
+   `no-new-privileges`, `cap_drop: ALL` and a tmpfs `/tmp` for the API, and
+   passes `SMS_ALLOWED_COUNTRY_PREFIXES` (default `+996`) and
+   `SMS_GLOBAL_HOURLY_MAX` (default `500`) to the API. Run
+   `docker compose -f docker-compose.prod.yml --env-file .env.prod config -q`
+   first. The API picks the new settings up on its next deploy; postgres and
+   backup only when they are recreated (a short database restart, do it in a
+   quiet period).
+3. Rebuild the backup image (`... build backup`, now includes `age`) and
+   recreate the backup service, then enable backup encryption as described in
+   docs/BACKUPS.md.
+4. Optional: `BACKUP_S3_SSE`, `API_READ_ONLY_ROOTFS=true`, resource limit
+   overrides (docs/SECURITY-OPERATIONS.md, section 9).
+5. The migration runner now adds a nullable `checksum` column to
+   `schema_migrations` and backfills it on its first run; an edited, already
+   applied migration file now fails the migration step (and therefore the
+   deploy) instead of being ignored.
+
 ## Post-deployment checks
 
 ```bash

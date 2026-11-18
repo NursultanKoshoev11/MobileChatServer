@@ -25,3 +25,6 @@ backups/
 *.bak-*
 *.dump
 *.dump.sha256
+*.p8
+*.age
+*.sql.gz
