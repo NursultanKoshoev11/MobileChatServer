@@ -120,6 +120,54 @@ func (h *Hub) DisconnectUser(userID string) {
 	}
 }
 
+// DisconnectUserSessions closes this process's sockets for userID without
+// blocking future connections (used on logout; the user may sign in again).
+func (h *Hub) DisconnectUserSessions(userID string) {
+	h.mu.RLock()
+	clients := make([]*Client, 0, len(h.users[userID]))
+	for client := range h.users[userID] {
+		clients = append(clients, client)
+	}
+	h.mu.RUnlock()
+	h.closeClients(clients)
+}
+
+// RemoveUserFromGroup stops delivering a group's events to a user who left or
+// was removed from it by closing that user's sockets subscribed to the group.
+// Group events sent through user sockets are addressed from the current member
+// list, so those need no change.
+func (h *Hub) RemoveUserFromGroup(groupID, userID string) {
+	h.mu.RLock()
+	clients := make([]*Client, 0)
+	for client := range h.groups[groupID] {
+		if client.UserID == userID {
+			clients = append(clients, client)
+		}
+	}
+	h.mu.RUnlock()
+	h.closeClients(clients)
+}
+
+// CloseGroup closes every socket subscribed to a deleted group.
+func (h *Hub) CloseGroup(groupID string) {
+	h.mu.RLock()
+	clients := make([]*Client, 0, len(h.groups[groupID]))
+	for client := range h.groups[groupID] {
+		clients = append(clients, client)
+	}
+	h.mu.RUnlock()
+	h.closeClients(clients)
+}
+
+func (h *Hub) closeClients(clients []*Client) {
+	for _, client := range clients {
+		h.Unregister(client)
+		if client.Conn != nil {
+			_ = client.Conn.Close()
+		}
+	}
+}
+
 func (h *Hub) Unregister(client *Client) {
 	h.mu.Lock()
 	defer h.mu.Unlock()

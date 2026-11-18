@@ -222,21 +222,32 @@ func (s *PhoneAuthService) Refresh(ctx context.Context, input RefreshInput) (dom
 }
 
 func (s *PhoneAuthService) Logout(ctx context.Context, input RefreshInput) error {
+	_, err := s.LogoutSession(ctx, input)
+	return err
+}
+
+// LogoutSession revokes the refresh session and returns the user it belonged
+// to ("" when the token was unknown or already revoked), so callers can also
+// close that user's realtime connections.
+func (s *PhoneAuthService) LogoutSession(ctx context.Context, input RefreshInput) (string, error) {
 	refreshToken := strings.TrimSpace(input.RefreshToken)
 	if refreshToken == "" {
-		return NewValidationError("refresh_token is required")
+		return "", NewValidationError("refresh_token is required")
 	}
 	record, err := s.repo.GetRefreshSession(ctx, security.HashToken(refreshToken))
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
-			return nil
+			return "", nil
 		}
-		return err
+		return "", err
 	}
 	if record.RevokedAt != nil {
-		return nil
+		return "", nil
 	}
-	return s.repo.RevokeRefreshSession(ctx, record.ID)
+	if err := s.repo.RevokeRefreshSession(ctx, record.ID); err != nil {
+		return "", err
+	}
+	return record.UserID, nil
 }
 
 func (s *PhoneAuthService) getOrCreatePhoneUser(ctx context.Context, mobile string, displayNameInput string) (domain.PhoneAuthUser, error) {

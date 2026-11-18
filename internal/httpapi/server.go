@@ -261,9 +261,15 @@ func (s *Server) logoutPhoneSession(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &input) {
 		return
 	}
-	if err := s.phoneAuth.Logout(r.Context(), input); err != nil {
+	userID, err := s.phoneAuth.LogoutSession(r.Context(), input)
+	if err != nil {
 		s.writeError(w, err)
 		return
+	}
+	if userID != "" {
+		// Close this instance's sockets for the user; other devices reconnect
+		// with their own still-valid sessions.
+		s.hub.DisconnectUserSessions(userID)
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "logged_out"})
 }
@@ -397,10 +403,13 @@ func (s *Server) updateGroupMemberRoleByPhone(w http.ResponseWriter, r *http.Req
 }
 
 func (s *Server) leaveGroup(w http.ResponseWriter, r *http.Request) {
-	if err := s.svc.LeaveGroup(r.Context(), currentUser(r).ID, chi.URLParam(r, "groupID")); err != nil {
+	userID := currentUser(r).ID
+	groupID := chi.URLParam(r, "groupID")
+	if err := s.svc.LeaveGroup(r.Context(), userID, groupID); err != nil {
 		s.writeError(w, err)
 		return
 	}
+	s.hub.RemoveUserFromGroup(groupID, userID)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "left"})
 }
 
