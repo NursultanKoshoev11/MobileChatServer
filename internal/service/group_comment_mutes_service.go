@@ -78,7 +78,7 @@ func (s *Service) SetGroupCommentMuteByPhone(ctx context.Context, actorID, group
 	if input.DurationMinutes < 0 {
 		return domain.GroupCommentMute{}, NewValidationError("duration_minutes must be zero or positive")
 	}
-	user, err := s.FindUserByPhone(ctx, phone)
+	user, err := s.resolveGroupMemberByPhone(ctx, actorID, groupID, phone, domain.RoleOwner, domain.RoleAdmin)
 	if err != nil {
 		return domain.GroupCommentMute{}, err
 	}
@@ -109,7 +109,7 @@ func (s *Service) ClearGroupCommentMuteByPhone(ctx context.Context, actorID, gro
 	if phone == "" {
 		return NewValidationError("phone is required")
 	}
-	user, err := s.FindUserByPhone(ctx, phone)
+	user, err := s.resolveGroupMemberByPhone(ctx, actorID, groupID, phone, domain.RoleOwner, domain.RoleAdmin)
 	if err != nil {
 		return err
 	}

@@ -19,7 +19,18 @@ const (
 	phoneCodeRateLimitWindow = 10 * time.Minute
 	phoneCodeRateLimitMax    = 3
 	phoneCodeMinRequestGap   = 30 * time.Second
+
+	// SMS spend guards (toll-fraud / SMS-pumping protection).
+	phoneCodeDailyWindow            = 24 * time.Hour
+	phoneCodeDailyMax               = 8
+	phoneCodeGlobalWindow           = time.Hour
+	defaultPhoneCodeGlobalHourlyMax = 500
 )
+
+// defaultSMSAllowedCountryPrefixes limits where verification SMS may be sent.
+// KOOM serves Kyrgyzstan; sending codes to arbitrary countries lets attackers
+// pump premium-rate numbers at the project's expense.
+var defaultSMSAllowedCountryPrefixes = []string{"+996"}
 
 type PhoneAuthConfig struct {
 	JWTSecret           string
@@ -29,6 +40,10 @@ type PhoneAuthConfig struct {
 	TestAuthPhone       string
 	TestAuthCode        string
 	TestAuthDisplayName string
+	// SMSAllowedCountryPrefixes overrides defaultSMSAllowedCountryPrefixes when set.
+	SMSAllowedCountryPrefixes []string
+	// SMSGlobalHourlyMax overrides defaultPhoneCodeGlobalHourlyMax when positive.
+	SMSGlobalHourlyMax int
 }
 
 type PhoneAuthService struct {
@@ -50,13 +65,20 @@ func (s *PhoneAuthService) RequestCode(ctx context.Context, input RequestPhoneCo
 	if s.isTestAuthMobile(mobile) {
 		return RequestPhoneCodeOutput{Status: "test_code_ready", DevCode: s.expectedTestAuthCode()}, nil
 	}
+	if !s.smsCountryAllowed(mobile) {
+		return RequestPhoneCodeOutput{}, NewValidationError("sms verification is not available for this phone number")
+	}
+
+	now := time.Now().UTC()
+	if err := s.checkSMSBudget(ctx, mobile, now); err != nil {
+		return RequestPhoneCodeOutput{}, err
+	}
 
 	code, err := newNumericCode(6)
 	if err != nil {
 		return RequestPhoneCodeOutput{}, err
 	}
 	codeID := "PC-" + strings.ToUpper(randomHex(12))
-	now := time.Now().UTC()
 	allowed, err := s.repo.CreatePhoneCodeIfWithinLimit(
 		ctx,
 		codeID,

@@ -46,12 +46,14 @@ type publicRequestBodyMeta struct {
 	VideoCount     int
 }
 
+// publicRequestPayload is the structured request body. Older clients also send
+// a "moderation_text" field; it is deliberately not decoded because moderation
+// must always run on the server-extracted text, never on client-chosen input.
 type publicRequestPayload struct {
-	Version        int                         `json:"version"`
-	Text           string                      `json:"text"`
-	ModerationText string                      `json:"moderation_text"`
-	Photos         []publicRequestPayloadPhoto `json:"photos"`
-	Videos         []publicRequestPayloadVideo `json:"videos"`
+	Version int                         `json:"version"`
+	Text    string                      `json:"text"`
+	Photos  []publicRequestPayloadPhoto `json:"photos"`
+	Videos  []publicRequestPayloadVideo `json:"videos"`
 }
 
 type publicRequestPayloadPhoto struct {
@@ -344,7 +346,6 @@ func parsePublicRequestBodyPayload(body, groupID string) (publicRequestBodyMeta,
 		return publicRequestBodyMeta{}, false, nil
 	}
 	text := strings.TrimSpace(payload.Text)
-	moderationText := strings.TrimSpace(payload.ModerationText)
 	if len(payload.Photos) > maxPublicRequestPhotos {
 		return publicRequestBodyMeta{}, true, NewValidationError(fmt.Sprintf("only %d photos are allowed", maxPublicRequestPhotos))
 	}
@@ -361,11 +362,7 @@ func parsePublicRequestBodyPayload(body, groupID string) (publicRequestBodyMeta,
 			return publicRequestBodyMeta{}, true, err
 		}
 	}
-	if moderationText == "" {
-		moderationText = buildPublicRequestMediaModerationText(text, len(payload.Photos), len(payload.Videos))
-	} else {
-		moderationText = cleanPublicRequestModerationText(moderationText, text)
-	}
+	moderationText := buildPublicRequestMediaModerationText(text, len(payload.Photos), len(payload.Videos))
 	return publicRequestBodyMeta{Text: text, ModerationText: moderationText, PhotoCount: len(payload.Photos), VideoCount: len(payload.Videos)}, true, nil
 }
 
@@ -485,24 +482,6 @@ func validatePublicRequestVideoPayload(video publicRequestPayloadVideo, groupID 
 
 func buildPublicRequestMediaModerationText(text string, photoCount, videoCount int) string {
 	return strings.TrimSpace(text)
-}
-
-func cleanPublicRequestModerationText(moderationText, fallbackText string) string {
-	lines := strings.Split(moderationText, "\n")
-	cleaned := make([]string, 0, len(lines))
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		lower := strings.ToLower(trimmed)
-		if trimmed == "" || strings.HasPrefix(lower, "attached photos") || strings.HasPrefix(lower, "attached videos") || strings.HasPrefix(lower, "photo file:") || strings.HasPrefix(lower, "video file:") {
-			continue
-		}
-		cleaned = append(cleaned, trimmed)
-	}
-	result := strings.TrimSpace(strings.Join(cleaned, "\n"))
-	if result != "" {
-		return result
-	}
-	return strings.TrimSpace(fallbackText)
 }
 
 func moderationBodyForInput(item domain.ContentModerationItem) string {
