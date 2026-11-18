@@ -180,6 +180,12 @@ services:
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
       AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      # Optional age encryption of dumps/media archives (public keys only; see docs/BACKUPS.md).
+      BACKUP_AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT:-}
+      BACKUP_AGE_RECIPIENTS_FILE: ${BACKUP_AGE_RECIPIENTS_FILE:-}
+      # Optional S3 server-side encryption: AES256 or aws:kms.
+      BACKUP_S3_SSE: ${BACKUP_S3_SSE:-}
+      BACKUP_S3_SSE_KMS_KEY_ID: ${BACKUP_S3_SSE_KMS_KEY_ID:-}
     volumes:
       - ./backups:/backups
       - ./data:/app-data:ro
@@ -200,10 +206,10 @@ services:
         - >-
           test -n "$(find /backups -maxdepth 1 -type f -name 'backup-success' -mmin -1500 -print -quit)" &&
           grep -qx 'offsite=uploaded' /backups/backup-success &&
-          test -n "$(find /backups -maxdepth 1 -type f -name "$${BACKUP_PREFIX:-mobilechat}-*.dump" -mmin -1500 -print -quit)" &&
-          test -n "$(find /backups -maxdepth 1 -type f -name "$${BACKUP_PREFIX:-mobilechat}-*.dump.sha256" -mmin -1500 -print -quit)" &&
-          test -n "$(find /backups -maxdepth 1 -type f -name "$${BACKUP_PREFIX:-mobilechat}-files-*.tar.gz" -mmin -1500 -print -quit)" &&
-          test -n "$(find /backups -maxdepth 1 -type f -name "$${BACKUP_PREFIX:-mobilechat}-files-*.tar.gz.sha256" -mmin -1500 -print -quit)"
+          test -n "$(find /backups -maxdepth 1 -type f \( -name "$${BACKUP_PREFIX:-mobilechat}-*.dump" -o -name "$${BACKUP_PREFIX:-mobilechat}-*.dump.age" \) -mmin -1500 -print -quit)" &&
+          test -n "$(find /backups -maxdepth 1 -type f \( -name "$${BACKUP_PREFIX:-mobilechat}-*.dump.sha256" -o -name "$${BACKUP_PREFIX:-mobilechat}-*.dump.age.sha256" \) -mmin -1500 -print -quit)" &&
+          test -n "$(find /backups -maxdepth 1 -type f \( -name "$${BACKUP_PREFIX:-mobilechat}-files-*.tar.gz" -o -name "$${BACKUP_PREFIX:-mobilechat}-files-*.tar.gz.age" \) -mmin -1500 -print -quit)" &&
+          test -n "$(find /backups -maxdepth 1 -type f \( -name "$${BACKUP_PREFIX:-mobilechat}-files-*.tar.gz.sha256" -o -name "$${BACKUP_PREFIX:-mobilechat}-files-*.tar.gz.age.sha256" \) -mmin -1500 -print -quit)"
       interval: 5m
       timeout: 10s
       retries: 2
