@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Удаление аккаунта Koom и связанных с ним данных.">
+  <title>Удаление аккаунта Koom</title>
+  <style>
+    :root{color-scheme:light;--bg:#f4f7fb;--card:#fff;--text:#172033;--muted:#59677a;--line:#d9e2ef;--brand:#145fc2;--danger:#a92828}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.55}
+    main{max-width:760px;margin:0 auto;padding:28px 16px 56px}.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:24px;box-shadow:0 8px 28px #1720330d}
+    h1{font-size:28px;line-height:1.2;margin:0 0 8px}h2{font-size:18px;margin:24px 0 8px}p,li,label{font-size:15px}.muted{color:var(--muted)}a{color:var(--brand)}ul{padding-left:22px}
+    form{margin-top:20px}label{display:block;font-weight:700;margin:12px 0 6px}input{width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;font:inherit}
+    button{margin-top:14px;border:0;border-radius:10px;padding:12px 16px;background:var(--brand);color:#fff;font:inherit;font-weight:700;cursor:pointer}button:disabled{opacity:.6;cursor:wait}.danger{background:var(--danger)}[hidden]{display:none!important}
+    .status{min-height:24px;margin-top:12px;font-weight:650}.lang{border-top:1px solid var(--line);margin-top:24px;padding-top:14px}
+  </style>
+</head>
+<body>
+<main>
+  <article class="card">
+    <h1>Удаление аккаунта Koom</h1>
+    <p class="muted">Бул барак Koom аккаунтун жана ага байланышкан маалыматтарды өчүрүүнү баштоого мүмкүндүк берет.</p>
+    <p>После подтверждения SMS-кодом удаляются номер телефона, профиль, сессии, push-токены, голоса, групповые сообщения и другие записи, связанные с аккаунтом. Ваши публичные обращения, комментарии и прикреплённые медиафайлы сохраняются без связи с аккаунтом и без имени или аватара. Персональные сведения, которые вы указали в тексте или которые видны на медиафайлах, автоматически не удаляются. Владелец группы передаёт её существующему администратору или участнику; если вы единственный участник, сначала пригласите другого человека в приложение.</p>
+    <p class="lang" lang="ky">SMS кодду ырастагандан кийин телефон номери, профиль, сессиялар, добуштар, push-токендер жана топтук чаттагы билдирүүлөр өчүрүлөт. Коомдук кайрылуулар, комментарийлер жана тиркелген медиафайлдар аккаунтка байланышы жок, аты-жөнү жана сүрөтү көрсөтүлбөй сакталат. Текстте өзүңүз жазган же медиафайлдардан көрүнгөн жеке маалымат автоматтык түрдө өчүрүлбөйт. Топтун ээси топту учурдагы администраторго же катышуучуга өткөрөт; эгер сиз жалгыз катышуучу болсоңуз, адегенде колдонмого башка адамды чакырыңыз.</p>
+
+    <form id="deletion-form">
+      <label for="mobile">Номер телефона / Телефон номери</label>
+      <input id="mobile" name="mobile" type="tel" autocomplete="tel" inputmode="tel" placeholder="+996 700 123 456" required>
+      <button id="send-code" type="submit">Получить код / Код алуу</button>
+      <div id="code-step" hidden>
+        <label for="code">Код из SMS / SMS коду</label>
+        <input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}">
+        <button id="delete-account" class="danger" type="button">Удалить аккаунт / Аккаунтту өчүрүү</button>
+      </div>
+      <p id="status" class="status" aria-live="polite"></p>
+    </form>
+
+    <p class="muted">Если у вас нет доступа к номеру телефона, напишите <a href="mailto:nursultankosoev2@gmail.com?subject=Koom%20account%20deletion">в службу поддержки</a>. <a href="/privacy">Политика конфиденциальности</a>.</p>
+  </article>
+</main>
+<script src="/assets/account-deletion.js" defer></script>
+</body>
+</html>

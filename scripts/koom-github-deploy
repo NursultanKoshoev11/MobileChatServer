@@ -4,20 +4,34 @@ set -Eeuo pipefail
 readonly APP_DIR=/opt/projects/MobileChatServer
 readonly ENV_FILE="$APP_DIR/.env.prod"
 readonly COMPOSE_FILE="$APP_DIR/docker-compose.prod.yml"
-readonly API_URL=http://10.0.0.150:8080/api/health
 readonly PUBLIC_API_URL=https://koom.com.kg/api/health
 readonly API_IMAGE=mobilechatserver-api
 readonly MIGRATE_IMAGE=mobilechatserver-migrate
+readonly POSTGRES_CONTAINER=mobilechat-postgres
+readonly PREDEPLOY_DIR="$APP_DIR/backups/pre-deploy"
+readonly PREDEPLOY_KEEP="${KOOM_PREDEPLOY_KEEP:-5}"
 
-health_check() {
-  local url="$1"
-  local response
-  response="$(curl --fail --silent --show-error --max-time 12 "$url")"
+assert_health_response() {
+  local response="$1"
+  local url="$2"
   if ! grep -Eq '"database"[[:space:]]*:[[:space:]]*"ok"' <<<"$response" \
     || ! grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' <<<"$response"; then
     echo "Health endpoint returned an unhealthy response: $url" >&2
     return 1
   fi
+}
+
+health_check() {
+  local url="$1"
+  local response
+  response="$(curl --fail --silent --show-error --max-time 12 "$url")"
+  assert_health_response "$response" "$url"
+}
+
+api_container_health_check() {
+  local response
+  response="$(sudo docker exec mobilechat-api wget -qO- -T 8 http://127.0.0.1:8080/api/health)"
+  assert_health_response "$response" "mobilechat-api:8080"
 }
 
 preflight() {
@@ -28,14 +42,29 @@ preflight() {
 
   local provider
   provider="$(sed -n 's/^SMS_PROVIDER[[:space:]]*=[[:space:]]*\([^[:space:]#]*\).*/\1/p' "$ENV_FILE" | tail -n 1)"
-  if [[ "$provider" != twilio ]] \
-    || ! grep -Eq '^TWILIO_ACCOUNT_SID[[:space:]]*=[[:space:]]*[^[:space:]#]+' "$ENV_FILE" \
-    || ! grep -Eq '^TWILIO_AUTH_TOKEN[[:space:]]*=[[:space:]]*[^[:space:]#]+' "$ENV_FILE" \
-    || { ! grep -Eq '^SMS_FROM[[:space:]]*=[[:space:]]*[^[:space:]#]+' "$ENV_FILE" \
-         && ! grep -Eq '^TWILIO_MESSAGING_SERVICE_SID[[:space:]]*=[[:space:]]*[^[:space:]#]+' "$ENV_FILE"; }; then
-    echo "Production SMS is not configured. Set SMS_PROVIDER=twilio, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and SMS_FROM or TWILIO_MESSAGING_SERVICE_SID in .env.prod." >&2
-    return 1
-  fi
+  case "$provider" in
+    smspro)
+      if ! grep -Eq '^SMSPRO_LOGIN[[:space:]]*=[[:space:]]*[^[:space:]#]+' "$ENV_FILE" \
+        || ! grep -Eq '^SMSPRO_PASSWORD[[:space:]]*=[[:space:]]*[^[:space:]#]+' "$ENV_FILE" \
+        || ! grep -Eq '^SMSPRO_SENDER[[:space:]]*=[[:space:]]*[^[:space:]#]+' "$ENV_FILE"; then
+        echo "Production SMS is not configured. Set SMS_PROVIDER=smspro, SMSPRO_LOGIN, SMSPRO_PASSWORD, and SMSPRO_SENDER in .env.prod." >&2
+        return 1
+      fi
+      ;;
+    twilio)
+      if ! grep -Eq '^TWILIO_ACCOUNT_SID[[:space:]]*=[[:space:]]*[^[:space:]#]+' "$ENV_FILE" \
+        || ! grep -Eq '^TWILIO_AUTH_TOKEN[[:space:]]*=[[:space:]]*[^[:space:]#]+' "$ENV_FILE" \
+        || { ! grep -Eq '^SMS_FROM[[:space:]]*=[[:space:]]*[^[:space:]#]+' "$ENV_FILE" \
+             && ! grep -Eq '^TWILIO_MESSAGING_SERVICE_SID[[:space:]]*=[[:space:]]*[^[:space:]#]+' "$ENV_FILE"; }; then
+        echo "Production SMS is not configured for Twilio in .env.prod." >&2
+        return 1
+      fi
+      ;;
+    *)
+      echo "Production SMS_PROVIDER must be smspro or twilio." >&2
+      return 1
+      ;;
+  esac
 
   local api_status postgres_status
   api_status="$(sudo docker inspect --format '{{.State.Health.Status}}' mobilechat-api 2>/dev/null || true)"
@@ -44,8 +73,96 @@ preflight() {
     echo "Production services must be healthy before deployment (API: ${api_status:-missing}, database: ${postgres_status:-missing})." >&2
     return 1
   fi
+  api_container_health_check
 
   echo "Production prerequisites are ready."
+}
+
+env_file_value() {
+  # Value of KEY=VALUE from .env.prod (last occurrence, trailing comment and
+  # surrounding quotes removed). Never echo secrets read this way.
+  sed -n "s/^$1[[:space:]]*=[[:space:]]*\([^#]*\).*/\1/p" "$ENV_FILE" | tail -n 1 \
+    | sed -e 's/[[:space:]]*$//' -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/"
+}
+
+# Mandatory pre-migration backup: dump the live database to the host and
+# validate it. Any failure aborts the deployment before images are switched or
+# migrations run. Credentials stay inside the PostgreSQL container.
+predeploy_backup() {
+  local sha="$1" stamp base db_bytes avail_kb recipients
+  if [[ ! "$PREDEPLOY_KEEP" =~ ^[0-9]+$ ]] || (( PREDEPLOY_KEEP < 1 )); then
+    echo "KOOM_PREDEPLOY_KEEP must be a positive integer." >&2
+    return 1
+  fi
+  recipients="$(env_file_value BACKUP_AGE_RECIPIENT)"
+  if [[ -n "$recipients" ]] && ! command -v age >/dev/null 2>&1; then
+    echo "BACKUP_AGE_RECIPIENT is set in .env.prod but 'age' is not installed on this host; refusing to write an unencrypted pre-deploy backup." >&2
+    return 1
+  fi
+  local -a age_args=()
+  local recipient
+  for recipient in $recipients; do
+    if [[ "$recipient" != age1* ]]; then
+      echo "BACKUP_AGE_RECIPIENT must only contain age public keys." >&2
+      return 1
+    fi
+    age_args+=(-r "$recipient")
+  done
+
+  install -d -m 700 "$PREDEPLOY_DIR"
+  db_bytes="$(sudo docker exec "$POSTGRES_CONTAINER" sh -c \
+    'PGPASSWORD="$POSTGRES_PASSWORD" exec psql -X -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "SELECT pg_database_size(current_database())"')"
+  avail_kb="$(df -Pk "$PREDEPLOY_DIR" | awk 'NR == 2 { print $4 }')"
+  if [[ ! "$db_bytes" =~ ^[0-9]+$ || ! "$avail_kb" =~ ^[0-9]+$ ]]; then
+    echo "Could not determine database size or free disk space for the pre-deploy backup." >&2
+    return 1
+  fi
+  # A custom-format dump is compressed and normally much smaller than the
+  # database; require the full database size plus 1 GiB of headroom anyway.
+  if (( avail_kb * 1024 < db_bytes + 1073741824 )); then
+    echo "Not enough free disk space for the pre-deploy backup (database ${db_bytes} bytes, free $((avail_kb * 1024)) bytes)." >&2
+    return 1
+  fi
+
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  base="$PREDEPLOY_DIR/predeploy-$stamp-${sha:0:12}.dump"
+  predeploy_tmp="$(mktemp "$PREDEPLOY_DIR/.predeploy.XXXXXXXX")"
+  echo "Creating pre-deploy database backup."
+  # The deployment-package size limit (ulimit -S -f) must not cap the dump.
+  (
+    ulimit -S -f unlimited
+    sudo docker exec "$POSTGRES_CONTAINER" sh -c \
+      'PGPASSWORD="$POSTGRES_PASSWORD" exec pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom --no-owner' \
+      > "$predeploy_tmp"
+  )
+  if [[ ! -s "$predeploy_tmp" ]]; then
+    echo "The pre-deploy backup is empty." >&2
+    return 1
+  fi
+  sudo docker exec -i "$POSTGRES_CONTAINER" pg_restore --list < "$predeploy_tmp" >/dev/null
+
+  if [[ -n "$recipients" ]]; then
+    (
+      ulimit -S -f unlimited
+      age --encrypt "${age_args[@]}" -o "$predeploy_tmp.age" "$predeploy_tmp"
+    )
+    rm -f -- "$predeploy_tmp"
+    predeploy_tmp="$predeploy_tmp.age"
+    base="$base.age"
+  fi
+  chmod 600 "$predeploy_tmp"
+  mv -- "$predeploy_tmp" "$base"
+  predeploy_tmp=""
+  (cd "$PREDEPLOY_DIR" && sha256sum "$(basename "$base")" > "$base.sha256" && sha256sum -c --quiet "$base.sha256")
+  chmod 600 "$base.sha256"
+  echo "Pre-deploy backup written: $base"
+
+  # Keep only the newest PREDEPLOY_KEEP pre-deploy dumps.
+  local old
+  while IFS= read -r old; do
+    rm -f -- "$old" "$old.sha256"
+  done < <(find "$PREDEPLOY_DIR" -maxdepth 1 -type f \( -name 'predeploy-*.dump' -o -name 'predeploy-*.dump.age' \) -printf '%T@ %p\n' \
+    | sort -nr | tail -n +"$((PREDEPLOY_KEEP + 1))" | cut -d' ' -f2-)
 }
 
 if [[ "${1:-}" == --preflight && $# == 1 ]]; then
@@ -59,10 +176,9 @@ if [[ $# != 1 || ! "$1" =~ ^[0-9a-f]{40}$ ]]; then
 fi
 
 target_sha="$1"
-preflight
 
-work_dir="$(mktemp -d /tmp/koom-github-deploy.XXXXXXXX)"
-chmod 700 "$work_dir"
+work_dir=""
+predeploy_tmp=""
 deployment_started=0
 previous_api=""
 previous_migrate=""
@@ -70,27 +186,45 @@ previous_migrate=""
 on_exit() {
   local status=$?
   trap - EXIT
+  set +e
   if (( status != 0 && deployment_started == 1 )); then
     echo "Deployment failed; restoring the previous API and migration images." >&2
-    set +e
     if [[ -n "$previous_api" && -n "$previous_migrate" ]]; then
       sudo docker tag "$previous_api" "$API_IMAGE:latest"
       sudo docker tag "$previous_migrate" "$MIGRATE_IMAGE:latest"
       cd "$APP_DIR"
       sudo docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --no-deps --no-build api
-      sleep 4
-      health_check "$API_URL"
-      health_check "$PUBLIC_API_URL"
+      local attempt rollback_status
+      for attempt in {1..30}; do
+        rollback_status="$(sudo docker inspect --format '{{.State.Health.Status}}' mobilechat-api 2>/dev/null)"
+        [[ "$rollback_status" == healthy ]] && break
+        sleep 2
+      done
+      if api_container_health_check && health_check "$PUBLIC_API_URL"; then
+        echo "Rollback to the previous API image is healthy. Database migrations were NOT reversed; the pre-deploy backup is in $PREDEPLOY_DIR." >&2
+      else
+        echo "ROLLBACK UNHEALTHY: the previous API image did not pass health checks. Manual intervention required; pre-deploy backup is in $PREDEPLOY_DIR." >&2
+      fi
     fi
   fi
-  rm -rf -- "$work_dir"
+  [[ -z "$predeploy_tmp" ]] || rm -f -- "$predeploy_tmp" "$predeploy_tmp.age"
+  [[ -z "$work_dir" ]] || rm -rf -- "$work_dir"
   exit "$status"
 }
 trap on_exit EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+
+preflight
+
+work_dir="$(mktemp -d /tmp/koom-github-deploy.XXXXXXXX)"
+chmod 700 "$work_dir"
 
 # The payload is expected to be a small image bundle; keep a malformed stream
-# from filling the server's root filesystem.
-ulimit -f 524288
+# from filling the server's root filesystem. Only the soft limit is set so the
+# pre-deploy database backup can lift it for its own subshell.
+ulimit -S -f 524288
 cat > "$work_dir/package.tar.gz"
 if [[ ! -s "$work_dir/package.tar.gz" ]]; then
   echo "The deployment package is empty." >&2
@@ -120,6 +254,9 @@ if [[ "$api_revision" != "$target_sha" || "$migrate_revision" != "$target_sha" ]
   echo "The image revision does not match the requested deployment commit." >&2
   exit 1
 fi
+
+# Nothing has been switched yet: a failed backup aborts without a rollback.
+predeploy_backup "$target_sha"
 
 previous_api="$(sudo docker image inspect --format='{{.Id}}' "$API_IMAGE:latest")"
 previous_migrate="$(sudo docker image inspect --format='{{.Id}}' "$MIGRATE_IMAGE:latest")"
@@ -151,7 +288,7 @@ if [[ "$running_revision" != "$target_sha" ]]; then
   echo "The running API image revision does not match the requested commit." >&2
   exit 1
 fi
-health_check "$API_URL"
+api_container_health_check
 health_check "$PUBLIC_API_URL"
 
 deployment_started=0

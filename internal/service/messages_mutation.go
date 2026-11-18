@@ -30,8 +30,14 @@ func (s *Service) UpdateMessage(ctx context.Context, actorID, groupID, messageID
 	if err != nil {
 		return domain.Message{}, err
 	}
+	if moderationNotice != nil {
+		// Approving a queued item creates a new message rather than editing an
+		// existing one, so an edit that needs review is refused and the original
+		// text stays unchanged.
+		return domain.Message{}, NewValidationError("edited text requires moderation review; message was not changed")
+	}
 	var message domain.Message
-	_, err = s.persistModeratedPublication(ctx, moderationNotice, func(repo *storage.Repository) (string, error) {
+	_, err = s.persistModeratedPublication(ctx, nil, func(repo *storage.Repository) (string, error) {
 		var updateErr error
 		message, updateErr = repo.UpdateMessage(ctx, groupID, actorID, messageID, text)
 		return message.ID, updateErr

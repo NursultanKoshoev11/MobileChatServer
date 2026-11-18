@@ -46,12 +46,14 @@ type publicRequestBodyMeta struct {
 	VideoCount     int
 }
 
+// publicRequestPayload is the structured request body. Older clients also send
+// a "moderation_text" field; it is deliberately not decoded because moderation
+// must always run on the server-extracted text, never on client-chosen input.
 type publicRequestPayload struct {
-	Version        int                         `json:"version"`
-	Text           string                      `json:"text"`
-	ModerationText string                      `json:"moderation_text"`
-	Photos         []publicRequestPayloadPhoto `json:"photos"`
-	Videos         []publicRequestPayloadVideo `json:"videos"`
+	Version int                         `json:"version"`
+	Text    string                      `json:"text"`
+	Photos  []publicRequestPayloadPhoto `json:"photos"`
+	Videos  []publicRequestPayloadVideo `json:"videos"`
 }
 
 type publicRequestPayloadPhoto struct {
@@ -66,6 +68,8 @@ type publicRequestPayloadVideo struct {
 	Name      string `json:"name"`
 	SizeBytes int    `json:"size_bytes"`
 	Base64    string `json:"base64"`
+	FileID    string `json:"file_id"`
+	URL       string `json:"url"`
 	MimeType  string `json:"mime_type"`
 }
 
@@ -153,12 +157,12 @@ func (s *Service) MarkPublicRequestsRead(ctx context.Context, userID, groupID st
 	return s.repo.MarkPublicRequestsRead(ctx, groupID, userID)
 }
 
-func (s *Service) ListPublicRequests(ctx context.Context, viewerID, groupID string, limit int, before time.Time, mineOnly bool) ([]domain.PublicRequest, error) {
+func (s *Service) ListPublicRequests(ctx context.Context, viewerID, groupID string, limit int, before time.Time, beforeID string, mineOnly bool) ([]domain.PublicRequest, error) {
 	groupID = strings.TrimSpace(groupID)
 	if groupID == "" {
 		return nil, NewValidationError("group_id is required")
 	}
-	return s.repo.ListPublicRequests(ctx, groupID, viewerID, limit, before, mineOnly)
+	return s.repo.ListPublicRequests(ctx, groupID, viewerID, limit, before, beforeID, mineOnly)
 }
 
 func (s *Service) VotePublicRequest(ctx context.Context, userID, requestID, voteType string) (domain.PublicRequestVoteUpdate, error) {
@@ -342,7 +346,6 @@ func parsePublicRequestBodyPayload(body, groupID string) (publicRequestBodyMeta,
 		return publicRequestBodyMeta{}, false, nil
 	}
 	text := strings.TrimSpace(payload.Text)
-	moderationText := strings.TrimSpace(payload.ModerationText)
 	if len(payload.Photos) > maxPublicRequestPhotos {
 		return publicRequestBodyMeta{}, true, NewValidationError(fmt.Sprintf("only %d photos are allowed", maxPublicRequestPhotos))
 	}
@@ -355,15 +358,11 @@ func parsePublicRequestBodyPayload(body, groupID string) (publicRequestBodyMeta,
 		}
 	}
 	for _, video := range payload.Videos {
-		if err := validatePublicRequestVideoPayload(video); err != nil {
+		if err := validatePublicRequestVideoPayload(video, groupID); err != nil {
 			return publicRequestBodyMeta{}, true, err
 		}
 	}
-	if moderationText == "" {
-		moderationText = buildPublicRequestMediaModerationText(text, len(payload.Photos), len(payload.Videos))
-	} else {
-		moderationText = cleanPublicRequestModerationText(moderationText, text)
-	}
+	moderationText := buildPublicRequestMediaModerationText(text, len(payload.Photos), len(payload.Videos))
 	return publicRequestBodyMeta{Text: text, ModerationText: moderationText, PhotoCount: len(payload.Photos), VideoCount: len(payload.Videos)}, true, nil
 }
 
@@ -375,11 +374,14 @@ func validatePublicRequestPhotoPayload(photo publicRequestPayloadPhoto, groupID 
 	fileID := strings.TrimSpace(photo.FileID)
 	url := strings.TrimSpace(photo.URL)
 	if fileID != "" || url != "" {
-		if fileID != "" && !strings.HasPrefix(fileID, "PF-") {
+		if fileID != "" && !validPublicRequestFileID(fileID) {
 			return NewValidationError("photo file_id is invalid")
 		}
 		if url != "" && !validPublicRequestFileURL(url, groupID) {
 			return NewValidationError("photo url is invalid")
+		}
+		if fileID != "" && url != "" && !strings.HasSuffix(url, "/"+fileID) {
+			return NewValidationError("photo file_id and url do not match")
 		}
 		return nil
 	}
@@ -407,6 +409,18 @@ func validatePublicRequestPhotoPayload(photo publicRequestPayloadPhoto, groupID 
 	return nil
 }
 
+func validPublicRequestFileID(fileID string) bool {
+	if len(fileID) < 8 || len(fileID) > 80 || !strings.HasPrefix(fileID, "PF-") {
+		return false
+	}
+	for _, char := range fileID {
+		if !((char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || char == '-') {
+			return false
+		}
+	}
+	return true
+}
+
 func validPublicRequestFileURL(value, groupID string) bool {
 	if value == "" || groupID == "" || !strings.HasPrefix(value, "/") || strings.HasPrefix(value, "//") || strings.ContainsAny(value, "%?#\\") {
 		return false
@@ -422,19 +436,27 @@ func validPublicRequestFileURL(value, groupID string) bool {
 	if len(parts) != 4 || parts[0] != "api" || parts[1] != "public-files" || parts[2] != groupID {
 		return false
 	}
-	fileID := parts[3]
-	if !strings.HasPrefix(fileID, "PF-") || len(fileID) < 8 || len(fileID) > 80 {
-		return false
-	}
-	for _, char := range fileID {
-		if !((char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || char == '-') {
-			return false
-		}
-	}
-	return true
+	return validPublicRequestFileID(parts[3])
 }
 
-func validatePublicRequestVideoPayload(video publicRequestPayloadVideo) error {
+func validatePublicRequestVideoPayload(video publicRequestPayloadVideo, groupID string) error {
+	if video.SizeBytes > maxPublicRequestVideoBytes {
+		return NewValidationError(fmt.Sprintf("video must be less than %d bytes", maxPublicRequestVideoBytes))
+	}
+	fileID := strings.TrimSpace(video.FileID)
+	url := strings.TrimSpace(video.URL)
+	if fileID != "" || url != "" {
+		if fileID != "" && !validPublicRequestFileID(fileID) {
+			return NewValidationError("video file_id is invalid")
+		}
+		if url != "" && !validPublicRequestFileURL(url, groupID) {
+			return NewValidationError("video url is invalid")
+		}
+		if fileID != "" && url != "" && !strings.HasSuffix(url, "/"+fileID) {
+			return NewValidationError("video file_id and url do not match")
+		}
+		return nil
+	}
 	data := strings.TrimSpace(video.Base64)
 	if data == "" {
 		return NewValidationError("video data is required")
@@ -455,32 +477,11 @@ func validatePublicRequestVideoPayload(video publicRequestPayloadVideo) error {
 	if len(decoded) > maxPublicRequestVideoBytes {
 		return NewValidationError(fmt.Sprintf("video must be less than %d bytes", maxPublicRequestVideoBytes))
 	}
-	if video.SizeBytes > 0 && video.SizeBytes > maxPublicRequestVideoBytes {
-		return NewValidationError(fmt.Sprintf("video must be less than %d bytes", maxPublicRequestVideoBytes))
-	}
 	return nil
 }
 
 func buildPublicRequestMediaModerationText(text string, photoCount, videoCount int) string {
 	return strings.TrimSpace(text)
-}
-
-func cleanPublicRequestModerationText(moderationText, fallbackText string) string {
-	lines := strings.Split(moderationText, "\n")
-	cleaned := make([]string, 0, len(lines))
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		lower := strings.ToLower(trimmed)
-		if trimmed == "" || strings.HasPrefix(lower, "attached photos") || strings.HasPrefix(lower, "attached videos") || strings.HasPrefix(lower, "photo file:") || strings.HasPrefix(lower, "video file:") {
-			continue
-		}
-		cleaned = append(cleaned, trimmed)
-	}
-	result := strings.TrimSpace(strings.Join(cleaned, "\n"))
-	if result != "" {
-		return result
-	}
-	return strings.TrimSpace(fallbackText)
 }
 
 func moderationBodyForInput(item domain.ContentModerationItem) string {

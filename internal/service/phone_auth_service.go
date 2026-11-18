@@ -19,7 +19,18 @@ const (
 	phoneCodeRateLimitWindow = 10 * time.Minute
 	phoneCodeRateLimitMax    = 3
 	phoneCodeMinRequestGap   = 30 * time.Second
+
+	// SMS spend guards (toll-fraud / SMS-pumping protection).
+	phoneCodeDailyWindow            = 24 * time.Hour
+	phoneCodeDailyMax               = 8
+	phoneCodeGlobalWindow           = time.Hour
+	defaultPhoneCodeGlobalHourlyMax = 500
 )
+
+// defaultSMSAllowedCountryPrefixes limits where verification SMS may be sent.
+// KOOM serves Kyrgyzstan; sending codes to arbitrary countries lets attackers
+// pump premium-rate numbers at the project's expense.
+var defaultSMSAllowedCountryPrefixes = []string{"+996"}
 
 type PhoneAuthConfig struct {
 	JWTSecret           string
@@ -29,6 +40,10 @@ type PhoneAuthConfig struct {
 	TestAuthPhone       string
 	TestAuthCode        string
 	TestAuthDisplayName string
+	// SMSAllowedCountryPrefixes overrides defaultSMSAllowedCountryPrefixes when set.
+	SMSAllowedCountryPrefixes []string
+	// SMSGlobalHourlyMax overrides defaultPhoneCodeGlobalHourlyMax when positive.
+	SMSGlobalHourlyMax int
 }
 
 type PhoneAuthService struct {
@@ -50,13 +65,20 @@ func (s *PhoneAuthService) RequestCode(ctx context.Context, input RequestPhoneCo
 	if s.isTestAuthMobile(mobile) {
 		return RequestPhoneCodeOutput{Status: "test_code_ready", DevCode: s.expectedTestAuthCode()}, nil
 	}
+	if !s.smsCountryAllowed(mobile) {
+		return RequestPhoneCodeOutput{}, NewValidationError("sms verification is not available for this phone number")
+	}
+
+	now := time.Now().UTC()
+	if err := s.checkSMSBudget(ctx, mobile, now); err != nil {
+		return RequestPhoneCodeOutput{}, err
+	}
 
 	code, err := newNumericCode(6)
 	if err != nil {
 		return RequestPhoneCodeOutput{}, err
 	}
 	codeID := "PC-" + strings.ToUpper(randomHex(12))
-	now := time.Now().UTC()
 	allowed, err := s.repo.CreatePhoneCodeIfWithinLimit(
 		ctx,
 		codeID,
@@ -200,21 +222,32 @@ func (s *PhoneAuthService) Refresh(ctx context.Context, input RefreshInput) (dom
 }
 
 func (s *PhoneAuthService) Logout(ctx context.Context, input RefreshInput) error {
+	_, err := s.LogoutSession(ctx, input)
+	return err
+}
+
+// LogoutSession revokes the refresh session and returns the user it belonged
+// to ("" when the token was unknown or already revoked), so callers can also
+// close that user's realtime connections.
+func (s *PhoneAuthService) LogoutSession(ctx context.Context, input RefreshInput) (string, error) {
 	refreshToken := strings.TrimSpace(input.RefreshToken)
 	if refreshToken == "" {
-		return NewValidationError("refresh_token is required")
+		return "", NewValidationError("refresh_token is required")
 	}
 	record, err := s.repo.GetRefreshSession(ctx, security.HashToken(refreshToken))
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
-			return nil
+			return "", nil
 		}
-		return err
+		return "", err
 	}
 	if record.RevokedAt != nil {
-		return nil
+		return "", nil
 	}
-	return s.repo.RevokeRefreshSession(ctx, record.ID)
+	if err := s.repo.RevokeRefreshSession(ctx, record.ID); err != nil {
+		return "", err
+	}
+	return record.UserID, nil
 }
 
 func (s *PhoneAuthService) getOrCreatePhoneUser(ctx context.Context, mobile string, displayNameInput string) (domain.PhoneAuthUser, error) {

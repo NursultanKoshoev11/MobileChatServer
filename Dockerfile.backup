@@ -1,4 +1,9 @@
 FROM postgres:16-alpine
-RUN apk add --no-cache rclone
+# age encrypts backups when BACKUP_AGE_RECIPIENT / BACKUP_AGE_RECIPIENTS_FILE is set.
+RUN apk add --no-cache rclone age
 COPY scripts/backup-postgres.sh /usr/local/bin/backup-postgres.sh
-RUN chmod 0755 /usr/local/bin/backup-postgres.sh
+COPY scripts/restore-postgres.sh /usr/local/bin/restore-postgres.sh
+COPY scripts/restore-media.sh /usr/local/bin/restore-media.sh
+# Strip CR in case the build context comes from a Windows (core.autocrlf) checkout.
+RUN sed -i 's/\r$//' /usr/local/bin/backup-postgres.sh /usr/local/bin/restore-postgres.sh /usr/local/bin/restore-media.sh \
+    && chmod 0755 /usr/local/bin/backup-postgres.sh /usr/local/bin/restore-postgres.sh /usr/local/bin/restore-media.sh

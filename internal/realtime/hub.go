@@ -45,6 +45,7 @@ type Hub struct {
 	groups               map[string]map[*Client]bool
 	users                map[string]map[*Client]bool
 	remoteIPs            map[string]map[*Client]bool
+	revokedUsers         map[string]struct{}
 	eventCounter         uint64
 }
 
@@ -59,12 +60,17 @@ func NewHub(logger *log.Logger, validators ...AuthRefreshValidator) *Hub {
 		groups:               make(map[string]map[*Client]bool),
 		users:                make(map[string]map[*Client]bool),
 		remoteIPs:            make(map[string]map[*Client]bool),
+		revokedUsers:         make(map[string]struct{}),
 	}
 }
 
 func (h *Hub) Register(client *Client) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if _, revoked := h.revokedUsers[client.UserID]; revoked {
+		h.logger.Printf("websocket rejected: account was deleted user_id=%q remote_ip=%q", client.UserID, client.RemoteIP)
+		return false
+	}
 	if h.clientCountLocked() >= maxTotalConnections {
 		h.logger.Printf("websocket rejected: total connection limit reached user_id=%q remote_ip=%q", client.UserID, client.RemoteIP)
 		return false
@@ -94,6 +100,72 @@ func (h *Hub) Register(client *Client) bool {
 		h.remoteIPs[client.RemoteIP][client] = true
 	}
 	return true
+}
+
+// DisconnectUser revokes this process's existing and in-flight WebSocket
+// registrations after account deletion. Deleted user IDs cannot authenticate
+// again, so retaining the in-memory tombstone until process restart is safe.
+func (h *Hub) DisconnectUser(userID string) {
+	h.mu.Lock()
+	h.revokedUsers[userID] = struct{}{}
+	clients := make([]*Client, 0, len(h.users[userID]))
+	for client := range h.users[userID] {
+		clients = append(clients, client)
+	}
+	h.mu.Unlock()
+
+	for _, client := range clients {
+		h.Unregister(client)
+		_ = client.Conn.Close()
+	}
+}
+
+// DisconnectUserSessions closes this process's sockets for userID without
+// blocking future connections (used on logout; the user may sign in again).
+func (h *Hub) DisconnectUserSessions(userID string) {
+	h.mu.RLock()
+	clients := make([]*Client, 0, len(h.users[userID]))
+	for client := range h.users[userID] {
+		clients = append(clients, client)
+	}
+	h.mu.RUnlock()
+	h.closeClients(clients)
+}
+
+// RemoveUserFromGroup stops delivering a group's events to a user who left or
+// was removed from it by closing that user's sockets subscribed to the group.
+// Group events sent through user sockets are addressed from the current member
+// list, so those need no change.
+func (h *Hub) RemoveUserFromGroup(groupID, userID string) {
+	h.mu.RLock()
+	clients := make([]*Client, 0)
+	for client := range h.groups[groupID] {
+		if client.UserID == userID {
+			clients = append(clients, client)
+		}
+	}
+	h.mu.RUnlock()
+	h.closeClients(clients)
+}
+
+// CloseGroup closes every socket subscribed to a deleted group.
+func (h *Hub) CloseGroup(groupID string) {
+	h.mu.RLock()
+	clients := make([]*Client, 0, len(h.groups[groupID]))
+	for client := range h.groups[groupID] {
+		clients = append(clients, client)
+	}
+	h.mu.RUnlock()
+	h.closeClients(clients)
+}
+
+func (h *Hub) closeClients(clients []*Client) {
+	for _, client := range clients {
+		h.Unregister(client)
+		if client.Conn != nil {
+			_ = client.Conn.Close()
+		}
+	}
 }
 
 func (h *Hub) Unregister(client *Client) {

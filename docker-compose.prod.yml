@@ -4,6 +4,10 @@ services:
     image: caddy:2.11.4-alpine
     container_name: mobilechat-caddy
     restart: unless-stopped
+    mem_limit: ${CADDY_MEM_LIMIT:-256m}
+    cpus: ${CADDY_CPUS:-0.5}
+    security_opt:
+      - no-new-privileges:true
     logging:
       driver: json-file
       options:
@@ -30,6 +34,15 @@ services:
     image: postgres:16-alpine
     container_name: mobilechat-postgres
     restart: unless-stopped
+    # Generous caps for a small VM; raise via .env.prod if the host is larger.
+    # cpus must not exceed the host's CPU count or the container will not start.
+    mem_limit: ${POSTGRES_MEM_LIMIT:-1g}
+    cpus: ${POSTGRES_CPUS:-1.0}
+    # The postgres entrypoint drops root via su-exec (no setuid binary), so
+    # no-new-privileges is safe; capabilities are left at the Docker default
+    # because the entrypoint needs CHOWN/SETUID/SETGID/DAC_OVERRIDE.
+    security_opt:
+      - no-new-privileges:true
     logging:
       driver: json-file
       options:
@@ -56,6 +69,12 @@ services:
       dockerfile: Dockerfile
     container_name: mobilechat-migrate
     restart: "no"
+    mem_limit: ${MIGRATE_MEM_LIMIT:-256m}
+    cpus: ${MIGRATE_CPUS:-0.5}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     depends_on:
       postgres:
         condition: service_healthy
@@ -69,7 +88,7 @@ services:
       ACCESS_TOKEN_TTL_MINUTES: ${ACCESS_TOKEN_TTL_MINUTES:-5}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://koom.com.kg}
       BCRYPT_COST: ${BCRYPT_COST:-12}
-      SMS_PROVIDER: ${SMS_PROVIDER:-twilio}
+      SMS_PROVIDER: ${SMS_PROVIDER:-smspro}
       SUPER_ADMIN_PHONES: ${SUPER_ADMIN_PHONES:-}
       PLATFORM_ADMIN_PHONES: ${PLATFORM_ADMIN_PHONES:-}
       FCM_PROJECT_ID: ${FCM_PROJECT_ID:-}
@@ -79,7 +98,7 @@ services:
       CONTENT_MODERATION_PROVIDER: ${CONTENT_MODERATION_PROVIDER:-huggingface}
       HF_TOKEN: ${HF_TOKEN:-}
       HF_MODERATION_MODEL: ${HF_MODERATION_MODEL:-unitary/multilingual-toxic-xlm-roberta}
-      HF_MODERATION_ENDPOINT: ${HF_MODERATION_ENDPOINT:-https://api-inference.huggingface.co/models}
+      HF_MODERATION_ENDPOINT: ${HF_MODERATION_ENDPOINT:-https://router.huggingface.co/hf-inference/models}
       HF_MODERATION_THRESHOLD: ${HF_MODERATION_THRESHOLD:-0.72}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODERATION_MODEL: ${OPENAI_MODERATION_MODEL:-omni-moderation-latest}
@@ -95,6 +114,20 @@ services:
       dockerfile: Dockerfile
     container_name: mobilechat-api
     restart: unless-stopped
+    mem_limit: ${API_MEM_LIMIT:-768m}
+    cpus: ${API_CPUS:-1.0}
+    security_opt:
+      - no-new-privileges:true
+    # The API runs as uid 10001 and binds 8080, so it needs no capabilities.
+    cap_drop:
+      - ALL
+    # The API writes only to PUBLIC_FILE_DIR (/app/data, a bind mount) and to
+    # os.TempDir() for large multipart uploads (/tmp, tmpfs below). A read-only
+    # root filesystem is opt-in: set API_READ_ONLY_ROOTFS=true after checking
+    # that new code paths do not write elsewhere (see docs/SECURITY-OPERATIONS.md).
+    read_only: ${API_READ_ONLY_ROOTFS:-false}
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=${API_TMPFS_SIZE:-128m}
     logging:
       driver: json-file
       options:
@@ -112,11 +145,14 @@ services:
       ACCESS_TOKEN_TTL_MINUTES: ${ACCESS_TOKEN_TTL_MINUTES:-5}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://koom.com.kg}
       BCRYPT_COST: ${BCRYPT_COST:-12}
-      SMS_PROVIDER: ${SMS_PROVIDER:-twilio}
+      SMS_PROVIDER: ${SMS_PROVIDER:-smspro}
       TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
       TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
       SMS_FROM: ${SMS_FROM:-}
       TWILIO_MESSAGING_SERVICE_SID: ${TWILIO_MESSAGING_SERVICE_SID:-}
+      SMSPRO_LOGIN: ${SMSPRO_LOGIN:-}
+      SMSPRO_PASSWORD: ${SMSPRO_PASSWORD:-}
+      SMSPRO_SENDER: ${SMSPRO_SENDER:-}
       TEST_AUTH_ENABLED: ${TEST_AUTH_ENABLED:-false}
       TEST_AUTH_PHONE: ${TEST_AUTH_PHONE:-}
       TEST_AUTH_CODE: ${TEST_AUTH_CODE:-}
@@ -130,12 +166,14 @@ services:
       CONTENT_MODERATION_PROVIDER: ${CONTENT_MODERATION_PROVIDER:-huggingface}
       HF_TOKEN: ${HF_TOKEN:-}
       HF_MODERATION_MODEL: ${HF_MODERATION_MODEL:-unitary/multilingual-toxic-xlm-roberta}
-      HF_MODERATION_ENDPOINT: ${HF_MODERATION_ENDPOINT:-https://api-inference.huggingface.co/models}
+      HF_MODERATION_ENDPOINT: ${HF_MODERATION_ENDPOINT:-https://router.huggingface.co/hf-inference/models}
       HF_MODERATION_THRESHOLD: ${HF_MODERATION_THRESHOLD:-0.72}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODERATION_MODEL: ${OPENAI_MODERATION_MODEL:-omni-moderation-latest}
       OPENAI_MODERATION_ENDPOINT: ${OPENAI_MODERATION_ENDPOINT:-https://api.openai.com/v1/moderations}
       MODERATION_FAIL_CLOSED: ${MODERATION_FAIL_CLOSED:-true}
+      SMS_ALLOWED_COUNTRY_PREFIXES: ${SMS_ALLOWED_COUNTRY_PREFIXES:-+996}
+      SMS_GLOBAL_HOURLY_MAX: ${SMS_GLOBAL_HOURLY_MAX:-500}
       PUBLIC_FILE_DIR: ${PUBLIC_FILE_DIR:-/app/data/public-files}
       TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-172.18.0.0/16}
     ports:
@@ -158,6 +196,10 @@ services:
     image: mobilechat-backup:prod
     container_name: mobilechat-backup
     restart: unless-stopped
+    mem_limit: ${BACKUP_MEM_LIMIT:-512m}
+    cpus: ${BACKUP_CPUS:-0.5}
+    security_opt:
+      - no-new-privileges:true
     logging:
       driver: json-file
       options:
@@ -177,6 +219,12 @@ services:
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
       AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      # Optional age encryption of dumps/media archives (public keys only; see docs/BACKUPS.md).
+      BACKUP_AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT:-}
+      BACKUP_AGE_RECIPIENTS_FILE: ${BACKUP_AGE_RECIPIENTS_FILE:-}
+      # Optional S3 server-side encryption: AES256 or aws:kms.
+      BACKUP_S3_SSE: ${BACKUP_S3_SSE:-}
+      BACKUP_S3_SSE_KMS_KEY_ID: ${BACKUP_S3_SSE_KMS_KEY_ID:-}
     volumes:
       - ./backups:/backups
       - ./data:/app-data:ro
@@ -197,10 +245,10 @@ services:
         - >-
           test -n "$(find /backups -maxdepth 1 -type f -name 'backup-success' -mmin -1500 -print -quit)" &&
           grep -qx 'offsite=uploaded' /backups/backup-success &&
-          test -n "$(find /backups -maxdepth 1 -type f -name "$${BACKUP_PREFIX:-mobilechat}-*.dump" -mmin -1500 -print -quit)" &&
-          test -n "$(find /backups -maxdepth 1 -type f -name "$${BACKUP_PREFIX:-mobilechat}-*.dump.sha256" -mmin -1500 -print -quit)" &&
-          test -n "$(find /backups -maxdepth 1 -type f -name "$${BACKUP_PREFIX:-mobilechat}-files-*.tar.gz" -mmin -1500 -print -quit)" &&
-          test -n "$(find /backups -maxdepth 1 -type f -name "$${BACKUP_PREFIX:-mobilechat}-files-*.tar.gz.sha256" -mmin -1500 -print -quit)"
+          test -n "$(find /backups -maxdepth 1 -type f \( -name "$${BACKUP_PREFIX:-mobilechat}-*.dump" -o -name "$${BACKUP_PREFIX:-mobilechat}-*.dump.age" \) -mmin -1500 -print -quit)" &&
+          test -n "$(find /backups -maxdepth 1 -type f \( -name "$${BACKUP_PREFIX:-mobilechat}-*.dump.sha256" -o -name "$${BACKUP_PREFIX:-mobilechat}-*.dump.age.sha256" \) -mmin -1500 -print -quit)" &&
+          test -n "$(find /backups -maxdepth 1 -type f \( -name "$${BACKUP_PREFIX:-mobilechat}-files-*.tar.gz" -o -name "$${BACKUP_PREFIX:-mobilechat}-files-*.tar.gz.age" \) -mmin -1500 -print -quit)" &&
+          test -n "$(find /backups -maxdepth 1 -type f \( -name "$${BACKUP_PREFIX:-mobilechat}-files-*.tar.gz.sha256" -o -name "$${BACKUP_PREFIX:-mobilechat}-files-*.tar.gz.age.sha256" \) -mmin -1500 -print -quit)"
       interval: 5m
       timeout: 10s
       retries: 2

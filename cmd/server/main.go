@@ -94,13 +94,15 @@ func main() {
 	logModerationConfig(logger, cfg)
 
 	phoneAuth := service.NewPhoneAuth(repo, service.PhoneAuthConfig{
-		JWTSecret:           cfg.JWTSecret,
-		AccessTokenTTL:      cfg.AccessTokenTTL,
-		Environment:         cfg.Environment,
-		TestAuthEnabled:     cfg.TestAuthEnabled,
-		TestAuthPhone:       cfg.TestAuthPhone,
-		TestAuthCode:        cfg.TestAuthCode,
-		TestAuthDisplayName: cfg.TestAuthDisplayName,
+		JWTSecret:                 cfg.JWTSecret,
+		AccessTokenTTL:            cfg.AccessTokenTTL,
+		Environment:               cfg.Environment,
+		TestAuthEnabled:           cfg.TestAuthEnabled,
+		TestAuthPhone:             cfg.TestAuthPhone,
+		TestAuthCode:              cfg.TestAuthCode,
+		TestAuthDisplayName:       cfg.TestAuthDisplayName,
+		SMSAllowedCountryPrefixes: cfg.SMSAllowedCountryPrefixes,
+		SMSGlobalHourlyMax:        cfg.SMSGlobalHourlyMax,
 	}, smsSender)
 
 	handler := httpapi.New(svc, phoneAuth, logger, cfg.AllowedOrigins, cfg.TrustedProxyCIDRs)

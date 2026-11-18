@@ -27,6 +27,38 @@ Required authorization rules:
 ## Deployment
 
 - Use HTTPS in production.
+- Apply and validate `deployment/edge/Caddyfile` on the edge host separately;
+  backend and static-site deployments do not refresh its bind-mounted Caddy
+  configuration. Confirm all required response headers on each public HTML
+  route after Caddy reload.
+- Verify HSTS, CSP, `X-Content-Type-Options`, `X-Frame-Options`,
+  `Referrer-Policy`, and `Permissions-Policy` on each public HTML page after
+  deployment; reverse-proxy configuration alone may not match the running server.
 - Store secrets in environment variables or a secret manager.
 - Keep `.env` and signing keys outside Docker images.
-- Run server CI, CodeQL, dependency checks, and container scanning before release.
+- Run server CI (`go test`, `go vet`, and pinned `govulncheck`), CodeQL for Go, and
+  Trivy image scanning before release. The production package workflow stops
+  on HIGH or CRITICAL OS/library vulnerabilities. CodeQL and Trivy are present
+  only in the local pilot branch and are not yet required checks. Add them to
+  the gate after their first successful GitHub runs; CodeQL result upload
+  requires a public repository or GitHub Code Security entitlement.
+- Keep deployment, PostgreSQL volume, media directory, and backup paths stable;
+  inspect existing host mounts before any recovery or migration.
+- Verify a recent database dump and media archive, checksums, and offsite upload.
+
+## Privacy and store release
+
+- Group member roster APIs do not return personal phone numbers.
+- Provide an in-app abuse and safety reporting flow, route reports to a monitored
+  queue, and document who reviews them and how actions are recorded before a
+  broader pilot.
+- The app and `/account-deletion` page provide account deletion. Public requests
+  and comments are retained without author identity; private messages, votes,
+  profile data, and session tokens are removed. Confirm the Play Console web
+  deletion URL and test the flow after the database migration is deployed.
+- Set S3 lifecycle retention for current objects and noncurrent versions. The
+  backup script prunes expired current objects, while S3 versioning requires a
+  bucket lifecycle rule to expire historical versions too.
+- Publish privacy and child-safety information in the languages used by the
+  target audience and keep the store data-safety declarations consistent with
+  actual collection, sharing, and retention.

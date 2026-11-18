@@ -115,8 +115,9 @@ func (r *Repository) ListUserGroups(ctx context.Context, userID string) ([]domai
 		           FROM public_requests pr
 		           LEFT JOIN public_request_reads prr ON prr.group_id = pr.group_id AND prr.user_id = $1
 		           WHERE pr.group_id = g.id
-		             AND pr.author_id <> $1
+		             AND pr.author_id IS DISTINCT FROM $1
 		             AND pr.created_at > COALESCE(prr.last_read_at, 'epoch'::timestamptz)
+		             AND NOT EXISTS (SELECT 1 FROM user_blocks ub WHERE ub.blocker_id = $1 AND ub.blocked_id = pr.author_id)
 		       ) AS unread_public_request_count
 		FROM groups g
 		JOIN group_members gm ON gm.group_id = g.id AND gm.user_id = $1
@@ -148,11 +149,11 @@ func (r *Repository) SearchPublicGroups(ctx context.Context, queryText string) (
 		FROM groups g
 		LEFT JOIN group_members gm ON gm.group_id = g.id
 		WHERE g.visibility = 'public'
-		  AND ($1 = '' OR lower(g.title) LIKE '%' || lower($1) || '%' OR lower(g.description) LIKE '%' || lower($1) || '%')
+		  AND ($1 = '' OR lower(g.title) LIKE '%' || lower($1) || '%' ESCAPE '\' OR lower(g.description) LIKE '%' || lower($1) || '%' ESCAPE '\')
 		GROUP BY g.id
 		ORDER BY g.created_at DESC
 		LIMIT 50`
-	rows, err := r.db.Query(ctx, query, queryText)
+	rows, err := r.db.Query(ctx, query, EscapeLikePattern(queryText))
 	if err != nil {
 		return nil, fmt.Errorf("search public groups: %w", err)
 	}
@@ -333,18 +334,18 @@ func (r *Repository) InviteUserByID(ctx context.Context, groupID, adminID, targe
 }
 
 func (r *Repository) CreateMessage(ctx context.Context, message domain.Message) (domain.Message, error) {
-	isMember, err := r.IsGroupMember(ctx, message.GroupID, message.SenderID)
-	if err != nil {
-		return domain.Message{}, err
-	}
-	if !isMember {
-		return domain.Message{}, ErrForbidden
-	}
 	query := `
 		INSERT INTO messages (id, group_id, sender_id, text, created_at)
-		VALUES ($1, $2, $3, $4, now())
+		SELECT $1, $2, $3, $4, now()
+		WHERE EXISTS (
+			SELECT 1 FROM group_members
+			WHERE group_id = $2 AND user_id = $3 AND role IN ('owner', 'admin')
+		)
 		RETURNING created_at`
 	if err := r.db.QueryRow(ctx, query, message.ID, message.GroupID, message.SenderID, message.Text).Scan(&message.CreatedAt); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.Message{}, ErrForbidden
+		}
 		return domain.Message{}, fmt.Errorf("create message: %w", err)
 	}
 	user, err := r.GetUserByID(ctx, message.SenderID)
@@ -355,7 +356,7 @@ func (r *Repository) CreateMessage(ctx context.Context, message domain.Message) 
 	return message, nil
 }
 
-func (r *Repository) ListMessages(ctx context.Context, groupID, userID string, limit int, before time.Time) ([]domain.Message, error) {
+func (r *Repository) ListMessages(ctx context.Context, groupID, userID string, limit int, before time.Time, beforeIDs ...string) ([]domain.Message, error) {
 	isMember, err := r.IsGroupMember(ctx, groupID, userID)
 	if err != nil {
 		return nil, err
@@ -370,14 +371,24 @@ func (r *Repository) ListMessages(ctx context.Context, groupID, userID string, l
 		SELECT m.id, m.group_id, m.sender_id, u.display_name, m.text, m.created_at
 		FROM messages m
 		JOIN users u ON u.id = m.sender_id
-		WHERE m.group_id = $1 AND m.deleted_at IS NULL AND ($2::timestamptz IS NULL OR m.created_at < $2)
-		ORDER BY m.created_at DESC
-		LIMIT $3`
+		WHERE m.group_id = $1 AND m.deleted_at IS NULL AND (
+			$2::timestamptz IS NULL
+			OR ($3::text IS NULL AND m.created_at < $2)
+			OR ($3::text IS NOT NULL AND (m.created_at, m.id) < ($2, $3))
+		)
+		  AND NOT EXISTS (SELECT 1 FROM user_blocks ub WHERE ub.blocker_id = $5 AND ub.blocked_id = m.sender_id)
+		ORDER BY m.created_at DESC, m.id DESC
+		LIMIT $4`
 	var beforePtr *time.Time
+	var beforeIDPtr *string
 	if !before.IsZero() {
 		beforePtr = &before
+		if len(beforeIDs) > 0 && strings.TrimSpace(beforeIDs[0]) != "" {
+			beforeID := strings.TrimSpace(beforeIDs[0])
+			beforeIDPtr = &beforeID
+		}
 	}
-	rows, err := r.db.Query(ctx, query, groupID, beforePtr, limit)
+	rows, err := r.db.Query(ctx, query, groupID, beforePtr, beforeIDPtr, limit, userID)
 	if err != nil {
 		return nil, fmt.Errorf("list messages: %w", err)
 	}
@@ -387,6 +398,43 @@ func (r *Repository) ListMessages(ctx context.Context, groupID, userID string, l
 		var message domain.Message
 		if err := rows.Scan(&message.ID, &message.GroupID, &message.SenderID, &message.SenderName, &message.Text, &message.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan message: %w", err)
+		}
+		messages = append(messages, message)
+	}
+	return messages, rows.Err()
+}
+
+func (r *Repository) ListMessagesAfter(ctx context.Context, groupID, userID string, limit int, after time.Time, afterID string) ([]domain.Message, error) {
+	isMember, err := r.IsGroupMember(ctx, groupID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !isMember {
+		return nil, ErrForbidden
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 100
+	}
+	query := `
+		SELECT m.id, m.group_id, m.sender_id, u.display_name, m.text, m.created_at
+		FROM messages m
+		JOIN users u ON u.id = m.sender_id
+		WHERE m.group_id = $1
+		  AND m.deleted_at IS NULL
+		  AND (m.created_at, m.id) > ($2, $3)
+		  AND NOT EXISTS (SELECT 1 FROM user_blocks ub WHERE ub.blocker_id = $5 AND ub.blocked_id = m.sender_id)
+		ORDER BY m.created_at ASC, m.id ASC
+		LIMIT $4`
+	rows, err := r.db.Query(ctx, query, groupID, after, afterID, limit, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list messages after cursor: %w", err)
+	}
+	defer rows.Close()
+	messages := make([]domain.Message, 0)
+	for rows.Next() {
+		var message domain.Message
+		if err := rows.Scan(&message.ID, &message.GroupID, &message.SenderID, &message.SenderName, &message.Text, &message.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan message after cursor: %w", err)
 		}
 		messages = append(messages, message)
 	}
@@ -419,6 +467,14 @@ func (r *Repository) GetMemberRole(ctx context.Context, groupID, userID string) 
 	}
 	return role, nil
 }
+
+// EscapeLikePattern escapes LIKE wildcards so user input is matched literally
+// (used with ESCAPE '\').
+func EscapeLikePattern(value string) string {
+	return likePatternEscaper.Replace(value)
+}
+
+var likePatternEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 
 func nullableInviteCode(inviteCode string) any {
 	value := strings.TrimSpace(inviteCode)
@@ -470,8 +526,9 @@ func nullableString(value string) any {
 }
 
 var (
-	ErrNotFound  = errors.New("not found")
-	ErrForbidden = errors.New("forbidden")
+	ErrNotFound                       = errors.New("not found")
+	ErrForbidden                      = errors.New("forbidden")
+	ErrGroupOwnershipTransferRequired = errors.New("group ownership transfer required")
 )
 
 func (r *Repository) ensurePublicRequestReadsTable(ctx context.Context) error {

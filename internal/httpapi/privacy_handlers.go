@@ -5,6 +5,8 @@ import "net/http"
 func (s *Server) privacyPolicy(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; script-src 'none'")
+	setSiteSecurityHeaders(w)
 	_, _ = w.Write([]byte(privacyPolicyHTML))
 }
 
@@ -35,7 +37,7 @@ const privacyPolicyHTML = `<!doctype html>
 <main>
   <article class="card">
     <h1>Koom Privacy Policy</h1>
-    <p class="muted">Last updated: July 9, 2026</p>
+    <p class="muted">Last updated: November 17, 2026</p>
     <p>Koom is a community communication application for groups, posts, comments, voting, public requests, media sharing, notifications, and related community features. This Privacy Policy explains what information we collect, how we use it, and what choices users have.</p>
 
     <h2>1. Information we collect</h2>
@@ -72,8 +74,9 @@ const privacyPolicyHTML = `<!doctype html>
     <h2>6. Security</h2>
     <p>We use reasonable technical and organizational measures to protect information against unauthorized access, loss, misuse, alteration, or disclosure. No online service can be guaranteed to be completely secure, but we work to protect user accounts, app data, and service infrastructure.</p>
 
-    <h2>7. User choices and requests</h2>
-    <p>You may contact us to request access, correction, or deletion of your personal information where applicable. Some information may need to be retained when required for legal, security, fraud prevention, backup, dispute resolution, or operational reasons.</p>
+    <h2>7. User choices and account deletion</h2>
+    <p>You can delete your account from Profile settings in the Koom app or start deletion at <a href="/account-deletion">koom.com.kg/account-deletion</a>. Deletion removes your profile, phone number, active sessions, push tokens, votes, group chat messages, and other account-linked records. Public requests and comments remain with the author identity removed; their text and attached media remain part of the public record. Groups you own are transferred to an existing group admin or member. If you are the only member of a group, invite another member before deleting your account.</p>
+    <p>Account deletion from the live service may not immediately remove information from protected backups. Backup copies are removed according to their configured retention schedule. For access or correction requests, or if you cannot access the phone number on your account, contact us at <a href="mailto:nursultankosoev2@gmail.com">nursultankosoev2@gmail.com</a>.</p>
 
     <h2>8. Children</h2>
     <p>Koom is not intended for children under the minimum age required by applicable law. If we learn that personal information from a child was collected without appropriate consent where consent is required, we will take reasonable steps to delete it.</p>
@@ -88,5 +91,6 @@ const privacyPolicyHTML = `<!doctype html>
     <p>For privacy questions or requests, contact us at <a href="mailto:nursultankosoev2@gmail.com">nursultankosoev2@gmail.com</a>.</p>
   </article>
 </main>
+<footer style="max-width:980px;margin:0 auto;padding:0 18px 40px;color:#617191;font-size:13px"><a href="/terms">Terms of Use / Условия использования</a> · <a href="/account-deletion">Account deletion</a> · <a href="/child-safety">Child safety</a></footer>
 </body>
 </html>`

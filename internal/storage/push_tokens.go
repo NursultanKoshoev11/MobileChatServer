@@ -12,6 +12,9 @@ type PushToken struct {
 	Platform string
 }
 
+// UpsertPushToken registers a device token for userID. Tokens are globally
+// unique: registering a token that belongs to another account moves it to
+// userID, so a shared or re-used device stops notifying the previous account.
 func (r *Repository) UpsertPushToken(ctx context.Context, userID, token, platform string) error {
 	userID = strings.TrimSpace(userID)
 	token = strings.TrimSpace(token)
@@ -25,7 +28,7 @@ func (r *Repository) UpsertPushToken(ctx context.Context, userID, token, platfor
 	_, err := r.db.Exec(ctx, `
 		INSERT INTO push_tokens (user_id, token, platform, created_at, updated_at)
 		VALUES ($1, $2, $3, now(), now())
-		ON CONFLICT (user_id, token) DO UPDATE SET platform = EXCLUDED.platform, updated_at = now()`, userID, token, platform)
+		ON CONFLICT (token) DO UPDATE SET user_id = EXCLUDED.user_id, platform = EXCLUDED.platform, updated_at = now()`, userID, token, platform)
 	if err != nil {
 		return fmt.Errorf("upsert push token: %w", err)
 	}

@@ -140,34 +140,24 @@ func (s *Service) persistPublication(ctx context.Context, notice *ContentModerat
 		return "", fmt.Errorf("pending moderation item is invalid")
 	}
 
-	var publishedResourceID string
+	// Content that needs review is held back: only the moderation item is stored
+	// (with no published resource). ApproveContentModerationItem creates the
+	// message, request or comment from the stored item once a moderator approves
+	// it, and RejectContentModerationItem simply closes the item. Nothing is
+	// visible to other members until then.
+	item.PublishedResourceID = ""
 	if err := s.recordAuditedMutation(ctx, item.AuthorID, "content_moderation_queued", string(item.ContentType), item.ID, func(repo *storage.Repository) error {
-		resourceID, err := publish(repo)
-		if err != nil {
-			return err
-		}
-		resourceID = strings.TrimSpace(resourceID)
-		if resourceID == "" {
-			return fmt.Errorf("moderated publication returned an empty resource id")
-		}
-		item.PublishedResourceID = resourceID
 		created, err := repo.CreateContentModerationItem(ctx, item)
 		if err != nil {
 			return err
 		}
 		notice.Item = created
-		if additionalEvent != nil {
-			if err := repo.CreateAuditEvent(ctx, additionalEvent.ID, additionalEvent.ActorUserID, additionalEvent.EventType, additionalEvent.ResourceType, additionalEvent.ResourceID, additionalEvent.MetadataJSON); err != nil {
-				return fmt.Errorf("persist publication audit event: %w", err)
-			}
-		}
-		publishedResourceID = resourceID
 		return nil
 	}); err != nil {
 		return "", err
 	}
 	go s.NotifyAdminsAboutContentModerationPending(context.Background(), notice.Item)
-	return publishedResourceID, nil
+	return "", ContentModerationPendingError{Item: notice.Item}
 }
 
 func (s *Service) enforceModerationRateLimit(ctx context.Context, item domain.ContentModerationItem) error {

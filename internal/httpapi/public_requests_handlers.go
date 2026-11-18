@@ -3,8 +3,10 @@ package httpapi
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/NursultanKoshoev11/MobileChatServer/internal/domain"
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/realtime"
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/service"
 	"github.com/go-chi/chi/v5"
@@ -33,13 +35,20 @@ func (s *Server) listPublicRequests(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var before time.Time
+	beforeID := strings.TrimSpace(r.URL.Query().Get("before_id"))
 	if raw := r.URL.Query().Get("before"); raw != "" {
-		if parsed, err := time.Parse(time.RFC3339Nano, raw); err == nil {
-			before = parsed
+		parsed, err := time.Parse(time.RFC3339Nano, raw)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid before cursor"})
+			return
 		}
+		before = parsed
+	} else if beforeID != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "before timestamp is required with before_id"})
+		return
 	}
 	mineOnly := r.URL.Query().Get("mine") == "true"
-	requests, err := s.svc.ListPublicRequests(r.Context(), currentUser(r).ID, chi.URLParam(r, "groupID"), limit, before, mineOnly)
+	requests, err := s.svc.ListPublicRequests(r.Context(), currentUser(r).ID, chi.URLParam(r, "groupID"), limit, before, beforeID, mineOnly)
 	if err != nil {
 		s.writeError(w, err)
 		return
@@ -54,7 +63,7 @@ func (s *Server) supportPublicRequest(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, err)
 		return
 	}
-	s.broadcastPublicRequestRefresh(r, requestID, "public_request.voted", update)
+	s.broadcastVoteUpdate(r, "public_request.voted", update)
 	writeJSON(w, http.StatusOK, update)
 }
 
@@ -65,7 +74,7 @@ func (s *Server) opposePublicRequest(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, err)
 		return
 	}
-	s.broadcastPublicRequestRefresh(r, requestID, "public_request.voted", update)
+	s.broadcastVoteUpdate(r, "public_request.voted", update)
 	writeJSON(w, http.StatusOK, update)
 }
 
@@ -76,7 +85,7 @@ func (s *Server) clearPublicRequestVote(w http.ResponseWriter, r *http.Request) 
 		s.writeError(w, err)
 		return
 	}
-	s.broadcastPublicRequestRefresh(r, requestID, "public_request.vote_cleared", update)
+	s.broadcastVoteUpdate(r, "public_request.vote_cleared", update)
 	writeJSON(w, http.StatusOK, update)
 }
 
@@ -127,6 +136,29 @@ func (s *Server) updatePublicRequestStatus(w http.ResponseWriter, r *http.Reques
 	}
 	s.broadcastPublicRequestRefresh(r, requestID, "public_request.status_updated", map[string]string{"request_id": requestID, "status": string(input.Status)})
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
+
+// voteAggregatePayload is the vote event every group member receives: counts
+// only. Who voted and how is private to the voter.
+func voteAggregatePayload(update domain.PublicRequestVoteUpdate) map[string]any {
+	return map[string]any{
+		"request_id":    update.RequestID,
+		"support_count": update.SupportCount,
+		"oppose_count":  update.OpposeCount,
+	}
+}
+
+// broadcastVoteUpdate sends aggregate counts to the group and the full update
+// (voter_id + vote_type, from which clients derive my_vote) only to the
+// voter's own sockets.
+func (s *Server) broadcastVoteUpdate(r *http.Request, eventType string, update domain.PublicRequestVoteUpdate) {
+	ctx, err := s.svc.GetPublicRequestRealtimeContext(r.Context(), update.RequestID)
+	if err != nil || ctx.GroupID == "" {
+		s.logger.Printf("public request vote realtime skipped request_id=%q type=%q", update.RequestID, eventType)
+		return
+	}
+	s.broadcastGroupAndUsers(r, ctx.GroupID, realtime.Event{Type: eventType, GroupID: ctx.GroupID, Payload: voteAggregatePayload(update)})
+	s.hub.NotifyUser(currentUser(r).ID, realtime.Event{Type: eventType, GroupID: ctx.GroupID, Payload: update})
 }
 
 func (s *Server) broadcastPublicRequestRefresh(r *http.Request, requestID string, eventType string, payload any) {

@@ -18,6 +18,9 @@ type Config struct {
 	BCryptCost                     int
 	Environment                    string
 	SMSProvider                    string
+	SMSProLogin                    string
+	SMSProPassword                 string
+	SMSProSender                   string
 	TwilioAccountSID               string
 	TwilioAuthToken                string
 	SMSFrom                        string
@@ -45,6 +48,10 @@ type Config struct {
 	RealtimeBroker                 string
 	BackendInstanceCount           int
 	TrustedProxyCIDRs              string
+	// SMSAllowedCountryPrefixes limits where verification SMS may be sent.
+	SMSAllowedCountryPrefixes []string
+	// SMSGlobalHourlyMax caps verification SMS sent per hour across all numbers.
+	SMSGlobalHourlyMax int
 }
 
 func Load() (Config, error) {
@@ -56,6 +63,9 @@ func Load() (Config, error) {
 		Environment:                    getEnv("APP_ENV", "production"),
 		BCryptCost:                     getEnvInt("BCRYPT_COST", 12),
 		SMSProvider:                    getEnv("SMS_PROVIDER", "disabled"),
+		SMSProLogin:                    os.Getenv("SMSPRO_LOGIN"),
+		SMSProPassword:                 os.Getenv("SMSPRO_PASSWORD"),
+		SMSProSender:                   os.Getenv("SMSPRO_SENDER"),
 		TwilioAccountSID:               os.Getenv("TWILIO_ACCOUNT_SID"),
 		TwilioAuthToken:                os.Getenv("TWILIO_AUTH_TOKEN"),
 		SMSFrom:                        os.Getenv("SMS_FROM"),
@@ -73,7 +83,7 @@ func Load() (Config, error) {
 		ContentModerationProvider:      getEnv("CONTENT_MODERATION_PROVIDER", "huggingface"),
 		HuggingFaceModerationToken:     os.Getenv("HF_TOKEN"),
 		HuggingFaceModerationModel:     getEnv("HF_MODERATION_MODEL", "unitary/multilingual-toxic-xlm-roberta"),
-		HuggingFaceModerationEndpoint:  getEnv("HF_MODERATION_ENDPOINT", "https://api-inference.huggingface.co/models"),
+		HuggingFaceModerationEndpoint:  getEnv("HF_MODERATION_ENDPOINT", "https://router.huggingface.co/hf-inference/models"),
 		HuggingFaceModerationThreshold: getEnvFloat("HF_MODERATION_THRESHOLD", 0.72),
 		OpenAIModerationAPIKey:         os.Getenv("OPENAI_API_KEY"),
 		OpenAIModerationModel:          getEnv("OPENAI_MODERATION_MODEL", "omni-moderation-latest"),
@@ -84,7 +94,22 @@ func Load() (Config, error) {
 		TrustedProxyCIDRs:              os.Getenv("TRUSTED_PROXY_CIDRS"),
 	}
 
+	if !knownEnvironment(cfg.Environment) {
+		return Config{}, fmt.Errorf("APP_ENV=%q is not recognized; use one of: %s", cfg.Environment, strings.Join(knownEnvironments, ", "))
+	}
+
 	cfg.RunMigrationsOnStart = getEnvBool("RUN_MIGRATIONS_ON_START", !sharedEnvironment(cfg.Environment))
+
+	prefixes, err := parseSMSCountryPrefixes(getEnv("SMS_ALLOWED_COUNTRY_PREFIXES", "+996"))
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.SMSAllowedCountryPrefixes = prefixes
+	hourlyMax, err := getEnvPositiveInt("SMS_GLOBAL_HOURLY_MAX", 500)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.SMSGlobalHourlyMax = hourlyMax
 
 	accessTokenTTLMinutes := getEnvInt("ACCESS_TOKEN_TTL_MINUTES", 5)
 	cfg.AccessTokenTTL = time.Duration(accessTokenTTLMinutes) * time.Minute
@@ -94,6 +119,9 @@ func Load() (Config, error) {
 	}
 	if cfg.JWTSecret == "" || len(cfg.JWTSecret) < 32 {
 		return Config{}, fmt.Errorf("JWT_SECRET is required and must be at least 32 characters")
+	}
+	if sharedEnvironment(cfg.Environment) && looksLikePlaceholderSecret(cfg.JWTSecret) {
+		return Config{}, fmt.Errorf("JWT_SECRET looks like a placeholder value; generate a random secret for staging or production")
 	}
 	if cfg.BCryptCost < 10 || cfg.BCryptCost > 15 {
 		return Config{}, fmt.Errorf("BCRYPT_COST must be between 10 and 15")
@@ -240,6 +268,72 @@ func localTestAuthEnvironment(environment string) bool {
 	default:
 		return false
 	}
+}
+
+// knownEnvironments lists every APP_ENV value the server accepts. A typo such
+// as "prod" must fail startup instead of silently getting non-shared
+// (development) defaults.
+var knownEnvironments = []string{"local", "dev", "development", "test", "testing", "staging", "production"}
+
+func knownEnvironment(environment string) bool {
+	environment = strings.ToLower(strings.TrimSpace(environment))
+	for _, known := range knownEnvironments {
+		if environment == known {
+			return true
+		}
+	}
+	return false
+}
+
+var placeholderSecretMarkers = []string{"change", "replace", "example", "placeholder", "secret-here", "secret_here", "your-secret", "your_secret", "dummy"}
+
+func looksLikePlaceholderSecret(secret string) bool {
+	lower := strings.ToLower(secret)
+	for _, marker := range placeholderSecretMarkers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func parseSMSCountryPrefixes(raw string) ([]string, error) {
+	prefixes := make([]string, 0)
+	seen := map[string]bool{}
+	for _, part := range strings.Split(raw, ",") {
+		prefix := strings.TrimSpace(part)
+		if prefix == "" {
+			continue
+		}
+		if !strings.HasPrefix(prefix, "+") || len(prefix) < 2 || len(prefix) > 5 {
+			return nil, fmt.Errorf("SMS_ALLOWED_COUNTRY_PREFIXES entries must look like +996, got %q", prefix)
+		}
+		for _, char := range prefix[1:] {
+			if char < '0' || char > '9' {
+				return nil, fmt.Errorf("SMS_ALLOWED_COUNTRY_PREFIXES entries must look like +996, got %q", prefix)
+			}
+		}
+		if !seen[prefix] {
+			seen[prefix] = true
+			prefixes = append(prefixes, prefix)
+		}
+	}
+	if len(prefixes) == 0 {
+		return nil, fmt.Errorf("SMS_ALLOWED_COUNTRY_PREFIXES must list at least one country prefix")
+	}
+	return prefixes, nil
+}
+
+func getEnvPositiveInt(key string, fallback int) (int, error) {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		return 0, fmt.Errorf("%s must be a positive integer", key)
+	}
+	return parsed, nil
 }
 
 func sharedEnvironment(environment string) bool {

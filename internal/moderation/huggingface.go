@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-const defaultHuggingFaceEndpoint = "https://api-inference.huggingface.co/models"
+const defaultHuggingFaceEndpoint = "https://router.huggingface.co/hf-inference/models"
 
 type HuggingFaceConfig struct {
 	Token     string

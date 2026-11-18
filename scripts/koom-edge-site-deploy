@@ -16,6 +16,19 @@ health_check() {
     && grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' <<<"$response"
 }
 
+check_security_headers() {
+  local path headers name
+  for path in "$@"; do
+    headers="$(curl --fail --silent --show-error --max-time 12 -D - -o /dev/null "https://koom.com.kg$path")"
+    for name in Strict-Transport-Security X-Content-Type-Options X-Frame-Options Referrer-Policy Permissions-Policy; do
+      if ! grep -Eiq "^${name}:" <<<"$headers"; then
+        echo "Required response header ${name} is missing on ${path}." >&2
+        return 1
+      fi
+    done
+  done
+}
+
 preflight() {
   local caddy_status
   caddy_status="$(sudo /usr/local/bin/docker inspect --format '{{.State.Status}}' "$CADDY_CONTAINER" 2>/dev/null || true)"
@@ -32,6 +45,7 @@ preflight() {
     return 1
   fi
   health_check
+  check_security_headers / /kg /privacy /child-safety
   echo "KOOM static-site deployment prerequisites are ready."
 }
 
@@ -144,7 +158,7 @@ if ! grep -Fq '<clipPath' <<<"$icon_content" || ! grep -Fq 'data:image/png;base6
   echo "The live favicon is missing its transparent circular mask." >&2
   exit 1
 fi
-curl --fail --silent --show-error --max-time 12 https://koom.com.kg/privacy >/dev/null
+check_security_headers / /kg /privacy /child-safety
 health_check
 
 site_switched=0

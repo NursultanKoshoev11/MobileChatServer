@@ -25,6 +25,9 @@ import (
 
 const maxJSONBodyBytes = 2 * 1024 * 1024
 
+// backgroundNotifyTimeout bounds push notifications sent after a response.
+const backgroundNotifyTimeout = 30 * time.Second
+
 type userContextKey struct{}
 
 type Server struct {
@@ -35,6 +38,11 @@ type Server struct {
 	hub            *realtime.Hub
 	limiter        *RateLimiter
 	strictLimiter  *RateLimiter
+	// joinCodeLimiter caps invite-code attempts per account, on top of the
+	// per-IP strict limit, so rotating IPs does not help brute-force codes.
+	joinCodeLimiter *RateLimiter
+	// userLimiter limits authenticated requests per account.
+	userLimiter    *RateLimiter
 	trustedProxies []net.IPNet
 	router         http.Handler
 	upgrader       websocket.Upgrader
@@ -53,9 +61,11 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 			}
 			return user.ID, nil
 		}),
-		limiter:        NewRateLimiter(600, time.Minute),
-		strictLimiter:  NewRateLimiter(20, time.Minute),
-		trustedProxies: parseTrustedProxyCIDRs(strings.Join(trustedProxyCIDRs, ",")),
+		limiter:         NewRateLimiter(600, time.Minute),
+		strictLimiter:   NewRateLimiter(20, time.Minute),
+		joinCodeLimiter: NewRateLimiter(joinCodeAttemptsPerAccount, joinCodeAttemptWindow),
+		userLimiter:     NewRateLimiter(perUserRequestsPerWindow, perUserRequestWindow),
+		trustedProxies:  parseTrustedProxyCIDRs(strings.Join(trustedProxyCIDRs, ",")),
 	}
 	server.upgrader = websocket.Upgrader{
 		ReadBufferSize:  1024,
@@ -88,6 +98,10 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 	r.Get("/api/health", server.health)
 	r.Get("/privacy", server.privacyPolicy)
 	r.Head("/privacy", server.privacyPolicy)
+	r.Get("/terms", server.termsOfUse)
+	r.Head("/terms", server.termsOfUse)
+	r.Get("/account-deletion", server.accountDeletionPage)
+	r.Head("/account-deletion", server.accountDeletionPage)
 	r.Get("/child-safety", server.childSafetyStandards)
 	r.Head("/child-safety", server.childSafetyStandards)
 	r.Get("/api/health/ws", server.websocketHealth)
@@ -101,7 +115,9 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 
 	r.Group(func(r chi.Router) {
 		r.Use(server.auth)
+		r.Use(server.userRateLimit)
 		r.Get("/api/me", server.me)
+		r.Delete("/api/me", server.deleteMyAccount)
 		r.Put("/api/me/avatar", server.updateMyAvatar)
 		r.Post("/api/ws-token", server.issueWebSocketToken)
 		r.Get("/api/ws", server.userWebSocket)
@@ -159,6 +175,13 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 		r.Post("/api/admin/group-creation-requests/{requestID}/reject", server.rejectGroupCreationRequest)
 		r.Post("/api/admin/group-creation-requests/{requestID}/need-more-info", server.needMoreInfoForGroupCreationRequest)
 		r.Delete("/api/admin/groups/{groupID}", server.deleteGroupAsPlatformAdmin)
+		r.Post("/api/reports", server.createReport)
+		r.Post("/api/reports/{reportID}/resolve", server.resolveReport)
+		r.Get("/api/groups/{groupID}/reports", server.listGroupReports)
+		r.Get("/api/admin/reports", server.listAdminReports)
+		r.Post("/api/users/{userID}/block", server.blockUser)
+		r.Delete("/api/users/{userID}/block", server.unblockUser)
+		r.Get("/api/me/blocks", server.listMyBlocks)
 	})
 
 	server.router = r
@@ -177,6 +200,16 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "database": "ok"})
+}
+
+func (s *Server) deleteMyAccount(w http.ResponseWriter, r *http.Request) {
+	userID := currentUser(r).ID
+	if err := s.svc.DeleteAccount(r.Context(), userID); err != nil {
+		s.writeError(w, err)
+		return
+	}
+	s.hub.DisconnectUser(userID)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted", "public_content": "anonymized"})
 }
 
 func (s *Server) websocketHealth(w http.ResponseWriter, r *http.Request) {
@@ -231,9 +264,15 @@ func (s *Server) logoutPhoneSession(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &input) {
 		return
 	}
-	if err := s.phoneAuth.Logout(r.Context(), input); err != nil {
+	userID, err := s.phoneAuth.LogoutSession(r.Context(), input)
+	if err != nil {
 		s.writeError(w, err)
 		return
+	}
+	if userID != "" {
+		// Close this instance's sockets for the user; other devices reconnect
+		// with their own still-valid sessions.
+		s.hub.DisconnectUserSessions(userID)
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "logged_out"})
 }
@@ -367,10 +406,13 @@ func (s *Server) updateGroupMemberRoleByPhone(w http.ResponseWriter, r *http.Req
 }
 
 func (s *Server) leaveGroup(w http.ResponseWriter, r *http.Request) {
-	if err := s.svc.LeaveGroup(r.Context(), currentUser(r).ID, chi.URLParam(r, "groupID")); err != nil {
+	userID := currentUser(r).ID
+	groupID := chi.URLParam(r, "groupID")
+	if err := s.svc.LeaveGroup(r.Context(), userID, groupID); err != nil {
 		s.writeError(w, err)
 		return
 	}
+	s.hub.RemoveUserFromGroup(groupID, userID)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "left"})
 }
 
@@ -381,7 +423,12 @@ func (s *Server) joinByCode(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &input) {
 		return
 	}
-	group, err := s.svc.JoinByInviteCode(r.Context(), currentUser(r).ID, input.InviteCode)
+	userID := currentUser(r).ID
+	if !s.joinCodeLimiter.Allow("join-code:" + userID) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "rate limit exceeded"})
+		return
+	}
+	group, err := s.svc.JoinByInviteCode(r.Context(), userID, input.InviteCode)
 	if err != nil {
 		s.writeError(w, err)
 		return
@@ -406,7 +453,7 @@ func (s *Server) inviteUser(w http.ResponseWriter, r *http.Request) {
 		target = ""
 	}
 	if target == "" && mobile != "" {
-		user, err := s.svc.FindUserByPhone(r.Context(), mobile)
+		user, err := s.svc.ResolveInviteTargetByPhone(r.Context(), currentUser(r).ID, chi.URLParam(r, "groupID"), mobile)
 		if err != nil {
 			s.writeError(w, err)
 			return
@@ -419,7 +466,13 @@ func (s *Server) inviteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.hub.NotifyUser(target, realtime.Event{Type: "invite.created", GroupID: invite.GroupID, Payload: invite})
-	go s.svc.NotifyUserAboutInvite(r.Context(), target, invite)
+	// The request context is cancelled as soon as this handler returns, which
+	// would abort the push send; detach it but keep a bound on the work.
+	notifyCtx, cancelNotify := context.WithTimeout(context.WithoutCancel(r.Context()), backgroundNotifyTimeout)
+	go func() {
+		defer cancelNotify()
+		s.svc.NotifyUserAboutInvite(notifyCtx, target, invite)
+	}()
 	writeJSON(w, http.StatusCreated, invite)
 }
 
@@ -457,13 +510,39 @@ func (s *Server) listMessages(w http.ResponseWriter, r *http.Request) {
 			limit = parsed
 		}
 	}
-	var before time.Time
-	if raw := r.URL.Query().Get("before"); raw != "" {
-		if parsed, err := time.Parse(time.RFC3339Nano, raw); err == nil {
-			before = parsed
+	if rawAfter := r.URL.Query().Get("after"); rawAfter != "" {
+		after, err := time.Parse(time.RFC3339Nano, rawAfter)
+		afterID := strings.TrimSpace(r.URL.Query().Get("after_id"))
+		if err != nil || afterID == "" || r.URL.Query().Get("before") != "" || r.URL.Query().Get("before_id") != "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "a valid after cursor is required"})
+			return
 		}
+		messages, err := s.svc.ListMessagesAfter(r.Context(), currentUser(r).ID, chi.URLParam(r, "groupID"), limit, after, afterID)
+		if err != nil {
+			s.writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, messages)
+		return
 	}
-	messages, err := s.svc.ListMessages(r.Context(), currentUser(r).ID, chi.URLParam(r, "groupID"), limit, before)
+	if r.URL.Query().Get("after_id") != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "after timestamp is required with after_id"})
+		return
+	}
+	var before time.Time
+	beforeID := strings.TrimSpace(r.URL.Query().Get("before_id"))
+	if raw := r.URL.Query().Get("before"); raw != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, raw)
+		if err != nil || r.URL.Query().Get("after_id") != "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid message cursor"})
+			return
+		}
+		before = parsed
+	} else if beforeID != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "before timestamp is required with before_id"})
+		return
+	}
+	messages, err := s.svc.ListMessages(r.Context(), currentUser(r).ID, chi.URLParam(r, "groupID"), limit, before, beforeID)
 	if err != nil {
 		s.writeError(w, err)
 		return
@@ -520,7 +599,7 @@ func (s *Server) groupWebSocket(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
 	groupID := chi.URLParam(r, "groupID")
 	remoteIP := s.clientIP(r)
-	if !s.strictLimiter.Allow("ws:" + remoteIP) {
+	if !s.strictLimiter.Allow("ws:" + rateLimitKeyForIP(remoteIP)) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many websocket connection attempts"})
 		return
 	}
@@ -547,7 +626,7 @@ func (s *Server) groupWebSocket(w http.ResponseWriter, r *http.Request) {
 func (s *Server) userWebSocket(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
 	remoteIP := s.clientIP(r)
-	if !s.strictLimiter.Allow("ws:" + remoteIP) {
+	if !s.strictLimiter.Allow("ws:" + rateLimitKeyForIP(remoteIP)) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many websocket connection attempts"})
 		return
 	}
@@ -618,7 +697,7 @@ func (s *Server) rateLimit(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		key := s.clientIP(r)
+		key := rateLimitKeyForIP(s.clientIP(r))
 		if user := currentUser(r); user.ID != "" {
 			key = user.ID
 		}
@@ -642,6 +721,14 @@ func strictRateLimitClass(method, path string) string {
 	if method == http.MethodGet && path == "/api/groups/search" {
 		return "group-search"
 	}
+	// Endpoints that resolve a phone number are kept on the strict limiter so
+	// they cannot be used for bulk phone-number probing.
+	if strings.HasPrefix(path, "/api/groups/") && (strings.HasSuffix(path, "/members/role-by-phone") ||
+		strings.HasSuffix(path, "/comment-mutes/by-phone") ||
+		strings.HasSuffix(path, "/comment-mutes/unmute-by-phone")) &&
+		(method == http.MethodPost || method == http.MethodDelete) {
+		return "phone-lookup"
+	}
 	if method != http.MethodPost {
 		return ""
 	}
@@ -650,6 +737,14 @@ func strictRateLimitClass(method, path string) string {
 		return "auth-request-code"
 	case "/api/auth/verify-code":
 		return "auth-verify-code"
+	case "/api/groups/join-by-code":
+		// Invite codes are short; joining by code must not be guessable at the
+		// general API rate.
+		return "group-join-code"
+	case "/api/reports":
+		// Reports notify moderators; keep them off the general rate so they
+		// cannot be used to flood moderation queues.
+		return "report-create"
 	}
 	if strings.HasPrefix(path, "/api/groups/") && strings.HasSuffix(path, "/messages") {
 		return "message-create"
@@ -754,7 +849,13 @@ func (s *Server) writeError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.As(err, &pending):
 		if pending.Item.GroupID != "" {
-			s.hub.BroadcastGroup(pending.Item.GroupID, realtime.Event{Type: "content_moderation.pending_review", GroupID: pending.Item.GroupID, Payload: pending.Item})
+			// Every group member receives this event, so it must not carry the held
+			// content itself; clients only use it to refresh the moderation count.
+			s.hub.BroadcastGroup(pending.Item.GroupID, realtime.Event{Type: "content_moderation.pending_review", GroupID: pending.Item.GroupID, Payload: map[string]string{
+				"id":           pending.Item.ID,
+				"content_type": string(pending.Item.ContentType),
+				"status":       string(pending.Item.Status),
+			}})
 		}
 		writeJSON(w, http.StatusAccepted, map[string]any{"status": "pending_review", "moderation_item": pending.Item})
 	case errors.As(err, &validation):
@@ -769,6 +870,8 @@ func (s *Server) writeError(w http.ResponseWriter, err error) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 	case errors.Is(err, storage.ErrForbidden):
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+	case errors.Is(err, storage.ErrGroupOwnershipTransferRequired):
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "group_ownership_transfer_required"})
 	default:
 		s.logger.Printf("http error: %q", fmt.Sprint(err))
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})

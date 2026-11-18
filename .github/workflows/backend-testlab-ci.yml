@@ -3,9 +3,12 @@ name: Backend Test Lab CI
 on:
   push:
     branches: [ main ]
+  # All pull requests, whatever their base branch.
   pull_request:
-    branches: [ main ]
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   backend:
@@ -22,7 +25,7 @@ jobs:
         run: go vet ./...
       - name: Go vulnerability check
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
           govulncheck ./...
       - name: Build server
         run: go build ./cmd/server
