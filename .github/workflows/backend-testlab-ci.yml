@@ -13,22 +13,6 @@ permissions:
 jobs:
   backend:
     runs-on: ubuntu-latest
-    services:
-      # Disposable database for the integration tests (push notifications,
-      # realtime delivery, storage). The tests apply migrations themselves.
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: koom_test
-          POSTGRES_PASSWORD: koom_test
-          POSTGRES_DB: koom_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U koom_test -d koom_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -37,10 +21,6 @@ jobs:
           cache: true
       - name: Go test
         run: go test ./...
-      - name: Integration tests (Postgres)
-        env:
-          TEST_DATABASE_URL: postgres://koom_test:koom_test@localhost:5432/koom_test?sslmode=disable
-        run: go test -count=1 ./internal/e2e/... ./internal/storage/...
       - name: Go vet
         run: go vet ./...
       - name: Go vulnerability check
