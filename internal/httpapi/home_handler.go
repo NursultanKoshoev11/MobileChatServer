@@ -6,6 +6,8 @@ import (
 	"net/http"
 )
 
+// Bump the stylesheet query version in both home pages whenever site.css changes;
+// browsers cache static assets for 24 hours.
 //go:embed home.ru.html home.kg.html account_deletion.html site-assets/*
 var homeSiteFiles embed.FS
 

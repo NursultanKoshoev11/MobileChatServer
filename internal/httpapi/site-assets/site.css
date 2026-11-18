@@ -107,7 +107,7 @@ a:focus-visible,summary:focus-visible{outline:3px solid #16b9e5;outline-offset:4
 .section-heading h2,.product-copy h2{color:var(--ink)}
 .section-heading>p:last-child,.product-copy>p{max-width:620px;margin:16px 0 0;color:var(--muted);font-size:16px;line-height:1.72}
 .features{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
-.feature{position:relative;min-height:225px;overflow:hidden;padding:24px 21px;border:1px solid var(--line);border-radius:20px;background:#fff;transition:transform .25s,box-shadow .25s,border-color .25s}
+.feature{position:relative;min-height:225px;overflow:hidden;padding:24px 21px;border:1px solid var(--line);border-radius:20px;background:transparent;transition:transform .25s,box-shadow .25s,border-color .25s}
 .feature:hover{transform:translateY(-5px);border-color:#b6d6f9;box-shadow:0 18px 40px #10254f0e}
 .feature-icon{width:44px;height:44px;display:grid;place-items:center;margin-bottom:24px;border-radius:14px;background:#eaf4ff;color:#0878f9}
 .feature-icon svg{width:22px;height:22px}
