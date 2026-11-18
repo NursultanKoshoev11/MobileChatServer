@@ -295,7 +295,32 @@ restore a media archive into a scratch directory and a backup downloaded from
 S3. Record the result (date, file, counts, duration) and treat a failed drill
 as an incident.
 
-## 9. Container hardening switches
+## 9. Store-review login (Apple App Review, Google Play)
+
+Store reviewers cannot receive an SMS on a Kyrgyz number, so production has one
+dedicated review account:
+
+- `APP_REVIEW_PHONE`: a number used only for review. Prefer a landline
+  (`+996312…`) so no real person can own it. Never an admin phone (startup
+  refuses that).
+- `APP_REVIEW_CODE`: a fixed 6-digit code. Startup refuses trivial codes
+  (repeated digits, two distinct digits, ascending or descending sequences).
+
+For this number `request-code` sends no SMS and answers `code_sent` exactly like
+a real send. It never returns the code. Verification goes through the normal
+flow: the code expires after 5 minutes, allows 5 attempts and is single-use. The
+per-number limits still apply (3 requests per 10 minutes, 30 s apart, at most 8
+per day), so guessing is capped at 40 attempts per day. Each issued review code
+is logged as `app review login code issued`.
+
+The account is an ordinary user. Before submission, sign in once and add it to a
+demo group with sample content so reviewers can see the features.
+
+Put the phone and code in App Store Connect → App Review Information → Sign-in
+required (and in Play Console → App access). Rotate the code after each review
+round. To turn the feature off, clear both variables and restart the API.
+
+## 10. Container hardening switches
 
 `docker-compose.prod.yml` sets memory/CPU limits (override with
 `API_MEM_LIMIT`, `API_CPUS`, `POSTGRES_MEM_LIMIT`, `POSTGRES_CPUS`,

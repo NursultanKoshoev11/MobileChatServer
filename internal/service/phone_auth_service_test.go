@@ -60,3 +60,34 @@ func TestExpectedTestAuthCodeHasNoProductionFallback(t *testing.T) {
 		t.Fatalf("expected no fallback test auth code, got %q", got)
 	}
 }
+
+func TestAppReviewMobileMatchesOnlyConfiguredNumberInAnyEnvironment(t *testing.T) {
+	for _, environment := range []string{"development", "staging", "production"} {
+		auth := NewPhoneAuth(nil, PhoneAuthConfig{
+			Environment:    environment,
+			AppReviewPhone: "+996 312 000 001",
+			AppReviewCode:  "482915",
+		}, nil)
+		if !auth.isAppReviewMobile("+996312000001") {
+			t.Errorf("%s: expected configured review phone to match", environment)
+		}
+		if auth.isAppReviewMobile("+996312000002") {
+			t.Errorf("%s: unexpected match for another phone", environment)
+		}
+		if auth.isTestAuthMobile("+996312000001") {
+			t.Errorf("%s: review phone must not enable test auth (which reveals codes)", environment)
+		}
+	}
+}
+
+func TestAppReviewMobileDisabledWithoutValidCode(t *testing.T) {
+	for _, code := range []string{"", "12345"} {
+		auth := NewPhoneAuth(nil, PhoneAuthConfig{AppReviewPhone: "+996312000001", AppReviewCode: code}, nil)
+		if auth.isAppReviewMobile("+996312000001") {
+			t.Errorf("review login must be off with code %q", code)
+		}
+	}
+	if NewPhoneAuth(nil, PhoneAuthConfig{}, nil).isAppReviewMobile("+996312000001") {
+		t.Error("review login must be off when not configured")
+	}
+}

@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestOriginListContainsWildcard(t *testing.T) {
 	if !originListContainsWildcard("https://example.com, *") {
@@ -146,5 +149,48 @@ func TestSMSGuardConfig(t *testing.T) {
 		if _, err := Load(); err == nil {
 			t.Errorf("SMS_GLOBAL_HOURLY_MAX=%q accepted", bad)
 		}
+	}
+}
+
+func TestAppReviewLoginValidation(t *testing.T) {
+	base := func(t *testing.T) {
+		t.Setenv("DATABASE_URL", "postgres://user:pass@127.0.0.1/test")
+		t.Setenv("JWT_SECRET", "k8Zq2Lr7Vx4Np9Tg3Hw6Jy1Bc5Mf0Ds8Qa")
+		t.Setenv("APP_ENV", "production")
+		t.Setenv("SUPER_ADMIN_PHONES", "+996700111222")
+		t.Setenv("PROJECT_OWNER_PHONE", "")
+		t.Setenv("TRUSTED_PROXY_CIDRS", "10.0.0.220/32")
+	}
+	cases := []struct {
+		name, phone, code string
+		ok                bool
+	}{
+		{"not configured", "", "", true},
+		{"valid", "+996312000001", "482915", true},
+		{"valid with spaces", "+996 312 000 001", "482915", true},
+		{"phone without code", "+996312000001", "", false},
+		{"code without phone", "", "482915", false},
+		{"bad phone", "0312000001", "482915", false},
+		{"short code", "+996312000001", "48291", false},
+		{"letters", "+996312000001", "48a915", false},
+		{"repeated digits", "+996312000001", "111111", false},
+		{"two digits only", "+996312000001", "121212", false},
+		{"ascending", "+996312000001", "123456", false},
+		{"descending", "+996312000001", "987654", false},
+		{"admin phone", "+996700111222", "482915", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			base(t)
+			t.Setenv("APP_REVIEW_PHONE", tc.phone)
+			t.Setenv("APP_REVIEW_CODE", tc.code)
+			_, err := Load()
+			if tc.ok && err != nil {
+				t.Fatalf("expected valid config, got %v", err)
+			}
+			if !tc.ok && (err == nil || !strings.Contains(err.Error(), "APP_REVIEW")) {
+				t.Fatalf("expected APP_REVIEW error, got %v", err)
+			}
+		})
 	}
 }
