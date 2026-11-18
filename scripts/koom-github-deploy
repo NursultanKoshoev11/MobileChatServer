@@ -8,6 +8,7 @@ readonly PUBLIC_API_URL=https://koom.com.kg/api/health
 readonly API_IMAGE=mobilechatserver-api
 readonly MIGRATE_IMAGE=mobilechatserver-migrate
 readonly POSTGRES_CONTAINER=mobilechat-postgres
+readonly BACKUP_IMAGE=mobilechat-backup:prod
 readonly PREDEPLOY_DIR="$APP_DIR/backups/pre-deploy"
 readonly PREDEPLOY_KEEP="${KOOM_PREDEPLOY_KEEP:-5}"
 
@@ -85,6 +86,16 @@ env_file_value() {
     | sed -e 's/[[:space:]]*$//' -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/"
 }
 
+# age on the host if installed; otherwise the copy shipped in the backup image
+# (Dockerfile.backup), run without network. Data flows via stdin/stdout only.
+run_age() {
+  if command -v age >/dev/null 2>&1; then
+    age "$@"
+  else
+    sudo docker run --rm -i --network none --entrypoint age "$BACKUP_IMAGE" "$@"
+  fi
+}
+
 # Mandatory pre-migration backup: dump the live database to the host and
 # validate it. Any failure aborts the deployment before images are switched or
 # migrations run. Credentials stay inside the PostgreSQL container.
@@ -95,8 +106,8 @@ predeploy_backup() {
     return 1
   fi
   recipients="$(env_file_value BACKUP_AGE_RECIPIENT)"
-  if [[ -n "$recipients" ]] && ! command -v age >/dev/null 2>&1; then
-    echo "BACKUP_AGE_RECIPIENT is set in .env.prod but 'age' is not installed on this host; refusing to write an unencrypted pre-deploy backup." >&2
+  if [[ -n "$recipients" ]] && ! run_age --version >/dev/null 2>&1; then
+    echo "BACKUP_AGE_RECIPIENT is set in .env.prod but 'age' is available neither on this host nor in $BACKUP_IMAGE; refusing to write an unencrypted pre-deploy backup." >&2
     return 1
   fi
   local -a age_args=()
@@ -144,8 +155,12 @@ predeploy_backup() {
   if [[ -n "$recipients" ]]; then
     (
       ulimit -S -f unlimited
-      age --encrypt "${age_args[@]}" -o "$predeploy_tmp.age" "$predeploy_tmp"
+      run_age --encrypt "${age_args[@]}" < "$predeploy_tmp" > "$predeploy_tmp.age"
     )
+    if [[ "$(head -c 21 "$predeploy_tmp.age")" != "age-encryption.org/v1" ]]; then
+      echo "age produced an invalid pre-deploy backup." >&2
+      return 1
+    fi
     rm -f -- "$predeploy_tmp"
     predeploy_tmp="$predeploy_tmp.age"
     base="$base.age"
