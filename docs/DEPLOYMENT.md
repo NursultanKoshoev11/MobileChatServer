@@ -18,11 +18,11 @@ and proxies requests to the API container.
   mount paths before moving the deployment.
 
 The restricted host-side deploy helper uses
-`/opt/projects/MobileChatServer`. Production deploy run 11 reached the host but
-stopped in preflight because Twilio SMS is not configured. That check confirms
-the directory, `.env.prod`, and Compose file exist; it stopped before checking
-container health, loading images, or applying migrations. An earlier runner
-workflow expected the same directory and failed to find it. The current
+`/opt/projects/MobileChatServer`. Production deploy run 11 and the 18 November
+run reached the host but stopped in preflight because SMS credentials were not
+configured. They stopped before loading images or applying migrations. The
+repository now supports SMSPro; the production `.env.prod` and separately
+installed host-side helper must both be updated before a release. The current
 workflow uses a pinned SSH host key and a key limited to preflight/deploy
 commands. Verify the active database volume and data mounts before the next
 release; do not change Compose paths or project names until that mapping is
@@ -63,8 +63,8 @@ the file to the deployment account. Never commit it. Production requires:
 - `APP_ENV=production`, `DATABASE_URL`, and a random `JWT_SECRET` of at least
   32 characters;
 - exact `ALLOWED_ORIGINS=https://koom.com.kg`;
-- `SMS_PROVIDER=twilio` with a valid account token and sender ID or messaging
-  service;
+- `SMS_PROVIDER=smspro` with `SMSPRO_LOGIN`, `SMSPRO_PASSWORD`, and an approved
+  `SMSPRO_SENDER` set only in the protected `.env.prod` file;
 - `TRUSTED_PROXY_CIDRS` set to the actual private proxy subnet;
 - `TEST_AUTH_ENABLED=false` and `MODERATION_FAIL_CLOSED=true`.
 
@@ -76,6 +76,33 @@ It prunes expired Koom backup objects from the configured S3 prefix according
 to `BACKUP_RETENTION_DAYS`. For versioned S3 buckets, add a lifecycle rule to
 expire noncurrent object versions as well; the script cannot remove those
 versions through ordinary object deletion.
+
+## SMSPro integration
+
+The API sends verification codes over HTTPS to
+`https://smspro.nikita.kg/api/message` as UTF-8 XML in a `POST`. Keep the provider
+login and password in the server secret file; never put them in source, logs, or
+mobile builds. `SMSPRO_SENDER` must be approved in the SMSPro account and match
+the provider's sender-ID format. The adapter sends one recipient per request and
+does not set the optional scheduled-send time.
+
+The provider's `status=0` means the SMS was accepted into its sending queue, not
+confirmed delivered. A provider processing-timeout (`status=9`) is retried once
+after five seconds with the same 12-character request ID to avoid duplicate
+submissions. Other provider statuses fail the request without logging the
+response message, phone, verification code, or credentials. SMSPro's documented
+`test=1` mode does not send a real SMS, so it is not enabled for the app's OTP
+flow.
+
+Provider status `3` indicates the production server's egress IP is not allowed
+by the SMSPro account; add the server egress IP to the provider allowlist if
+that control is enabled. Status `4` means the account balance is insufficient.
+
+Configure `SMS_PROVIDER=smspro`, `SMSPRO_LOGIN`, `SMSPRO_PASSWORD`, and
+`SMSPRO_SENDER` in `.env.prod`. Before deploying, update the separately
+installed `/usr/local/sbin/koom-github-deploy` helper to accept and validate
+these SMSPro settings; changing the repository copy alone does not update the
+server helper.
 
 ## First deployment
 

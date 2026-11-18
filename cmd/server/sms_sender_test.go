@@ -57,6 +57,34 @@ func TestNewSMSSenderRejectsIncompleteTwilioConfiguration(t *testing.T) {
 	}
 }
 
+func TestNewSMSSenderUsesSMSProInProduction(t *testing.T) {
+	sender, err := newSMSSender(config.Config{
+		Environment:    "production",
+		SMSProvider:    "smspro",
+		SMSProLogin:    "koom-login",
+		SMSProPassword: "secret",
+		SMSProSender:   "KOOM",
+	}, nil)
+	if err != nil {
+		t.Fatalf("newSMSSender returned error: %v", err)
+	}
+	if _, ok := sender.(sms.SMSProSender); !ok {
+		t.Fatalf("expected sms.SMSProSender, got %T", sender)
+	}
+}
+
+func TestNewSMSSenderRejectsIncompleteSMSProConfiguration(t *testing.T) {
+	_, err := newSMSSender(config.Config{
+		Environment:  "production",
+		SMSProvider:  "smspro",
+		SMSProLogin:  "koom-login",
+		SMSProSender: "KOOM",
+	}, nil)
+	if err == nil {
+		t.Fatal("expected missing SMSPRO_PASSWORD to be rejected")
+	}
+}
+
 func TestNewSMSSenderRejectsDevelopmentProviderInProduction(t *testing.T) {
 	_, err := newSMSSender(config.Config{Environment: "production", SMSProvider: "dev"}, nil)
 	if err == nil {

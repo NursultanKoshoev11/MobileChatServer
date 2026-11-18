@@ -39,14 +39,29 @@ preflight() {
 
   local provider
   provider="$(sed -n 's/^SMS_PROVIDER[[:space:]]*=[[:space:]]*\([^[:space:]#]*\).*/\1/p' "$ENV_FILE" | tail -n 1)"
-  if [[ "$provider" != twilio ]] \
-    || ! grep -Eq '^TWILIO_ACCOUNT_SID[[:space:]]*=[[:space:]]*[^[:space:]#]+' "$ENV_FILE" \
-    || ! grep -Eq '^TWILIO_AUTH_TOKEN[[:space:]]*=[[:space:]]*[^[:space:]#]+' "$ENV_FILE" \
-    || { ! grep -Eq '^SMS_FROM[[:space:]]*=[[:space:]]*[^[:space:]#]+' "$ENV_FILE" \
-         && ! grep -Eq '^TWILIO_MESSAGING_SERVICE_SID[[:space:]]*=[[:space:]]*[^[:space:]#]+' "$ENV_FILE"; }; then
-    echo "Production SMS is not configured. Set SMS_PROVIDER=twilio, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and SMS_FROM or TWILIO_MESSAGING_SERVICE_SID in .env.prod." >&2
-    return 1
-  fi
+  case "$provider" in
+    smspro)
+      if ! grep -Eq '^SMSPRO_LOGIN[[:space:]]*=[[:space:]]*[^[:space:]#]+' "$ENV_FILE" \
+        || ! grep -Eq '^SMSPRO_PASSWORD[[:space:]]*=[[:space:]]*[^[:space:]#]+' "$ENV_FILE" \
+        || ! grep -Eq '^SMSPRO_SENDER[[:space:]]*=[[:space:]]*[^[:space:]#]+' "$ENV_FILE"; then
+        echo "Production SMS is not configured. Set SMS_PROVIDER=smspro, SMSPRO_LOGIN, SMSPRO_PASSWORD, and SMSPRO_SENDER in .env.prod." >&2
+        return 1
+      fi
+      ;;
+    twilio)
+      if ! grep -Eq '^TWILIO_ACCOUNT_SID[[:space:]]*=[[:space:]]*[^[:space:]#]+' "$ENV_FILE" \
+        || ! grep -Eq '^TWILIO_AUTH_TOKEN[[:space:]]*=[[:space:]]*[^[:space:]#]+' "$ENV_FILE" \
+        || { ! grep -Eq '^SMS_FROM[[:space:]]*=[[:space:]]*[^[:space:]#]+' "$ENV_FILE" \
+             && ! grep -Eq '^TWILIO_MESSAGING_SERVICE_SID[[:space:]]*=[[:space:]]*[^[:space:]#]+' "$ENV_FILE"; }; then
+        echo "Production SMS is not configured for Twilio in .env.prod." >&2
+        return 1
+      fi
+      ;;
+    *)
+      echo "Production SMS_PROVIDER must be smspro or twilio." >&2
+      return 1
+      ;;
+  esac
 
   local api_status postgres_status
   api_status="$(sudo docker inspect --format '{{.State.Health.Status}}' mobilechat-api 2>/dev/null || true)"
