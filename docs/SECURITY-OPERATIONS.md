@@ -320,6 +320,17 @@ Put the phone and code in App Store Connect → App Review Information → Sign-
 required (and in Play Console → App access). Rotate the code after each review
 round. To turn the feature off, clear both variables and restart the API.
 
+**Several test accounts.** `APP_REVIEW_PHONE` may list up to 20 comma-separated
+numbers; all share `APP_REVIEW_CODE` and follow the same rules. A simple code
+such as `111111` is refused unless `APP_REVIEW_ALLOW_SIMPLE_CODE=true`. With it,
+anyone who learns a listed number can sign in as that account, so keep the
+numbers private and turn it off before public launch.
+
+**SMS off.** `SMS_PROVIDER=disabled` is refused in production unless
+`SMS_DISABLED_IN_PRODUCTION=true`. While it is on, only the listed test
+accounts can sign in; everyone else gets "SMS unavailable" (HTTP 503). The API
+logs a warning at startup.
+
 ## 10. Container hardening switches
 
 `docker-compose.prod.yml` sets memory/CPU limits (override with

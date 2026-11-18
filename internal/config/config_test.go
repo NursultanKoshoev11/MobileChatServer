@@ -194,3 +194,39 @@ func TestAppReviewLoginValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestAppReviewMultipleAccountsAndSimpleCode(t *testing.T) {
+	cases := []struct {
+		name, phones, code, allowSimple string
+		ok                              bool
+	}{
+		{"several accounts", "+996312000001,+996312000002, +996312000003", "482915", "", true},
+		{"simple code needs opt-in", "+996312000001,+996312000002", "111111", "", false},
+		{"simple code with opt-in", "+996312000001,+996312000002", "111111", "true", true},
+		{"opt-in still needs 6 digits", "+996312000001", "11111", "true", false},
+		{"opt-in rejects letters", "+996312000001", "11111a", "true", false},
+		{"duplicate number", "+996312000001,+996 312 000 001", "111111", "true", false},
+		{"admin among accounts", "+996312000001,+996700111222", "111111", "true", false},
+		{"bad number among accounts", "+996312000001,0312000002", "111111", "true", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("DATABASE_URL", "postgres://user:pass@127.0.0.1/test")
+			t.Setenv("JWT_SECRET", "k8Zq2Lr7Vx4Np9Tg3Hw6Jy1Bc5Mf0Ds8Qa")
+			t.Setenv("APP_ENV", "production")
+			t.Setenv("SUPER_ADMIN_PHONES", "+996700111222")
+			t.Setenv("PROJECT_OWNER_PHONE", "")
+			t.Setenv("TRUSTED_PROXY_CIDRS", "10.0.0.220/32")
+			t.Setenv("APP_REVIEW_PHONE", tc.phones)
+			t.Setenv("APP_REVIEW_CODE", tc.code)
+			t.Setenv("APP_REVIEW_ALLOW_SIMPLE_CODE", tc.allowSimple)
+			_, err := Load()
+			if tc.ok && err != nil {
+				t.Fatalf("expected valid config, got %v", err)
+			}
+			if !tc.ok && (err == nil || !strings.Contains(err.Error(), "APP_REVIEW")) {
+				t.Fatalf("expected APP_REVIEW error, got %v", err)
+			}
+		})
+	}
+}

@@ -346,9 +346,21 @@ func (s *PhoneAuthService) isTestAuthMobile(mobile string) bool {
 // isAppReviewMobile reports whether mobile is the dedicated store-review
 // account (APP_REVIEW_PHONE). Unlike test auth it works in production, but
 // only through the normal code flow: TTL, attempt limits and rate limits apply.
+// APP_REVIEW_PHONE may list several comma-separated accounts.
 func (s *PhoneAuthService) isAppReviewMobile(mobile string) bool {
-	reviewPhone := normalizeTestValue(s.cfg.AppReviewPhone)
-	return reviewPhone != "" && len(s.cfg.AppReviewCode) == 6 && normalizeTestValue(mobile) == reviewPhone
+	if len(s.cfg.AppReviewCode) != 6 {
+		return false
+	}
+	target := normalizeTestValue(mobile)
+	if target == "" {
+		return false
+	}
+	for _, part := range strings.Split(s.cfg.AppReviewPhone, ",") {
+		if normalizeTestValue(part) == target {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *PhoneAuthService) expectedTestAuthCode() string {
