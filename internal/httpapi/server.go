@@ -92,6 +92,8 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 	r.Get("/api/health", server.health)
 	r.Get("/privacy", server.privacyPolicy)
 	r.Head("/privacy", server.privacyPolicy)
+	r.Get("/terms", server.termsOfUse)
+	r.Head("/terms", server.termsOfUse)
 	r.Get("/account-deletion", server.accountDeletionPage)
 	r.Head("/account-deletion", server.accountDeletionPage)
 	r.Get("/child-safety", server.childSafetyStandards)
