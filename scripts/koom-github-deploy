@@ -268,7 +268,9 @@ sudo docker tag "$MIGRATE_IMAGE:deploy" "$MIGRATE_IMAGE:latest"
 sudo docker image rm "$API_IMAGE:deploy" "$MIGRATE_IMAGE:deploy" >/dev/null
 
 cd "$APP_DIR"
-sudo docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" run --rm --no-deps --no-build migrate
+# `compose run` has no --no-build on Compose v2.32 (production host); the
+# migrate image is pre-tagged above, so nothing is built either way.
+sudo docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" run --rm --no-deps migrate
 sudo docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --no-deps --no-build api
 
 for attempt in {1..30}; do
