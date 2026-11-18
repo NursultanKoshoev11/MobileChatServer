@@ -1,3 +1,6 @@
+# Targets for the LOCAL DEVELOPMENT stack (docker-compose.yml) only.
+# Production uses docker-compose.prod.yml and the release workflow; see
+# docs/DEPLOYMENT.md. Do not run these targets on a production server.
 .PHONY: up down restart logs ps health admin rebuild
 
 up:
