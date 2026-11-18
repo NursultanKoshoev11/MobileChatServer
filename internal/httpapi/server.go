@@ -561,11 +561,24 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, err)
 		return
 	}
-	s.broadcastGroupAndUsers(r, groupID, realtime.Event{Type: "message.created", GroupID: groupID, Payload: message})
+	s.broadcastAuthoredContent(r, groupID, message.SenderID, realtime.Event{Type: "message.created", GroupID: groupID, Payload: message})
 	writeJSON(w, http.StatusCreated, message)
 }
 
 func (s *Server) broadcastGroupAndUsers(r *http.Request, groupID string, event realtime.Event) {
+	s.broadcastGroupEvent(r.Context(), groupID, currentUser(r).ID, "", event)
+}
+
+// broadcastAuthoredContent broadcasts content written by authorID (a message,
+// post or comment). Members who blocked the author do not receive it, matching
+// the list endpoints, which hide blocked authors' content.
+func (s *Server) broadcastAuthoredContent(r *http.Request, groupID, authorID string, event realtime.Event) {
+	s.broadcastGroupEvent(r.Context(), groupID, currentUser(r).ID, authorID, event)
+}
+
+// broadcastGroupEvent sends event once to every socket subscribed to the group
+// and to the user sockets of current members other than actorID.
+func (s *Server) broadcastGroupEvent(ctx context.Context, groupID, actorID, contentAuthorID string, event realtime.Event) {
 	groupID = strings.TrimSpace(groupID)
 	if groupID == "" {
 		return
@@ -573,16 +586,19 @@ func (s *Server) broadcastGroupAndUsers(r *http.Request, groupID string, event r
 	if event.GroupID == "" {
 		event.GroupID = groupID
 	}
-	s.hub.BroadcastGroup(groupID, event)
-	actorID := currentUser(r).ID
-	memberIDs, err := s.svc.ListGroupMemberIDsExcept(r.Context(), groupID, actorID)
+	memberIDs, err := s.svc.ListGroupMemberIDsExcept(ctx, groupID, actorID)
 	if err != nil {
 		s.logger.Printf("realtime user broadcast skipped group_id=%q type=%q error=%q", groupID, event.Type, fmt.Sprint(err))
-		return
+		memberIDs = nil
 	}
-	for _, memberID := range memberIDs {
-		s.hub.NotifyUser(memberID, event)
+	var skipUserIDs []string
+	if contentAuthorID != "" {
+		skipUserIDs, err = s.svc.ListUserIDsBlocking(ctx, contentAuthorID)
+		if err != nil {
+			s.logger.Printf("realtime block filter failed group_id=%q type=%q error=%q", groupID, event.Type, fmt.Sprint(err))
+		}
 	}
+	s.hub.BroadcastGroupAndUsers(groupID, memberIDs, skipUserIDs, event)
 }
 
 func firstNonEmpty(values ...string) string {

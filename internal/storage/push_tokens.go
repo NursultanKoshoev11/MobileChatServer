@@ -43,12 +43,16 @@ func (r *Repository) DeletePushToken(ctx context.Context, userID, token string) 
 	return nil
 }
 
+// ListGroupPushTokensExceptUser lists the push tokens of groupID's members for
+// content authored by exceptUserID: the author and members who blocked the
+// author are left out.
 func (r *Repository) ListGroupPushTokensExceptUser(ctx context.Context, groupID, exceptUserID string) ([]PushToken, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT pt.user_id, pt.token, pt.platform
 		FROM push_tokens pt
 		JOIN group_members gm ON gm.user_id = pt.user_id
-		WHERE gm.group_id = $1 AND pt.user_id <> $2`, groupID, exceptUserID)
+		WHERE gm.group_id = $1 AND pt.user_id <> $2
+		  AND NOT EXISTS (SELECT 1 FROM user_blocks ub WHERE ub.blocker_id = pt.user_id AND ub.blocked_id = $2)`, groupID, exceptUserID)
 	if err != nil {
 		return nil, fmt.Errorf("list group push tokens: %w", err)
 	}

@@ -38,14 +38,17 @@ func (s *Server) approveContentModerationItem(w http.ResponseWriter, r *http.Req
 		s.writeError(w, err)
 		return
 	}
+	// Approved content reaches members like content published without review:
+	// group sockets plus members' user sockets, minus members who blocked the
+	// author.
 	if result.Message != nil {
-		s.hub.BroadcastGroup(result.Item.GroupID, realtime.Event{Type: "message.created", GroupID: result.Item.GroupID, Payload: result.Message})
+		s.broadcastGroupEvent(r.Context(), result.Item.GroupID, "", result.Message.SenderID, realtime.Event{Type: "message.created", GroupID: result.Item.GroupID, Payload: result.Message})
 	}
 	if result.PublicRequest != nil {
-		s.hub.BroadcastGroup(result.Item.GroupID, realtime.Event{Type: "public_request.created", GroupID: result.Item.GroupID, Payload: result.PublicRequest})
+		s.broadcastGroupEvent(r.Context(), result.Item.GroupID, "", result.PublicRequest.AuthorID, realtime.Event{Type: "public_request.created", GroupID: result.Item.GroupID, Payload: result.PublicRequest})
 	}
 	if result.Comment != nil {
-		s.broadcastPublicRequestRefresh(r, result.Comment.RequestID, "public_request.comment_created", map[string]any{"request_id": result.Comment.RequestID, "comment": result.Comment})
+		s.broadcastGroupEvent(r.Context(), result.Item.GroupID, "", result.Comment.AuthorID, realtime.Event{Type: "public_request.comment_created", GroupID: result.Item.GroupID, Payload: map[string]any{"request_id": result.Comment.RequestID, "comment": result.Comment}})
 	}
 	s.hub.BroadcastGroup(result.Item.GroupID, realtime.Event{Type: "content_moderation.reviewed", GroupID: result.Item.GroupID, Payload: map[string]string{"item_id": result.Item.ID, "status": string(result.Item.Status)}})
 	writeJSON(w, http.StatusOK, result)

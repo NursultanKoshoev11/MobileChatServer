@@ -207,6 +207,12 @@ func (s *Service) UnblockUser(ctx context.Context, blockerID, blockedID string) 
 	return s.repo.UnblockUser(ctx, blockerID, blockedID)
 }
 
+// ListUserIDsBlocking returns the users who blocked userID. Content authored by
+// userID is not pushed or broadcast to them.
+func (s *Service) ListUserIDsBlocking(ctx context.Context, userID string) ([]string, error) {
+	return s.repo.ListUserIDsBlocking(ctx, userID)
+}
+
 func (s *Service) ListUserBlocks(ctx context.Context, blockerID string) ([]domain.UserBlock, error) {
 	return s.repo.ListUserBlocks(ctx, blockerID)
 }
