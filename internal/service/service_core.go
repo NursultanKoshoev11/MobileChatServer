@@ -58,7 +58,9 @@ func (s *Service) UpdateGroupMemberRoleByPhone(ctx context.Context, actorID, gro
 	if phone == "" {
 		return domain.GroupMember{}, NewValidationError("phone is required")
 	}
-	user, err := s.FindUserByPhone(ctx, phone)
+	// Only the owner may change roles (UpdateGroupMemberRole enforces the same),
+	// and the phone is resolved only among the group's members.
+	user, err := s.resolveGroupMemberByPhone(ctx, actorID, groupID, phone, domain.RoleOwner)
 	if err != nil {
 		return domain.GroupMember{}, err
 	}
@@ -118,14 +120,6 @@ func (s *Service) JoinByInviteCode(ctx context.Context, userID, inviteCode strin
 		return domain.Group{}, err
 	}
 	return group, nil
-}
-
-func (s *Service) FindUserByPhone(ctx context.Context, mobile string) (domain.User, error) {
-	mobile = normalizePhone(mobile)
-	if mobile == "" {
-		return domain.User{}, NewValidationError("mobile is required")
-	}
-	return s.repo.GetUserByPhone(ctx, mobile)
 }
 
 func (s *Service) InviteUserByID(ctx context.Context, adminID, groupID, targetUserID string) error {

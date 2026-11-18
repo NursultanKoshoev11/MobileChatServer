@@ -35,9 +35,12 @@ type Server struct {
 	hub            *realtime.Hub
 	limiter        *RateLimiter
 	strictLimiter  *RateLimiter
-	trustedProxies []net.IPNet
-	router         http.Handler
-	upgrader       websocket.Upgrader
+	// joinCodeLimiter caps invite-code attempts per account, on top of the
+	// per-IP strict limit, so rotating IPs does not help brute-force codes.
+	joinCodeLimiter *RateLimiter
+	trustedProxies  []net.IPNet
+	router          http.Handler
+	upgrader        websocket.Upgrader
 }
 
 func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.Logger, allowedOrigins string, trustedProxyCIDRs ...string) http.Handler {
@@ -53,9 +56,10 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 			}
 			return user.ID, nil
 		}),
-		limiter:        NewRateLimiter(600, time.Minute),
-		strictLimiter:  NewRateLimiter(20, time.Minute),
-		trustedProxies: parseTrustedProxyCIDRs(strings.Join(trustedProxyCIDRs, ",")),
+		limiter:         NewRateLimiter(600, time.Minute),
+		strictLimiter:   NewRateLimiter(20, time.Minute),
+		joinCodeLimiter: NewRateLimiter(joinCodeAttemptsPerAccount, joinCodeAttemptWindow),
+		trustedProxies:  parseTrustedProxyCIDRs(strings.Join(trustedProxyCIDRs, ",")),
 	}
 	server.upgrader = websocket.Upgrader{
 		ReadBufferSize:  1024,
@@ -394,7 +398,12 @@ func (s *Server) joinByCode(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &input) {
 		return
 	}
-	group, err := s.svc.JoinByInviteCode(r.Context(), currentUser(r).ID, input.InviteCode)
+	userID := currentUser(r).ID
+	if !s.joinCodeLimiter.Allow("join-code:" + userID) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "rate limit exceeded"})
+		return
+	}
+	group, err := s.svc.JoinByInviteCode(r.Context(), userID, input.InviteCode)
 	if err != nil {
 		s.writeError(w, err)
 		return
@@ -419,7 +428,7 @@ func (s *Server) inviteUser(w http.ResponseWriter, r *http.Request) {
 		target = ""
 	}
 	if target == "" && mobile != "" {
-		user, err := s.svc.FindUserByPhone(r.Context(), mobile)
+		user, err := s.svc.ResolveInviteTargetByPhone(r.Context(), currentUser(r).ID, chi.URLParam(r, "groupID"), mobile)
 		if err != nil {
 			s.writeError(w, err)
 			return
@@ -681,6 +690,14 @@ func strictRateLimitClass(method, path string) string {
 	if method == http.MethodGet && path == "/api/groups/search" {
 		return "group-search"
 	}
+	// Endpoints that resolve a phone number are kept on the strict limiter so
+	// they cannot be used for bulk phone-number probing.
+	if strings.HasPrefix(path, "/api/groups/") && (strings.HasSuffix(path, "/members/role-by-phone") ||
+		strings.HasSuffix(path, "/comment-mutes/by-phone") ||
+		strings.HasSuffix(path, "/comment-mutes/unmute-by-phone")) &&
+		(method == http.MethodPost || method == http.MethodDelete) {
+		return "phone-lookup"
+	}
 	if method != http.MethodPost {
 		return ""
 	}
@@ -689,6 +706,10 @@ func strictRateLimitClass(method, path string) string {
 		return "auth-request-code"
 	case "/api/auth/verify-code":
 		return "auth-verify-code"
+	case "/api/groups/join-by-code":
+		// Invite codes are short; joining by code must not be guessable at the
+		// general API rate.
+		return "group-join-code"
 	}
 	if strings.HasPrefix(path, "/api/groups/") && strings.HasSuffix(path, "/messages") {
 		return "message-create"
@@ -793,7 +814,13 @@ func (s *Server) writeError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.As(err, &pending):
 		if pending.Item.GroupID != "" {
-			s.hub.BroadcastGroup(pending.Item.GroupID, realtime.Event{Type: "content_moderation.pending_review", GroupID: pending.Item.GroupID, Payload: pending.Item})
+			// Every group member receives this event, so it must not carry the held
+			// content itself; clients only use it to refresh the moderation count.
+			s.hub.BroadcastGroup(pending.Item.GroupID, realtime.Event{Type: "content_moderation.pending_review", GroupID: pending.Item.GroupID, Payload: map[string]string{
+				"id":           pending.Item.ID,
+				"content_type": string(pending.Item.ContentType),
+				"status":       string(pending.Item.Status),
+			}})
 		}
 		writeJSON(w, http.StatusAccepted, map[string]any{"status": "pending_review", "moderation_item": pending.Item})
 	case errors.As(err, &validation):

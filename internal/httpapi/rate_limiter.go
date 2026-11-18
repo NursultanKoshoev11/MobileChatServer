@@ -115,3 +115,10 @@ func ipInNetworks(ip net.IP, networks []net.IPNet) bool {
 	}
 	return false
 }
+
+// Invite-code joins per account. Legitimate users join a handful of groups;
+// this keeps code guessing to at most ~40 attempts per hour per account.
+const (
+	joinCodeAttemptsPerAccount = 10
+	joinCodeAttemptWindow      = 15 * time.Minute
+)
