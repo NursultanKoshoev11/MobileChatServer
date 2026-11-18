@@ -84,7 +84,8 @@ The API sends verification codes over HTTPS to
 login and password in the server secret file; never put them in source, logs, or
 mobile builds. `SMSPRO_SENDER` must be approved in the SMSPro account and match
 the provider's sender-ID format. The adapter sends one recipient per request and
-does not set the optional scheduled-send time.
+does not set the optional scheduled-send time. See the
+[official SMSPro XML protocol](https://smspro.nikita.kg/kg/documents/smspro.nikita.kg-XML-api.pdf).
 
 The provider's `status=0` means the SMS was accepted into its sending queue, not
 confirmed delivered. A provider processing-timeout (`status=9`) is retried once
