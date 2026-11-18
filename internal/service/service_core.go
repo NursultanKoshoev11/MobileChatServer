@@ -137,11 +137,21 @@ func (s *Service) InviteUserByID(ctx context.Context, adminID, groupID, targetUs
 	})
 }
 
-func (s *Service) ListMessages(ctx context.Context, userID, groupID string, limit int, before time.Time) ([]domain.Message, error) {
+func (s *Service) ListMessages(ctx context.Context, userID, groupID string, limit int, before time.Time, beforeIDs ...string) ([]domain.Message, error) {
 	if groupID == "" {
 		return nil, NewValidationError("group_id is required")
 	}
-	return s.repo.ListMessages(ctx, groupID, userID, limit, before)
+	return s.repo.ListMessages(ctx, groupID, userID, limit, before, beforeIDs...)
+}
+
+func (s *Service) ListMessagesAfter(ctx context.Context, userID, groupID string, limit int, after time.Time, afterID string) ([]domain.Message, error) {
+	if groupID == "" {
+		return nil, NewValidationError("group_id is required")
+	}
+	if after.IsZero() || strings.TrimSpace(afterID) == "" {
+		return nil, NewValidationError("after cursor is required")
+	}
+	return s.repo.ListMessagesAfter(ctx, groupID, userID, limit, after, afterID)
 }
 
 func (s *Service) SendMessage(ctx context.Context, senderID, groupID string, input SendMessageInput) (domain.Message, error) {
@@ -153,8 +163,12 @@ func (s *Service) createMessage(ctx context.Context, senderID, groupID string, i
 	if groupID == "" {
 		return domain.Message{}, NewValidationError("group_id is required")
 	}
-	if _, err := s.repo.GetMemberRole(ctx, groupID, senderID); err != nil {
+	role, err := s.repo.GetMemberRole(ctx, groupID, senderID)
+	if err != nil {
 		return domain.Message{}, err
+	}
+	if !canPublishOfficialMessage(role) {
+		return domain.Message{}, storage.ErrForbidden
 	}
 	if text == "" {
 		return domain.Message{}, NewValidationError("text is required")
@@ -172,7 +186,7 @@ func (s *Service) createMessage(ctx context.Context, senderID, groupID string, i
 	}
 	message := domain.Message{ID: "M-" + strings.ToUpper(randomHex(12)), GroupID: groupID, SenderID: senderID, Text: text}
 	var created domain.Message
-	_, err := s.persistModeratedPublication(ctx, moderationNotice, func(repo *storage.Repository) (string, error) {
+	_, err = s.persistModeratedPublication(ctx, moderationNotice, func(repo *storage.Repository) (string, error) {
 		var createErr error
 		created, createErr = repo.CreateMessage(ctx, message)
 		return created.ID, createErr
@@ -181,6 +195,10 @@ func (s *Service) createMessage(ctx context.Context, senderID, groupID string, i
 		return domain.Message{}, err
 	}
 	return created, nil
+}
+
+func canPublishOfficialMessage(role domain.GroupRole) bool {
+	return role == domain.RoleOwner || role == domain.RoleAdmin
 }
 
 func (s *Service) issueSession(ctx context.Context, user domain.User) (domain.Session, error) {

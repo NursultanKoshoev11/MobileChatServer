@@ -3,6 +3,7 @@ package httpapi
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/realtime"
@@ -33,13 +34,20 @@ func (s *Server) listPublicRequests(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var before time.Time
+	beforeID := strings.TrimSpace(r.URL.Query().Get("before_id"))
 	if raw := r.URL.Query().Get("before"); raw != "" {
-		if parsed, err := time.Parse(time.RFC3339Nano, raw); err == nil {
-			before = parsed
+		parsed, err := time.Parse(time.RFC3339Nano, raw)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid before cursor"})
+			return
 		}
+		before = parsed
+	} else if beforeID != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "before timestamp is required with before_id"})
+		return
 	}
 	mineOnly := r.URL.Query().Get("mine") == "true"
-	requests, err := s.svc.ListPublicRequests(r.Context(), currentUser(r).ID, chi.URLParam(r, "groupID"), limit, before, mineOnly)
+	requests, err := s.svc.ListPublicRequests(r.Context(), currentUser(r).ID, chi.URLParam(r, "groupID"), limit, before, beforeID, mineOnly)
 	if err != nil {
 		s.writeError(w, err)
 		return
