@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -35,6 +36,8 @@ type Config struct {
 	TestAuthPhone                  string
 	TestAuthCode                   string
 	TestAuthDisplayName            string
+	AppReviewPhone                 string
+	AppReviewCode                  string
 	ContentModerationEnabled       bool
 	ContentModerationProvider      string
 	HuggingFaceModerationToken     string
@@ -79,6 +82,8 @@ func Load() (Config, error) {
 		TestAuthPhone:                  os.Getenv("TEST_AUTH_PHONE"),
 		TestAuthCode:                   os.Getenv("TEST_AUTH_CODE"),
 		TestAuthDisplayName:            getEnv("TEST_AUTH_DISPLAY_NAME", "Test User"),
+		AppReviewPhone:                 strings.TrimSpace(os.Getenv("APP_REVIEW_PHONE")),
+		AppReviewCode:                  strings.TrimSpace(os.Getenv("APP_REVIEW_CODE")),
 		ContentModerationEnabled:       getEnvBool("CONTENT_MODERATION_ENABLED", true),
 		ContentModerationProvider:      getEnv("CONTENT_MODERATION_PROVIDER", "huggingface"),
 		HuggingFaceModerationToken:     os.Getenv("HF_TOKEN"),
@@ -141,6 +146,10 @@ func Load() (Config, error) {
 		}
 	}
 
+	if err := validateAppReviewLogin(cfg); err != nil {
+		return Config{}, err
+	}
+
 	if sharedEnvironment(cfg.Environment) {
 		for _, phone := range append(append([]string{}, cfg.SuperAdminPhones...), cfg.PlatformAdminPhones...) {
 			if normalizePhoneForValidation(phone) == "+996000000000" {
@@ -162,6 +171,66 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("ACCESS_TOKEN_TTL_MINUTES must be 15 or less in staging or production")
 	}
 	return cfg, nil
+}
+
+var appReviewPhonePattern = regexp.MustCompile(`^\+[1-9][0-9]{7,14}$`)
+
+// validateAppReviewLogin checks the store-review account settings. The account
+// must be a dedicated number (never an admin) with a non-trivial 6-digit code.
+func validateAppReviewLogin(cfg Config) error {
+	phone := normalizePhoneForValidation(cfg.AppReviewPhone)
+	code := cfg.AppReviewCode
+	if phone == "" && code == "" {
+		return nil
+	}
+	if phone == "" || code == "" {
+		return fmt.Errorf("APP_REVIEW_PHONE and APP_REVIEW_CODE must be set together")
+	}
+	if !appReviewPhonePattern.MatchString(phone) {
+		return fmt.Errorf("APP_REVIEW_PHONE must be in international format, for example +996312000000")
+	}
+	if weakAppReviewCode(code) {
+		return fmt.Errorf("APP_REVIEW_CODE must be 6 digits and not trivial (no repeated digits or sequences)")
+	}
+	for _, admin := range append(append([]string{}, cfg.SuperAdminPhones...), cfg.PlatformAdminPhones...) {
+		if normalizePhoneForValidation(admin) == phone {
+			return fmt.Errorf("APP_REVIEW_PHONE must not be an admin phone")
+		}
+	}
+	if cfg.TestAuthEnabled {
+		for _, part := range strings.Split(cfg.TestAuthPhone, ",") {
+			if normalizePhoneForValidation(part) == phone {
+				return fmt.Errorf("APP_REVIEW_PHONE must not also be a TEST_AUTH_PHONE")
+			}
+		}
+	}
+	return nil
+}
+
+func weakAppReviewCode(code string) bool {
+	if len(code) != 6 {
+		return true
+	}
+	distinct := map[rune]bool{}
+	for _, char := range code {
+		if char < '0' || char > '9' {
+			return true
+		}
+		distinct[char] = true
+	}
+	if len(distinct) < 3 {
+		return true
+	}
+	ascending, descending := true, true
+	for i := 1; i < len(code); i++ {
+		if code[i] != code[i-1]+1 {
+			ascending = false
+		}
+		if code[i] != code[i-1]-1 {
+			descending = false
+		}
+	}
+	return ascending || descending
 }
 
 func normalizePhoneForValidation(phone string) string {

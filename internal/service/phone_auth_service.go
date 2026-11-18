@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -40,6 +41,8 @@ type PhoneAuthConfig struct {
 	TestAuthPhone       string
 	TestAuthCode        string
 	TestAuthDisplayName string
+	AppReviewPhone      string
+	AppReviewCode       string
 	// SMSAllowedCountryPrefixes overrides defaultSMSAllowedCountryPrefixes when set.
 	SMSAllowedCountryPrefixes []string
 	// SMSGlobalHourlyMax overrides defaultPhoneCodeGlobalHourlyMax when positive.
@@ -65,18 +68,25 @@ func (s *PhoneAuthService) RequestCode(ctx context.Context, input RequestPhoneCo
 	if s.isTestAuthMobile(mobile) {
 		return RequestPhoneCodeOutput{Status: "test_code_ready", DevCode: s.expectedTestAuthCode()}, nil
 	}
-	if !s.smsCountryAllowed(mobile) {
+	appReview := s.isAppReviewMobile(mobile)
+	if !appReview && !s.smsCountryAllowed(mobile) {
 		return RequestPhoneCodeOutput{}, NewValidationError("sms verification is not available for this phone number")
 	}
 
 	now := time.Now().UTC()
+	// The per-number daily cap also bounds guessing of the fixed review code.
 	if err := s.checkSMSBudget(ctx, mobile, now); err != nil {
 		return RequestPhoneCodeOutput{}, err
 	}
 
-	code, err := newNumericCode(6)
-	if err != nil {
-		return RequestPhoneCodeOutput{}, err
+	var code string
+	if appReview {
+		code = s.cfg.AppReviewCode
+	} else {
+		code, err = newNumericCode(6)
+		if err != nil {
+			return RequestPhoneCodeOutput{}, err
+		}
 	}
 	codeID := "PC-" + strings.ToUpper(randomHex(12))
 	allowed, err := s.repo.CreatePhoneCodeIfWithinLimit(
@@ -94,6 +104,12 @@ func (s *PhoneAuthService) RequestCode(ctx context.Context, input RequestPhoneCo
 	}
 	if !allowed {
 		return RequestPhoneCodeOutput{}, NewValidationError("too many code requests; try again later")
+	}
+	if appReview {
+		// Store-review account: the code is the configured one, so no SMS is
+		// sent. The response is identical to a real send and never reveals it.
+		log.Printf("app review login code issued for the configured review account")
+		return RequestPhoneCodeOutput{Status: "code_sent"}, nil
 	}
 	if s.sender == nil {
 		return RequestPhoneCodeOutput{}, fmt.Errorf("sms sender is not configured")
@@ -325,6 +341,14 @@ func (s *PhoneAuthService) isTestAuthMobile(mobile string) bool {
 		}
 	}
 	return false
+}
+
+// isAppReviewMobile reports whether mobile is the dedicated store-review
+// account (APP_REVIEW_PHONE). Unlike test auth it works in production, but
+// only through the normal code flow: TTL, attempt limits and rate limits apply.
+func (s *PhoneAuthService) isAppReviewMobile(mobile string) bool {
+	reviewPhone := normalizeTestValue(s.cfg.AppReviewPhone)
+	return reviewPhone != "" && len(s.cfg.AppReviewCode) == 6 && normalizeTestValue(mobile) == reviewPhone
 }
 
 func (s *PhoneAuthService) expectedTestAuthCode() string {

@@ -101,6 +101,8 @@ func main() {
 		TestAuthPhone:             cfg.TestAuthPhone,
 		TestAuthCode:              cfg.TestAuthCode,
 		TestAuthDisplayName:       cfg.TestAuthDisplayName,
+		AppReviewPhone:            cfg.AppReviewPhone,
+		AppReviewCode:             cfg.AppReviewCode,
 		SMSAllowedCountryPrefixes: cfg.SMSAllowedCountryPrefixes,
 		SMSGlobalHourlyMax:        cfg.SMSGlobalHourlyMax,
 	}, smsSender)
