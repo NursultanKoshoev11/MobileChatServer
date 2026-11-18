@@ -61,8 +61,17 @@ preflight() {
         return 1
       fi
       ;;
+    disabled)
+      # Temporary SMS shutdown: only allowed with the explicit switch the API
+      # also requires; then only APP_REVIEW_PHONE test accounts can sign in.
+      if ! grep -Eq '^SMS_DISABLED_IN_PRODUCTION[[:space:]]*=[[:space:]]*true([[:space:]#]|$)' "$ENV_FILE"; then
+        echo "SMS_PROVIDER=disabled in production requires SMS_DISABLED_IN_PRODUCTION=true in .env.prod." >&2
+        return 1
+      fi
+      echo "WARNING: production SMS is disabled; only APP_REVIEW_PHONE accounts can sign in." >&2
+      ;;
     *)
-      echo "Production SMS_PROVIDER must be smspro or twilio." >&2
+      echo "Production SMS_PROVIDER must be smspro, twilio, or disabled (with SMS_DISABLED_IN_PRODUCTION=true)." >&2
       return 1
       ;;
   esac
