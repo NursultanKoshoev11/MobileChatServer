@@ -1,0 +1,4 @@
+# Shell scripts run on Linux hosts and in containers; keep them LF.
+*.sh text eol=lf
+scripts/* text eol=lf
+scripts/koom-github-deploy text eol=lf
