@@ -31,3 +31,45 @@ jobs:
         run: go build ./cmd/server
       - name: Build migrate
         run: go build ./cmd/migrate
+
+  # API end-to-end tests, the access-control matrix and the storage
+  # integration tests against a real, migrated Postgres 16.
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: koom
+          POSTGRES_PASSWORD: koom-ci-only
+          POSTGRES_DB: koom_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U koom -d koom_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://koom:koom-ci-only@localhost:5432/koom_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.11'
+          cache: true
+      - name: Apply migrations with the migrate command
+        env:
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+          APP_ENV: test
+          JWT_SECRET: ci-only-jwt-secret-0123456789abcdef0123456789abcdef
+        run: go run ./cmd/migrate
+      - name: Integration and end-to-end tests
+        # -p 1: storage tests rewrite the shared admin allowlist; run packages
+        # sequentially so they cannot race the e2e suite's admin accounts.
+        # shell: bash adds pipefail so a test failure is not hidden by tee.
+        shell: bash
+        run: go test -count=1 -p 1 -v ./internal/e2e/... ./internal/storage/... 2>&1 | tee e2e.log
+      - name: Access matrix summary
+        if: always()
+        run: grep -h "ACCESS MATRIX SUMMARY" e2e.log || true
