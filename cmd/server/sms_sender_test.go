@@ -91,3 +91,16 @@ func TestNewSMSSenderRejectsDevelopmentProviderInProduction(t *testing.T) {
 		t.Fatal("expected dev SMS provider to be rejected in production")
 	}
 }
+
+func TestNewSMSSenderDisabledInProductionNeedsExplicitSwitch(t *testing.T) {
+	if _, err := newSMSSender(config.Config{Environment: "production", SMSProvider: "disabled"}, nil); err == nil {
+		t.Fatal("expected disabled SMS to be rejected in production without SMS_DISABLED_IN_PRODUCTION")
+	}
+	sender, err := newSMSSender(config.Config{Environment: "production", SMSProvider: "disabled", SMSDisabledInProduction: true}, nil)
+	if err != nil {
+		t.Fatalf("expected explicit switch to allow disabled SMS, got %v", err)
+	}
+	if _, ok := sender.(sms.DisabledSender); !ok {
+		t.Fatalf("expected sms.DisabledSender, got %T", sender)
+	}
+}

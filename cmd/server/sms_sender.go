@@ -19,7 +19,12 @@ func newSMSSender(cfg config.Config, logger *log.Logger) (sms.Sender, error) {
 		return sms.DevSender{Logger: logger}, nil
 	case "disabled":
 		if strings.EqualFold(strings.TrimSpace(cfg.Environment), "production") {
-			return nil, fmt.Errorf("SMS_PROVIDER=disabled is not allowed in production")
+			if !cfg.SMSDisabledInProduction {
+				return nil, fmt.Errorf("SMS_PROVIDER=disabled is not allowed in production unless SMS_DISABLED_IN_PRODUCTION=true")
+			}
+			if logger != nil {
+				logger.Println("WARNING: SMS is disabled in production; only APP_REVIEW_PHONE accounts can sign in")
+			}
 		}
 		return sms.DisabledSender{}, nil
 	case "smspro":

@@ -91,3 +91,21 @@ func TestAppReviewMobileDisabledWithoutValidCode(t *testing.T) {
 		t.Error("review login must be off when not configured")
 	}
 }
+
+func TestAppReviewMobileMatchesAnyListedAccount(t *testing.T) {
+	auth := NewPhoneAuth(nil, PhoneAuthConfig{
+		Environment:    "production",
+		AppReviewPhone: "+996312000001, +996 312 000 002,+996312000003",
+		AppReviewCode:  "111111",
+	}, nil)
+	for _, phone := range []string{"+996312000001", "+996312000002", "+996312000003"} {
+		if !auth.isAppReviewMobile(phone) {
+			t.Errorf("expected %s to be a test account", phone)
+		}
+	}
+	for _, phone := range []string{"+996312000004", "", "+996312"} {
+		if auth.isAppReviewMobile(phone) {
+			t.Errorf("unexpected match for %q", phone)
+		}
+	}
+}

@@ -38,6 +38,8 @@ type Config struct {
 	TestAuthDisplayName            string
 	AppReviewPhone                 string
 	AppReviewCode                  string
+	AppReviewAllowSimpleCode       bool
+	SMSDisabledInProduction        bool
 	ContentModerationEnabled       bool
 	ContentModerationProvider      string
 	HuggingFaceModerationToken     string
@@ -84,6 +86,8 @@ func Load() (Config, error) {
 		TestAuthDisplayName:            getEnv("TEST_AUTH_DISPLAY_NAME", "Test User"),
 		AppReviewPhone:                 strings.TrimSpace(os.Getenv("APP_REVIEW_PHONE")),
 		AppReviewCode:                  strings.TrimSpace(os.Getenv("APP_REVIEW_CODE")),
+		AppReviewAllowSimpleCode:       getEnvBool("APP_REVIEW_ALLOW_SIMPLE_CODE", false),
+		SMSDisabledInProduction:        getEnvBool("SMS_DISABLED_IN_PRODUCTION", false),
 		ContentModerationEnabled:       getEnvBool("CONTENT_MODERATION_ENABLED", true),
 		ContentModerationProvider:      getEnv("CONTENT_MODERATION_PROVIDER", "huggingface"),
 		HuggingFaceModerationToken:     os.Getenv("HF_TOKEN"),
@@ -175,32 +179,59 @@ func Load() (Config, error) {
 
 var appReviewPhonePattern = regexp.MustCompile(`^\+[1-9][0-9]{7,14}$`)
 
-// validateAppReviewLogin checks the store-review account settings. The account
-// must be a dedicated number (never an admin) with a non-trivial 6-digit code.
-func validateAppReviewLogin(cfg Config) error {
-	phone := normalizePhoneForValidation(cfg.AppReviewPhone)
-	code := cfg.AppReviewCode
-	if phone == "" && code == "" {
-		return nil
-	}
-	if phone == "" || code == "" {
-		return fmt.Errorf("APP_REVIEW_PHONE and APP_REVIEW_CODE must be set together")
-	}
-	if !appReviewPhonePattern.MatchString(phone) {
-		return fmt.Errorf("APP_REVIEW_PHONE must be in international format, for example +996312000000")
-	}
-	if weakAppReviewCode(code) {
-		return fmt.Errorf("APP_REVIEW_CODE must be 6 digits and not trivial (no repeated digits or sequences)")
-	}
-	for _, admin := range append(append([]string{}, cfg.SuperAdminPhones...), cfg.PlatformAdminPhones...) {
-		if normalizePhoneForValidation(admin) == phone {
-			return fmt.Errorf("APP_REVIEW_PHONE must not be an admin phone")
+// AppReviewPhones splits APP_REVIEW_PHONE, which may list several
+// comma-separated test accounts that all share APP_REVIEW_CODE.
+func AppReviewPhones(raw string) []string {
+	var phones []string
+	for _, part := range strings.Split(raw, ",") {
+		if phone := normalizePhoneForValidation(part); phone != "" {
+			phones = append(phones, phone)
 		}
 	}
-	if cfg.TestAuthEnabled {
-		for _, part := range strings.Split(cfg.TestAuthPhone, ",") {
-			if normalizePhoneForValidation(part) == phone {
-				return fmt.Errorf("APP_REVIEW_PHONE must not also be a TEST_AUTH_PHONE")
+	return phones
+}
+
+// validateAppReviewLogin checks the store-review / test account settings. The
+// accounts must be dedicated numbers (never admins) with a 6-digit code. The
+// code must be non-trivial unless APP_REVIEW_ALLOW_SIMPLE_CODE=true.
+func validateAppReviewLogin(cfg Config) error {
+	phones := AppReviewPhones(cfg.AppReviewPhone)
+	code := cfg.AppReviewCode
+	if len(phones) == 0 && code == "" {
+		return nil
+	}
+	if len(phones) == 0 || code == "" {
+		return fmt.Errorf("APP_REVIEW_PHONE and APP_REVIEW_CODE must be set together")
+	}
+	if len(phones) > 20 {
+		return fmt.Errorf("APP_REVIEW_PHONE allows at most 20 numbers")
+	}
+	if cfg.AppReviewAllowSimpleCode {
+		if len(code) != 6 || strings.Trim(code, "0123456789") != "" {
+			return fmt.Errorf("APP_REVIEW_CODE must be 6 digits")
+		}
+	} else if weakAppReviewCode(code) {
+		return fmt.Errorf("APP_REVIEW_CODE must be 6 digits and not trivial (no repeated digits or sequences); set APP_REVIEW_ALLOW_SIMPLE_CODE=true to allow a simple test code")
+	}
+	seen := map[string]bool{}
+	for _, phone := range phones {
+		if !appReviewPhonePattern.MatchString(phone) {
+			return fmt.Errorf("APP_REVIEW_PHONE must be in international format, for example +996312000000")
+		}
+		if seen[phone] {
+			return fmt.Errorf("APP_REVIEW_PHONE lists %s twice", phone)
+		}
+		seen[phone] = true
+		for _, admin := range append(append([]string{}, cfg.SuperAdminPhones...), cfg.PlatformAdminPhones...) {
+			if normalizePhoneForValidation(admin) == phone {
+				return fmt.Errorf("APP_REVIEW_PHONE must not be an admin phone")
+			}
+		}
+		if cfg.TestAuthEnabled {
+			for _, part := range strings.Split(cfg.TestAuthPhone, ",") {
+				if normalizePhoneForValidation(part) == phone {
+					return fmt.Errorf("APP_REVIEW_PHONE must not also be a TEST_AUTH_PHONE")
+				}
 			}
 		}
 	}
