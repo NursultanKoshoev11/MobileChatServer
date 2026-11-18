@@ -74,6 +74,7 @@ func (r *Repository) ListPublicRequests(ctx context.Context, groupID, viewerID s
 			  OR ($4::text IS NOT NULL AND (pr.created_at, pr.id) < ($3, $4))
 		  )
 		  AND ($5::boolean = false OR pr.author_id = $2)
+		  AND NOT EXISTS (SELECT 1 FROM user_blocks ub WHERE ub.blocker_id = $2 AND ub.blocked_id = pr.author_id)
 		GROUP BY pr.id, u.display_name, u.avatar_data, myv.vote_type
 		ORDER BY pr.created_at DESC, pr.id DESC
 		LIMIT $6`
@@ -222,6 +223,9 @@ func (r *Repository) CreatePublicRequestComment(ctx context.Context, comment dom
 	return comment, nil
 }
 
+// maxListedPublicRequestComments caps one comments response.
+const maxListedPublicRequestComments = 500
+
 func (r *Repository) ListPublicRequestComments(ctx context.Context, requestID, viewerID string) ([]domain.PublicRequestComment, error) {
 	groupID, err := r.publicRequestGroupID(ctx, requestID)
 	if err != nil {
@@ -234,13 +238,21 @@ func (r *Repository) ListPublicRequestComments(ctx context.Context, requestID, v
 	if !isMember {
 		return nil, ErrForbidden
 	}
+	// The newest maxListedPublicRequestComments comments are returned in the
+	// existing oldest-first order.
 	rows, err := r.db.Query(ctx, `
-		SELECT c.id, c.request_id, COALESCE(c.author_id, ''), COALESCE(u.display_name, ''),
-		       COALESCE(u.avatar_data, ''), c.body, c.created_at, c.deleted_at
-		FROM public_request_comments c
-		LEFT JOIN users u ON u.id = c.author_id
-		WHERE c.request_id = $1 AND c.deleted_at IS NULL
-		ORDER BY c.created_at ASC`, requestID)
+		SELECT id, request_id, author_id, display_name, avatar_data, body, created_at, deleted_at
+		FROM (
+			SELECT c.id, c.request_id, COALESCE(c.author_id, '') AS author_id, COALESCE(u.display_name, '') AS display_name,
+			       COALESCE(u.avatar_data, '') AS avatar_data, c.body, c.created_at, c.deleted_at
+			FROM public_request_comments c
+			LEFT JOIN users u ON u.id = c.author_id
+			WHERE c.request_id = $1 AND c.deleted_at IS NULL
+			  AND NOT EXISTS (SELECT 1 FROM user_blocks ub WHERE ub.blocker_id = $2 AND ub.blocked_id = c.author_id)
+			ORDER BY c.created_at DESC, c.id DESC
+			LIMIT $3
+		) newest
+		ORDER BY created_at ASC, id ASC`, requestID, viewerID, maxListedPublicRequestComments)
 	if err != nil {
 		return nil, fmt.Errorf("list public request comments: %w", err)
 	}

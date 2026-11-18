@@ -15,6 +15,8 @@ func TestStrictRateLimitClassCoversAbuseProneEndpoints(t *testing.T) {
 		{http.MethodDelete, "/api/groups/G-1/comment-mutes/by-phone", "phone-lookup"},
 		{http.MethodPost, "/api/groups/G-1/comment-mutes/unmute-by-phone", "phone-lookup"},
 		{http.MethodPost, "/api/auth/request-code", "auth-request-code"},
+		{http.MethodPost, "/api/reports", "report-create"},
+		{http.MethodPost, "/api/reports/RPT-1/resolve", ""},
 		{http.MethodGet, "/api/groups", ""},
 		{http.MethodGet, "/api/groups/G-1/members", ""},
 	}

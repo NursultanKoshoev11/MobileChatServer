@@ -1,3 +1,6 @@
+# LOCAL DEVELOPMENT ONLY. Uses weak default credentials, SMS_PROVIDER=dev and
+# ALLOWED_ORIGINS=*. Never run this file on a real server; production uses
+# docker-compose.prod.yml as described in docs/DEPLOYMENT.md.
 services:
   postgres:
     image: postgres:16-alpine
@@ -39,7 +42,8 @@ services:
       SUPER_ADMIN_PHONES: ${SUPER_ADMIN_PHONES:-}
       PLATFORM_ADMIN_PHONES: ${PLATFORM_ADMIN_PHONES:-}
     ports:
-      - "${API_PORT:-8080}:8080"
+      # Loopback only: this file is for local development and uses dev defaults.
+      - "127.0.0.1:${API_PORT:-8080}:8080"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/api/health >/dev/null 2>&1 || exit 1"]
       interval: 15s

@@ -25,6 +25,9 @@ import (
 
 const maxJSONBodyBytes = 2 * 1024 * 1024
 
+// backgroundNotifyTimeout bounds push notifications sent after a response.
+const backgroundNotifyTimeout = 30 * time.Second
+
 type userContextKey struct{}
 
 type Server struct {
@@ -38,9 +41,11 @@ type Server struct {
 	// joinCodeLimiter caps invite-code attempts per account, on top of the
 	// per-IP strict limit, so rotating IPs does not help brute-force codes.
 	joinCodeLimiter *RateLimiter
-	trustedProxies  []net.IPNet
-	router          http.Handler
-	upgrader        websocket.Upgrader
+	// userLimiter limits authenticated requests per account.
+	userLimiter    *RateLimiter
+	trustedProxies []net.IPNet
+	router         http.Handler
+	upgrader       websocket.Upgrader
 }
 
 func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.Logger, allowedOrigins string, trustedProxyCIDRs ...string) http.Handler {
@@ -59,6 +64,7 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 		limiter:         NewRateLimiter(600, time.Minute),
 		strictLimiter:   NewRateLimiter(20, time.Minute),
 		joinCodeLimiter: NewRateLimiter(joinCodeAttemptsPerAccount, joinCodeAttemptWindow),
+		userLimiter:     NewRateLimiter(perUserRequestsPerWindow, perUserRequestWindow),
 		trustedProxies:  parseTrustedProxyCIDRs(strings.Join(trustedProxyCIDRs, ",")),
 	}
 	server.upgrader = websocket.Upgrader{
@@ -92,6 +98,8 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 	r.Get("/api/health", server.health)
 	r.Get("/privacy", server.privacyPolicy)
 	r.Head("/privacy", server.privacyPolicy)
+	r.Get("/terms", server.termsOfUse)
+	r.Head("/terms", server.termsOfUse)
 	r.Get("/account-deletion", server.accountDeletionPage)
 	r.Head("/account-deletion", server.accountDeletionPage)
 	r.Get("/child-safety", server.childSafetyStandards)
@@ -107,6 +115,7 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 
 	r.Group(func(r chi.Router) {
 		r.Use(server.auth)
+		r.Use(server.userRateLimit)
 		r.Get("/api/me", server.me)
 		r.Delete("/api/me", server.deleteMyAccount)
 		r.Put("/api/me/avatar", server.updateMyAvatar)
@@ -166,6 +175,13 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 		r.Post("/api/admin/group-creation-requests/{requestID}/reject", server.rejectGroupCreationRequest)
 		r.Post("/api/admin/group-creation-requests/{requestID}/need-more-info", server.needMoreInfoForGroupCreationRequest)
 		r.Delete("/api/admin/groups/{groupID}", server.deleteGroupAsPlatformAdmin)
+		r.Post("/api/reports", server.createReport)
+		r.Post("/api/reports/{reportID}/resolve", server.resolveReport)
+		r.Get("/api/groups/{groupID}/reports", server.listGroupReports)
+		r.Get("/api/admin/reports", server.listAdminReports)
+		r.Post("/api/users/{userID}/block", server.blockUser)
+		r.Delete("/api/users/{userID}/block", server.unblockUser)
+		r.Get("/api/me/blocks", server.listMyBlocks)
 	})
 
 	server.router = r
@@ -248,9 +264,15 @@ func (s *Server) logoutPhoneSession(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &input) {
 		return
 	}
-	if err := s.phoneAuth.Logout(r.Context(), input); err != nil {
+	userID, err := s.phoneAuth.LogoutSession(r.Context(), input)
+	if err != nil {
 		s.writeError(w, err)
 		return
+	}
+	if userID != "" {
+		// Close this instance's sockets for the user; other devices reconnect
+		// with their own still-valid sessions.
+		s.hub.DisconnectUserSessions(userID)
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "logged_out"})
 }
@@ -384,10 +406,13 @@ func (s *Server) updateGroupMemberRoleByPhone(w http.ResponseWriter, r *http.Req
 }
 
 func (s *Server) leaveGroup(w http.ResponseWriter, r *http.Request) {
-	if err := s.svc.LeaveGroup(r.Context(), currentUser(r).ID, chi.URLParam(r, "groupID")); err != nil {
+	userID := currentUser(r).ID
+	groupID := chi.URLParam(r, "groupID")
+	if err := s.svc.LeaveGroup(r.Context(), userID, groupID); err != nil {
 		s.writeError(w, err)
 		return
 	}
+	s.hub.RemoveUserFromGroup(groupID, userID)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "left"})
 }
 
@@ -441,7 +466,13 @@ func (s *Server) inviteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.hub.NotifyUser(target, realtime.Event{Type: "invite.created", GroupID: invite.GroupID, Payload: invite})
-	go s.svc.NotifyUserAboutInvite(r.Context(), target, invite)
+	// The request context is cancelled as soon as this handler returns, which
+	// would abort the push send; detach it but keep a bound on the work.
+	notifyCtx, cancelNotify := context.WithTimeout(context.WithoutCancel(r.Context()), backgroundNotifyTimeout)
+	go func() {
+		defer cancelNotify()
+		s.svc.NotifyUserAboutInvite(notifyCtx, target, invite)
+	}()
 	writeJSON(w, http.StatusCreated, invite)
 }
 
@@ -568,7 +599,7 @@ func (s *Server) groupWebSocket(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
 	groupID := chi.URLParam(r, "groupID")
 	remoteIP := s.clientIP(r)
-	if !s.strictLimiter.Allow("ws:" + remoteIP) {
+	if !s.strictLimiter.Allow("ws:" + rateLimitKeyForIP(remoteIP)) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many websocket connection attempts"})
 		return
 	}
@@ -595,7 +626,7 @@ func (s *Server) groupWebSocket(w http.ResponseWriter, r *http.Request) {
 func (s *Server) userWebSocket(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
 	remoteIP := s.clientIP(r)
-	if !s.strictLimiter.Allow("ws:" + remoteIP) {
+	if !s.strictLimiter.Allow("ws:" + rateLimitKeyForIP(remoteIP)) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many websocket connection attempts"})
 		return
 	}
@@ -666,7 +697,7 @@ func (s *Server) rateLimit(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		key := s.clientIP(r)
+		key := rateLimitKeyForIP(s.clientIP(r))
 		if user := currentUser(r); user.ID != "" {
 			key = user.ID
 		}
@@ -710,6 +741,10 @@ func strictRateLimitClass(method, path string) string {
 		// Invite codes are short; joining by code must not be guessable at the
 		// general API rate.
 		return "group-join-code"
+	case "/api/reports":
+		// Reports notify moderators; keep them off the general rate so they
+		// cannot be used to flood moderation queues.
+		return "report-create"
 	}
 	if strings.HasPrefix(path, "/api/groups/") && strings.HasSuffix(path, "/messages") {
 		return "message-create"

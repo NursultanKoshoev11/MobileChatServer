@@ -91,5 +91,6 @@ const privacyPolicyHTML = `<!doctype html>
     <p>For privacy questions or requests, contact us at <a href="mailto:nursultankosoev2@gmail.com">nursultankosoev2@gmail.com</a>.</p>
   </article>
 </main>
+<footer style="max-width:980px;margin:0 auto;padding:0 18px 40px;color:#617191;font-size:13px"><a href="/terms">Terms of Use / Условия использования</a> · <a href="/account-deletion">Account deletion</a> · <a href="/child-safety">Child safety</a></footer>
 </body>
 </html>`

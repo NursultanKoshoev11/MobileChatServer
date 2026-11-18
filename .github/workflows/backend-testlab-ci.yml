@@ -3,9 +3,12 @@ name: Backend Test Lab CI
 on:
   push:
     branches: [ main ]
+  # All pull requests, whatever their base branch.
   pull_request:
-    branches: [ main ]
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   backend:

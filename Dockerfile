@@ -4,13 +4,15 @@ WORKDIR /src
 ENV CGO_ENABLED=0 \
     GOOS=linux \
     GOMAXPROCS=1 \
-    GOMEMLIMIT=512MiB
-COPY go.mod go.sum* ./
-RUN go mod download
+    GOMEMLIMIT=512MiB \
+    GOFLAGS=-mod=readonly
+COPY go.mod go.sum ./
+# Never run `go mod tidy` in the image build: the build must use exactly the
+# committed go.mod/go.sum, verified against the checksum database records.
+RUN go mod download && go mod verify
 COPY . .
-RUN go mod tidy
-RUN go build -p=1 -trimpath -ldflags='-s -w' -o /out/koom-server ./cmd/server
-RUN go build -p=1 -trimpath -ldflags='-s -w' -o /out/koom-migrate ./cmd/migrate
+RUN go build -mod=readonly -p=1 -trimpath -ldflags='-s -w' -o /out/koom-server ./cmd/server
+RUN go build -mod=readonly -p=1 -trimpath -ldflags='-s -w' -o /out/koom-migrate ./cmd/migrate
 
 FROM alpine:3.24
 
@@ -25,4 +27,3 @@ ENV PORT=8080
 EXPOSE 8080
 
 ENTRYPOINT ["/app/koom-server"]
-

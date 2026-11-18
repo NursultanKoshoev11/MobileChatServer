@@ -2,7 +2,8 @@ package service
 
 import (
 	"regexp"
-	"strings"
+
+	"github.com/NursultanKoshoev11/MobileChatServer/internal/domain"
 )
 
 var phonePattern = regexp.MustCompile(`^\+[1-9][0-9]{7,14}$`)
@@ -23,10 +24,7 @@ type RequestPhoneCodeOutput struct {
 }
 
 func normalizeMobile(raw string) (string, error) {
-	mobile := strings.ReplaceAll(strings.TrimSpace(raw), " ", "")
-	mobile = strings.ReplaceAll(mobile, "-", "")
-	mobile = strings.ReplaceAll(mobile, "(", "")
-	mobile = strings.ReplaceAll(mobile, ")", "")
+	mobile := domain.NormalizeMobileInput(raw)
 	if !phonePattern.MatchString(mobile) {
 		return "", NewValidationError("mobile must be in international format, for example +996700123456")
 	}
