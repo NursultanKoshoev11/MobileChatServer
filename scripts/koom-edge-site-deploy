@@ -78,7 +78,7 @@ if [[ ! -s "$work_dir/package.tar.gz" ]]; then
   exit 1
 fi
 
-expected_entries=$'assets/koom-icon.png\nassets/og-cover.png\nassets/site.css\ndeploy-sha.txt\nindex.html\nkg/index.html'
+expected_entries=$'assets/koom-icon.png\nassets/koom-icon.svg\nassets/og-cover.png\nassets/site.css\ndeploy-sha.txt\nindex.html\nkg/index.html'
 actual_entries="$(tar -tzf "$work_dir/package.tar.gz" | LC_ALL=C sort)"
 if [[ "$actual_entries" != "$expected_entries" ]] \
   || ! tar -tvzf "$work_dir/package.tar.gz" | awk 'substr($0,1,1) != "-" { bad=1 } END { exit bad }'; then
@@ -93,7 +93,7 @@ if [[ "$package_sha" != "$target_sha" ]]; then
   echo "The static-site package SHA does not match the requested commit." >&2
   exit 1
 fi
-for entry in assets/koom-icon.png assets/og-cover.png assets/site.css index.html kg/index.html; do
+for entry in assets/koom-icon.png assets/koom-icon.svg assets/og-cover.png assets/site.css index.html kg/index.html; do
   tar -xOzf "$work_dir/package.tar.gz" "$entry" > "$work_dir/$entry"
 done
 if ! grep -Eq 'site\.css\?v=[A-Za-z0-9._-]+' "$work_dir/index.html" \
@@ -108,7 +108,7 @@ cp -a "$work_dir/index.html" "$stage_dir/index.html"
 cp -a "$work_dir/kg" "$stage_dir/kg"
 cp -a "$work_dir/assets" "$stage_dir/assets"
 chmod 0755 "$stage_dir" "$stage_dir/kg" "$stage_dir/assets"
-chmod 0644 "$stage_dir/index.html" "$stage_dir/kg/index.html" "$stage_dir/assets/koom-icon.png" "$stage_dir/assets/og-cover.png" "$stage_dir/assets/site.css"
+chmod 0644 "$stage_dir/index.html" "$stage_dir/kg/index.html" "$stage_dir/assets/koom-icon.png" "$stage_dir/assets/koom-icon.svg" "$stage_dir/assets/og-cover.png" "$stage_dir/assets/site.css"
 chown -R root:root "$stage_dir"
 
 release_dir="$SITE_ROOT/releases/$target_sha"
@@ -131,11 +131,19 @@ site_switched=1
 home_page="$(curl --fail --silent --show-error --max-time 12 "$HOME_URL")"
 kg_page="$(curl --fail --silent --show-error --max-time 12 "$KG_URL")"
 css_path="$(sed -n 's/.*href="\([^"]*site\.css?v=[^"]*\)".*/\1/p' <<<"$home_page" | head -n 1)"
-if [[ -z "$css_path" ]] || ! grep -Fq 'site.css?v=' <<<"$kg_page"; then
-  echo "The live home pages do not reference the deployed stylesheet." >&2
+icon_path="$(sed -n 's/.*rel="icon" href="\([^"]*koom-icon\.svg?v=[^"]*\)".*/\1/p' <<<"$home_page" | head -n 1)"
+kg_icon_path="$(sed -n 's/.*rel="icon" href="\([^"]*koom-icon\.svg?v=[^"]*\)".*/\1/p' <<<"$kg_page" | head -n 1)"
+if [[ -z "$css_path" || -z "$icon_path" || "$icon_path" != "$kg_icon_path" ]] \
+  || ! grep -Fq 'site.css?v=' <<<"$kg_page"; then
+  echo "The live home pages do not reference the deployed stylesheet and transparent favicon." >&2
   exit 1
 fi
 curl --fail --silent --show-error --max-time 12 "https://koom.com.kg$css_path" >/dev/null
+icon_content="$(curl --fail --silent --show-error --max-time 12 "https://koom.com.kg$icon_path")"
+if ! grep -Fq '<clipPath' <<<"$icon_content" || ! grep -Fq 'data:image/png;base64,' <<<"$icon_content"; then
+  echo "The live favicon is missing its transparent circular mask." >&2
+  exit 1
+fi
 curl --fail --silent --show-error --max-time 12 https://koom.com.kg/privacy >/dev/null
 health_check
 
