@@ -36,6 +36,8 @@ type Service struct {
 	cfg              Config
 	notifier         Notifier
 	contentModerator moderation.Moderator
+	background       backgroundTasks
+	uploadQuotaBytes int64
 }
 
 func New(repo *storage.Repository, cfg Config, notifier ...Notifier) *Service {

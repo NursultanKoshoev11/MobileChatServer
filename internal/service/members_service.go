@@ -44,17 +44,15 @@ func (s *Service) DemoteMember(ctx context.Context, actorID, groupID, targetUser
 	return nil
 }
 
+// RemoveMember removes targetUserID from a group as its owner or an admin
+// (see storage.Repository.RemoveGroupMember for the rules).
 func (s *Service) RemoveMember(ctx context.Context, actorID, groupID, targetUserID string) error {
 	groupID = strings.TrimSpace(groupID)
 	targetUserID = strings.TrimSpace(targetUserID)
 	if groupID == "" || targetUserID == "" {
 		return NewValidationError("group_id and target_user_id are required")
 	}
-	eventType := "member_removed"
-	if actorID == targetUserID {
-		eventType = "member_left"
-	}
-	return s.recordAuditedMutation(ctx, actorID, eventType, "group", groupID, func(repo *storage.Repository) error {
+	return s.recordAuditedMutation(ctx, actorID, "member_removed", "group", groupID, func(repo *storage.Repository) error {
 		return repo.RemoveGroupMember(ctx, groupID, actorID, targetUserID)
 	})
 }

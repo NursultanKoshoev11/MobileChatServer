@@ -12,27 +12,45 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
+	"github.com/NursultanKoshoev11/MobileChatServer/internal/media"
+	"github.com/NursultanKoshoev11/MobileChatServer/internal/storage"
 	"github.com/go-chi/chi/v5"
 )
 
 const (
 	maxPublicFileBytes          = 12 << 20
 	maxPublicUploadRequestBytes = maxPublicFileBytes + (1 << 20)
+	// fileTransferDeadline replaces the server-wide read/write timeouts for
+	// file uploads and downloads so a 12 MB transfer survives a slow mobile
+	// link.
+	fileTransferDeadline = 5 * time.Minute
 )
 
 var (
-	publicFileIDPattern = regexp.MustCompile(`^[A-Z0-9-]{8,80}$`)
+	publicFileIDPattern  = regexp.MustCompile(`^[A-Z0-9-]{8,80}$`)
 	publicGroupIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,80}$`)
 )
 
+// extendTransferDeadlines lifts the server's ReadTimeout/WriteTimeout for this
+// request only.
+func extendTransferDeadlines(w http.ResponseWriter) {
+	controller := http.NewResponseController(w)
+	deadline := time.Now().Add(fileTransferDeadline)
+	_ = controller.SetReadDeadline(deadline)
+	_ = controller.SetWriteDeadline(deadline)
+}
+
 func (s *Server) uploadPublicFile(w http.ResponseWriter, r *http.Request) {
+	extendTransferDeadlines(w)
 	groupID := chi.URLParam(r, "groupID")
 	if !publicGroupIDPattern.MatchString(groupID) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid group id"})
 		return
 	}
-	if err := s.svc.EnsureGroupMember(r.Context(), currentUser(r).ID, groupID); err != nil {
+	userID := currentUser(r).ID
+	if err := s.svc.EnsureGroupMember(r.Context(), userID, groupID); err != nil {
 		s.writeError(w, err)
 		return
 	}
@@ -58,48 +76,68 @@ func (s *Server) uploadPublicFile(w http.ResponseWriter, r *http.Request) {
 	}
 	defer input.Close()
 
-	kind := strings.TrimSpace(r.FormValue("kind"))
-	prefix := make([]byte, 512)
-	n, readErr := io.ReadFull(input, prefix)
-	if readErr != nil && readErr != io.ErrUnexpectedEOF && readErr != io.EOF {
-		s.writeError(w, readErr)
+	data, err := io.ReadAll(io.LimitReader(input, maxPublicFileBytes+1))
+	if err != nil {
+		s.writeError(w, err)
 		return
 	}
-	prefix = prefix[:n]
-	contentType, ext := detectPublicMedia(prefix)
+	if len(data) > maxPublicFileBytes {
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "file is too large"})
+		return
+	}
+
+	kind := strings.TrimSpace(r.FormValue("kind"))
+	contentType, ext := detectPublicMedia(data)
 	if !validPublicFileKind(kind, contentType) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid or unsupported file content"})
 		return
 	}
+	if kind == "photo" {
+		// Remove EXIF (GPS, device) and text metadata without re-encoding.
+		data = media.StripImageMetadata(data)
+	}
 
 	id := "PF-" + randomPublicFileID()
+	if err := s.svc.RecordGroupUpload(r.Context(), storage.UploadedFile{
+		ID:          id,
+		GroupID:     groupID,
+		UploaderID:  userID,
+		SizeBytes:   int64(len(data)),
+		ContentType: contentType,
+		StoragePath: groupID + "/" + id + ext,
+	}); err != nil {
+		s.writeError(w, err)
+		return
+	}
+	forget := func() {
+		if err := s.svc.ForgetGroupUpload(r.Context(), id); err != nil {
+			s.logger.Printf("upload record cleanup failed file_id=%q error=%q", id, err.Error())
+		}
+	}
+
 	dir := filepath.Join(publicFileRoot(), groupID)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
+		forget()
 		s.writeError(w, err)
 		return
 	}
 	path := filepath.Join(dir, id+ext)
 	out, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o640)
 	if err != nil {
+		forget()
 		s.writeError(w, err)
 		return
 	}
-
-	reader := io.MultiReader(bytes.NewReader(prefix), input)
-	written, copyErr := io.Copy(out, io.LimitReader(reader, maxPublicFileBytes+1))
+	written, copyErr := io.Copy(out, bytes.NewReader(data))
 	closeErr := out.Close()
 	if copyErr != nil || closeErr != nil {
 		_ = os.Remove(path)
+		forget()
 		if copyErr != nil {
 			s.writeError(w, copyErr)
 		} else {
 			s.writeError(w, closeErr)
 		}
-		return
-	}
-	if written > maxPublicFileBytes {
-		_ = os.Remove(path)
-		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "file is too large"})
 		return
 	}
 
@@ -116,35 +154,24 @@ func (s *Server) uploadPublicFile(w http.ResponseWriter, r *http.Request) {
 func validPublicFileKind(kind, contentType string) bool {
 	switch kind {
 	case "photo":
-		return contentType == "image/jpeg" || contentType == "image/png" || contentType == "image/webp"
+		return contentType == media.TypeJPEG || contentType == media.TypePNG || contentType == media.TypeWebP
 	case "video":
-		return contentType == "video/mp4" || contentType == "video/quicktime" || contentType == "video/webm"
+		return contentType == media.TypeMP4 || contentType == media.TypeQuickTime || contentType == media.TypeWebM
 	default:
 		return false
 	}
 }
 
 func detectPublicMedia(prefix []byte) (contentType, ext string) {
-	if len(prefix) >= 3 && prefix[0] == 0xff && prefix[1] == 0xd8 && prefix[2] == 0xff {
-		return "image/jpeg", ".jpg"
+	switch media.ImageType(prefix) {
+	case media.TypeJPEG:
+		return media.TypeJPEG, ".jpg"
+	case media.TypePNG:
+		return media.TypePNG, ".png"
+	case media.TypeWebP:
+		return media.TypeWebP, ".webp"
 	}
-	if len(prefix) >= 8 && bytes.Equal(prefix[:8], []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a}) {
-		return "image/png", ".png"
-	}
-	if len(prefix) >= 12 && bytes.Equal(prefix[:4], []byte("RIFF")) && bytes.Equal(prefix[8:12], []byte("WEBP")) {
-		return "image/webp", ".webp"
-	}
-	if len(prefix) >= 12 && bytes.Equal(prefix[4:8], []byte("ftyp")) {
-		brand := string(prefix[8:12])
-		if brand == "qt  " {
-			return "video/quicktime", ".mov"
-		}
-		return "video/mp4", ".mp4"
-	}
-	if len(prefix) >= 4 && bytes.Equal(prefix[:4], []byte{0x1a, 0x45, 0xdf, 0xa3}) {
-		return "video/webm", ".webm"
-	}
-	return "", ""
+	return media.VideoType(prefix)
 }
 
 func publicFileRoot() string {
@@ -162,7 +189,35 @@ func randomPublicFileID() string {
 	return strings.ToUpper(hex.EncodeToString(buf))
 }
 
+// removeGroupFiles deletes a deleted group's stored files (best effort).
+func (s *Server) removeGroupFiles(groupID string) {
+	groupID = strings.TrimSpace(groupID)
+	if !publicGroupIDPattern.MatchString(groupID) {
+		return
+	}
+	if err := os.RemoveAll(filepath.Join(publicFileRoot(), groupID)); err != nil {
+		s.logger.Printf("group file cleanup failed group_id=%q error=%q", groupID, err.Error())
+	}
+}
+
+// removeStoredFiles deletes recorded uploads from disk (best effort).
+func (s *Server) removeStoredFiles(files []storage.UploadedFile) {
+	root := publicFileRoot()
+	for _, file := range files {
+		parts := strings.Split(file.StoragePath, "/")
+		if len(parts) != 2 || !publicGroupIDPattern.MatchString(parts[0]) ||
+			!publicFileIDPattern.MatchString(strings.TrimSuffix(parts[1], filepath.Ext(parts[1]))) {
+			s.logger.Printf("stored file cleanup skipped: unexpected path file_id=%q", file.ID)
+			continue
+		}
+		if err := os.Remove(filepath.Join(root, parts[0], parts[1])); err != nil && !errors.Is(err, os.ErrNotExist) {
+			s.logger.Printf("stored file cleanup failed file_id=%q error=%q", file.ID, err.Error())
+		}
+	}
+}
+
 func (s *Server) servePublicFile(w http.ResponseWriter, r *http.Request) {
+	extendTransferDeadlines(w)
 	groupID := chi.URLParam(r, "groupID")
 	if !publicGroupIDPattern.MatchString(groupID) {
 		w.WriteHeader(http.StatusNotFound)
@@ -182,18 +237,40 @@ func (s *Server) servePublicFile(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	w.Header().Set("X-Content-Type-Options", "nosniff")
+	contentType := ""
 	switch strings.ToLower(filepath.Ext(matches[0])) {
-	case ".jpg": w.Header().Set("Content-Type", "image/jpeg")
-	case ".png": w.Header().Set("Content-Type", "image/png")
-	case ".webp": w.Header().Set("Content-Type", "image/webp")
-	case ".mp4": w.Header().Set("Content-Type", "video/mp4")
-	case ".mov": w.Header().Set("Content-Type", "video/quicktime")
-	case ".webm": w.Header().Set("Content-Type", "video/webm")
+	case ".jpg":
+		contentType = media.TypeJPEG
+	case ".png":
+		contentType = media.TypePNG
+	case ".webp":
+		contentType = media.TypeWebP
+	case ".mp4", ".mov", ".webm":
+		// Files stored before ftyp brands were checked may be, for example,
+		// HEIC photos saved as .mp4, so the type comes from the content.
+		contentType = storedVideoContentType(matches[0])
 	default:
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Type", contentType)
+	if contentType == "application/octet-stream" {
+		w.Header().Set("Content-Disposition", "attachment")
+	}
 	http.ServeFile(w, r, matches[0])
 }
 
+func storedVideoContentType(path string) string {
+	file, err := os.Open(path)
+	if err != nil {
+		return "application/octet-stream"
+	}
+	defer file.Close()
+	prefix := make([]byte, 16)
+	n, _ := io.ReadFull(file, prefix)
+	if contentType, _ := media.VideoType(prefix[:n]); contentType != "" {
+		return contentType
+	}
+	return "application/octet-stream"
+}

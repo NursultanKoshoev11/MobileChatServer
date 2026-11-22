@@ -57,6 +57,9 @@ type Config struct {
 	SMSAllowedCountryPrefixes []string
 	// SMSGlobalHourlyMax caps verification SMS sent per hour across all numbers.
 	SMSGlobalHourlyMax int
+	// UploadDailyQuotaBytes caps the bytes one user may upload as group files
+	// in a rolling 24 hours (UPLOAD_DAILY_QUOTA_MB; 0 disables the quota).
+	UploadDailyQuotaBytes int64
 }
 
 func Load() (Config, error) {
@@ -120,6 +123,12 @@ func Load() (Config, error) {
 	}
 	cfg.SMSGlobalHourlyMax = hourlyMax
 
+	uploadQuotaMB := getEnvInt("UPLOAD_DAILY_QUOTA_MB", 300)
+	if uploadQuotaMB < 0 {
+		return Config{}, fmt.Errorf("UPLOAD_DAILY_QUOTA_MB must be 0 (disabled) or a positive number of megabytes")
+	}
+	cfg.UploadDailyQuotaBytes = int64(uploadQuotaMB) << 20
+
 	accessTokenTTLMinutes := getEnvInt("ACCESS_TOKEN_TTL_MINUTES", 5)
 	cfg.AccessTokenTTL = time.Duration(accessTokenTTLMinutes) * time.Minute
 
@@ -162,6 +171,11 @@ func Load() (Config, error) {
 		}
 	}
 
+	// Production must always run some content moderation. The free local rules
+	// provider counts (it needs no external token).
+	if cfg.Environment == "production" && !cfg.ContentModerationEnabled {
+		return Config{}, fmt.Errorf("CONTENT_MODERATION_ENABLED=false is not allowed in production; use CONTENT_MODERATION_PROVIDER=local for the free built-in rules")
+	}
 	if sharedEnvironment(cfg.Environment) && !cfg.ModerationFailClosed {
 		return Config{}, fmt.Errorf("MODERATION_FAIL_CLOSED=false is not allowed in staging or production")
 	}

@@ -69,22 +69,36 @@ func (r *Repository) SetMemberRole(ctx context.Context, groupID, actorID, target
 	return nil
 }
 
+// RemoveGroupMember removes targetUserID from the group on behalf of actorID.
+// The owner may remove any admin or member; an admin may remove plain members
+// only; nobody removes themselves here (leaving is a separate action) and the
+// owner is never removed. Returns ErrForbidden when the actor may not remove
+// the target and ErrNotFound when the target is not a member. Pending invites
+// to or from the removed user for this group are deleted with the membership.
+// Run it inside a transaction (WithAuditEvent) so the row locks hold.
 func (r *Repository) RemoveGroupMember(ctx context.Context, groupID, actorID, targetUserID string) error {
-	actorRole, err := r.GetMemberRole(ctx, groupID, actorID)
-	if err != nil {
-		return err
-	}
-	if actorRole != domain.RoleOwner && actorRole != domain.RoleAdmin && actorID != targetUserID {
+	if actorID == targetUserID {
 		return ErrForbidden
 	}
-	if actorID != targetUserID {
-		targetRole, err := r.GetMemberRole(ctx, groupID, targetUserID)
-		if err != nil {
-			return err
-		}
-		if targetRole == domain.RoleOwner || (actorRole == domain.RoleAdmin && targetRole == domain.RoleAdmin) {
+	var actorRole domain.GroupRole
+	if err := r.db.QueryRow(ctx, `SELECT role FROM group_members WHERE group_id = $1 AND user_id = $2 FOR UPDATE`, groupID, actorID).Scan(&actorRole); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrForbidden
 		}
+		return fmt.Errorf("load actor membership: %w", err)
+	}
+	if actorRole != domain.RoleOwner && actorRole != domain.RoleAdmin {
+		return ErrForbidden
+	}
+	var targetRole domain.GroupRole
+	if err := r.db.QueryRow(ctx, `SELECT role FROM group_members WHERE group_id = $1 AND user_id = $2 FOR UPDATE`, groupID, targetUserID).Scan(&targetRole); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("load target membership: %w", err)
+	}
+	if targetRole == domain.RoleOwner || (actorRole == domain.RoleAdmin && targetRole != domain.RoleMember) {
+		return ErrForbidden
 	}
 	result, err := r.db.Exec(ctx, `DELETE FROM group_members WHERE group_id = $1 AND user_id = $2 AND role <> 'owner'`, groupID, targetUserID)
 	if err != nil {
@@ -92,6 +106,11 @@ func (r *Repository) RemoveGroupMember(ctx context.Context, groupID, actorID, ta
 	}
 	if result.RowsAffected() == 0 {
 		return ErrNotFound
+	}
+	if _, err := r.db.Exec(ctx, `
+		DELETE FROM group_invite_requests
+		WHERE group_id = $1 AND status = 'pending' AND (target_user_id = $2 OR inviter_id = $2)`, groupID, targetUserID); err != nil {
+		return fmt.Errorf("delete removed member's pending invites: %w", err)
 	}
 	return nil
 }

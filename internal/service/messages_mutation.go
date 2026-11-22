@@ -45,7 +45,7 @@ func (s *Service) UpdateMessage(ctx context.Context, actorID, groupID, messageID
 	if err != nil {
 		return domain.Message{}, err
 	}
-	go s.NotifyGroupAboutMessageUpdated(context.Background(), actorID, message)
+	s.Go("push.message_updated", func(ctx context.Context) { s.NotifyGroupAboutMessageUpdated(ctx, actorID, message) })
 	return message, nil
 }
 
@@ -64,6 +64,6 @@ func (s *Service) DeleteMessage(ctx context.Context, actorID, groupID, messageID
 	if err != nil {
 		return domain.Message{}, err
 	}
-	go s.NotifyGroupAboutMessageDeleted(context.Background(), actorID, message)
+	s.Go("push.message_deleted", func(ctx context.Context) { s.NotifyGroupAboutMessageDeleted(ctx, actorID, message) })
 	return message, nil
 }

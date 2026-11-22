@@ -5,6 +5,7 @@ services:
       dockerfile: Dockerfile
     container_name: koom-api
     restart: unless-stopped
+    stop_grace_period: 45s
     mem_limit: ${API_MEM_LIMIT:-768m}
     cpus: ${API_CPUS:-1.0}
     security_opt:
@@ -29,6 +30,7 @@ services:
       SMSPRO_SENDER: ${SMSPRO_SENDER:-}
       SMS_ALLOWED_COUNTRY_PREFIXES: ${SMS_ALLOWED_COUNTRY_PREFIXES:-+996}
       SMS_GLOBAL_HOURLY_MAX: ${SMS_GLOBAL_HOURLY_MAX:-500}
+      UPLOAD_DAILY_QUOTA_MB: ${UPLOAD_DAILY_QUOTA_MB:-300}
       FCM_PROJECT_ID: ${FCM_PROJECT_ID:-}
       FCM_CLIENT_EMAIL: ${FCM_CLIENT_EMAIL:-}
       FCM_PRIVATE_KEY: ${FCM_PRIVATE_KEY:-}

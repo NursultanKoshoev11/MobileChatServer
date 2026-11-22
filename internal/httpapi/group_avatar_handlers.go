@@ -26,6 +26,12 @@ func (s *Server) updateGroupAvatar(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, err)
 		return
 	}
-	s.broadcastGroupAndUsers(r, group.ID, realtime.Event{Type: "group.avatar_updated", GroupID: group.ID, Payload: group})
+	// Every member receives the broadcast; the invite code is for the owner and
+	// admins only.
+	broadcast := group
+	broadcast.InviteCode = ""
+	broadcast.QRPass = ""
+	broadcast.MyRole = nil
+	s.broadcastGroupAndUsers(r, group.ID, realtime.Event{Type: "group.avatar_updated", GroupID: group.ID, Payload: broadcast})
 	writeJSON(w, http.StatusOK, group)
 }

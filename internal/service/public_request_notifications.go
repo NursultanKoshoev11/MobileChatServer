@@ -4,12 +4,13 @@ import (
 	"context"
 	"log"
 	"strings"
-	"time"
 
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/storage"
 )
 
-const pushNotificationTimeout = 10 * time.Second
+// pushNotificationTimeout bounds one push fan-out (token lookup, concurrent
+// FCM sends and invalid-token cleanup).
+const pushNotificationTimeout = backgroundTaskTimeout
 
 type PublicRequestRealtimeContext struct {
 	GroupID string

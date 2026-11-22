@@ -24,11 +24,19 @@ import (
 
 const firebaseMessagingScope = "https://www.googleapis.com/auth/firebase.messaging"
 
+// defaultFCMConcurrency is the number of FCM sends in flight per SendToTokens
+// call. FCM v1 has no multicast endpoint, so large groups are fanned out with a
+// bounded worker pool instead of one request at a time.
+const defaultFCMConcurrency = 16
+
 type FCMNotifier struct {
 	ProjectID   string
 	ClientEmail string
 	PrivateKey  string
 	HTTPClient  *http.Client
+	// Concurrency bounds the number of tokens sent in parallel; 0 uses
+	// defaultFCMConcurrency.
+	Concurrency int
 
 	mu          sync.Mutex
 	accessToken string
@@ -53,26 +61,58 @@ func (n *FCMNotifier) SendToTokens(ctx context.Context, tokens []string, message
 		client = http.DefaultClient
 	}
 
-	seen := map[string]bool{}
-	failed := 0
-	var lastErr error
+	unique := make([]string, 0, len(tokens))
+	seen := make(map[string]bool, len(tokens))
 	for _, token := range tokens {
 		token = strings.TrimSpace(token)
 		if token == "" || seen[token] {
 			continue
 		}
 		seen[token] = true
-		err := n.sendOneWithRetry(ctx, client, accessToken, token, message)
-		if err == nil {
-			continue
-		}
-		if isInvalidTokenError(err) {
-			result.InvalidTokens = append(result.InvalidTokens, token)
-			continue
-		}
-		failed++
-		lastErr = err
+		unique = append(unique, token)
 	}
+
+	workers := n.Concurrency
+	if workers <= 0 {
+		workers = defaultFCMConcurrency
+	}
+	if workers > len(unique) {
+		workers = len(unique)
+	}
+
+	var (
+		mu      sync.Mutex
+		failed  int
+		lastErr error
+		wg      sync.WaitGroup
+	)
+	jobs := make(chan string)
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for token := range jobs {
+				err := n.sendOneWithRetry(ctx, client, accessToken, token, message)
+				if err == nil {
+					continue
+				}
+				mu.Lock()
+				if isInvalidTokenError(err) {
+					result.InvalidTokens = append(result.InvalidTokens, token)
+				} else {
+					failed++
+					lastErr = err
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+	for _, token := range unique {
+		jobs <- token
+	}
+	close(jobs)
+	wg.Wait()
+
 	if failed > 0 {
 		return result, fmt.Errorf("fcm send failed for %d token(s): %w", failed, lastErr)
 	}

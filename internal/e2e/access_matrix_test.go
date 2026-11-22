@@ -160,7 +160,13 @@ func (f *fixture) rows() []matrixRow {
 		{route: "GET /api/requests/{requestID}/comments", path: "/api/requests/" + f.requestID + "/comments", deny: outsiderOnly},
 
 		// Group-scoped writes.
-		{route: "POST /api/groups/{groupID}/invite-code", path: g + "/invite-code", deny: outsiderOnly},
+		// Only the owner and admins may see or rotate the invite code.
+		{route: "POST /api/groups/{groupID}/invite-code", path: g + "/invite-code", deny: outsiderMember},
+		{route: "POST /api/groups/{groupID}/invite-code/rotate", path: g + "/invite-code/rotate", deny: outsiderMember},
+		// Removing the group admin: only the owner may (an admin may remove
+		// plain members only, and nobody removes themselves).
+		{route: "DELETE /api/groups/{groupID}/members/{userID}", path: g + "/members/" + f.groupAdmin.ID, deny: []string{actOutsider, actPlatformAdm, actMember, actGroupAdmin}},
+		{route: "DELETE /api/groups/{groupID}/members/{userID}", path: g + "/members/" + f.owner.ID, deny: []string{actOutsider, actPlatformAdm, actMember, actGroupAdmin, actGroupOwner}},
 		{route: "PUT /api/groups/{groupID}/avatar", path: g + "/avatar", body: map[string]string{"avatar_data": avatar}, deny: outsiderMember},
 		{route: "POST /api/groups/{groupID}/members/{userID}/role", path: g + "/members/" + f.member.ID + "/role", body: map[string]string{"role": "admin"}, deny: outsiderMember},
 		{route: "POST /api/groups/{groupID}/members/{userID}/role", path: g + "/members/" + f.groupAdmin.ID + "/role", body: map[string]string{"role": "member"}, deny: outsiderMember},

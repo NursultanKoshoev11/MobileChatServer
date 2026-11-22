@@ -156,7 +156,8 @@ func (s *Service) persistPublication(ctx context.Context, notice *ContentModerat
 	}); err != nil {
 		return "", err
 	}
-	go s.NotifyAdminsAboutContentModerationPending(context.Background(), notice.Item)
+	pendingItem := notice.Item
+	s.Go("push.content_moderation_pending", func(ctx context.Context) { s.NotifyAdminsAboutContentModerationPending(ctx, pendingItem) })
 	return "", ContentModerationPendingError{Item: notice.Item}
 }
 
@@ -334,7 +335,9 @@ func (s *Service) ApproveContentModerationItem(ctx context.Context, reviewerID, 
 	_ = s.storeAdaptiveModerationFeedback(ctx, reviewedSource, "allow", itemID)
 	if result.PublicRequest != nil {
 		request := result.PublicRequest
-		go s.notifyGroupAboutNewPublicRequest(context.Background(), request.AuthorID, request.GroupID, request.ID, request.Title, requestNotificationBody)
+		s.Go("push.public_request_created", func(ctx context.Context) {
+			s.notifyGroupAboutNewPublicRequest(ctx, request.AuthorID, request.GroupID, request.ID, request.Title, requestNotificationBody)
+		})
 	}
 	return result, nil
 }
@@ -375,7 +378,8 @@ func (s *Service) RejectContentModerationItem(ctx context.Context, reviewerID, i
 	}
 	_ = s.storeAdaptiveModerationFeedback(ctx, item, "deny", itemID)
 	if deletedMessage != nil {
-		go s.NotifyGroupAboutMessageDeleted(context.Background(), reviewerID, *deletedMessage)
+		message := *deletedMessage
+		s.Go("push.message_deleted", func(ctx context.Context) { s.NotifyGroupAboutMessageDeleted(ctx, reviewerID, message) })
 	}
 	return reviewed, nil
 }
