@@ -32,28 +32,28 @@ func ImageType(data []byte) string {
 	return ""
 }
 
-// mp4Brands are ISO base media major brands produced by phone cameras and
-// common encoders for MP4 video. Other ftyp files (HEIC/HEIF/AVIF images, 3GP,
-// JPEG 2000, ...) are deliberately not accepted as video.
-var mp4Brands = map[string]bool{
-	"isom": true, "iso2": true, "iso3": true, "iso4": true, "iso5": true, "iso6": true,
-	"mp41": true, "mp42": true, "avc1": true, "dash": true, "mmp4": true, "MSNV": true,
-	"M4V ": true, "M4VH": true, "M4VP": true, "f4v ": true,
+// imageBrands are ISO base media major brands of still images (HEIF/HEIC and
+// AVIF, including image sequences). They share the ftyp container with video
+// but must not be accepted or served as video.
+var imageBrands = map[string]bool{
+	"heic": true, "heix": true, "heim": true, "heis": true,
+	"mif1": true, "msf1": true, "avif": true, "avis": true,
 }
 
-// VideoType identifies MP4, QuickTime (MOV) and WebM video by magic number. For
-// ISO base media files only real MP4/MOV major brands are accepted, so for
-// example a HEIC photo is not treated as a video.
+// VideoType identifies MP4, QuickTime (MOV) and WebM video by magic number.
+// Every ISO base media file (ftyp) is video/mp4, or video/quicktime for the
+// "qt  " brand, except the still-image brands in imageBrands (so a HEIC photo
+// is not treated as a video while 3GP or HEVC phone videos still are).
 func VideoType(data []byte) (contentType, ext string) {
 	if len(data) >= 12 && bytes.Equal(data[4:8], []byte("ftyp")) {
 		brand := string(data[8:12])
+		if imageBrands[brand] {
+			return "", ""
+		}
 		if brand == "qt  " {
 			return TypeQuickTime, ".mov"
 		}
-		if mp4Brands[brand] {
-			return TypeMP4, ".mp4"
-		}
-		return "", ""
+		return TypeMP4, ".mp4"
 	}
 	if len(data) >= 4 && bytes.Equal(data[:4], []byte{0x1a, 0x45, 0xdf, 0xa3}) {
 		return TypeWebM, ".webm"
@@ -61,7 +61,7 @@ func VideoType(data []byte) (contentType, ext string) {
 	return "", ""
 }
 
-// StripImageMetadata removes metadata from JPEG and PNG images. Other data, and
+// StripImageMetadata removes metadata from JPEG, PNG and WebP images. Other data, and
 // images it cannot parse, are returned unchanged. The pixel data is never
 // re-encoded.
 func StripImageMetadata(data []byte) []byte {
@@ -74,8 +74,68 @@ func StripImageMetadata(data []byte) []byte {
 		if out, ok := stripPNG(data); ok {
 			return out
 		}
+	case TypeWebP:
+		if out, ok := stripWebP(data); ok {
+			return out
+		}
 	}
 	return data
+}
+
+// VP8X feature flags (first byte of the VP8X chunk payload).
+const (
+	webpFlagEXIF = 0x08
+	webpFlagXMP  = 0x04
+)
+
+// stripWebP drops the EXIF and "XMP " chunks of an extended (VP8X) WebP,
+// clears the matching VP8X flags and rewrites the RIFF size.
+func stripWebP(data []byte) ([]byte, bool) {
+	if len(data) < 12 {
+		return nil, false
+	}
+	riffSize := int(binary.LittleEndian.Uint32(data[4:8]))
+	if riffSize+8 > len(data) || riffSize < 4 {
+		return nil, false
+	}
+	body := data[12 : riffSize+8]
+	out := make([]byte, 12, len(data))
+	copy(out, data[:12])
+	vp8xFlags := -1
+	removed := false
+	for pos := 0; pos < len(body); {
+		if pos+8 > len(body) {
+			return nil, false
+		}
+		fourCC := string(body[pos : pos+4])
+		size := int(binary.LittleEndian.Uint32(body[pos+4 : pos+8]))
+		end := pos + 8 + size + size%2 // chunks are padded to an even size
+		if size < 0 || end > len(body) || end < pos {
+			if pos+8+size == len(body) {
+				end = len(body) // tolerate a missing final pad byte
+			} else {
+				return nil, false
+			}
+		}
+		switch fourCC {
+		case "EXIF", "XMP ":
+			removed = true
+		default:
+			if fourCC == "VP8X" && size >= 1 {
+				vp8xFlags = len(out) + 8
+			}
+			out = append(out, body[pos:end]...)
+		}
+		pos = end
+	}
+	if !removed {
+		return data, true
+	}
+	if vp8xFlags >= 0 {
+		out[vp8xFlags] &^= webpFlagEXIF | webpFlagXMP
+	}
+	binary.LittleEndian.PutUint32(out[4:8], uint32(len(out)-8))
+	return out, true
 }
 
 // stripJPEG drops APP1 (Exif, XMP) and APP13 (Photoshop/IPTC) segments and

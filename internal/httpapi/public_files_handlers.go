@@ -22,6 +22,9 @@ import (
 const (
 	maxPublicFileBytes          = 12 << 20
 	maxPublicUploadRequestBytes = maxPublicFileBytes + (1 << 20)
+	// multipartMemoryBytes is how much of an upload is buffered in memory;
+	// the rest spills to a temporary file (os.TempDir, a tmpfs in production).
+	multipartMemoryBytes = 1 << 20
 	// fileTransferDeadline replaces the server-wide read/write timeouts for
 	// file uploads and downloads so a 12 MB transfer survives a slow mobile
 	// link.
@@ -56,7 +59,7 @@ func (s *Server) uploadPublicFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxPublicUploadRequestBytes)
-	if err := r.ParseMultipartForm(maxPublicFileBytes); err != nil {
+	if err := r.ParseMultipartForm(multipartMemoryBytes); err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
 			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "upload request is too large"})
@@ -76,25 +79,42 @@ func (s *Server) uploadPublicFile(w http.ResponseWriter, r *http.Request) {
 	}
 	defer input.Close()
 
-	data, err := io.ReadAll(io.LimitReader(input, maxPublicFileBytes+1))
-	if err != nil {
-		s.writeError(w, err)
-		return
-	}
-	if len(data) > maxPublicFileBytes {
+	if header.Size > maxPublicFileBytes {
 		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "file is too large"})
 		return
 	}
+	prefix := make([]byte, 512)
+	n, readErr := io.ReadFull(input, prefix)
+	if readErr != nil && readErr != io.ErrUnexpectedEOF && readErr != io.EOF {
+		s.writeError(w, readErr)
+		return
+	}
+	prefix = prefix[:n]
 
 	kind := strings.TrimSpace(r.FormValue("kind"))
-	contentType, ext := detectPublicMedia(data)
+	contentType, ext := detectPublicMedia(prefix)
 	if !validPublicFileKind(kind, contentType) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid or unsupported file content"})
 		return
 	}
+	// Videos are streamed from the multipart temp file to disk. Photos are
+	// read into memory once to remove EXIF (GPS, device) and text metadata
+	// without re-encoding.
+	var source io.Reader = io.MultiReader(bytes.NewReader(prefix), input)
+	size := header.Size
 	if kind == "photo" {
-		// Remove EXIF (GPS, device) and text metadata without re-encoding.
+		data, err := io.ReadAll(io.LimitReader(source, maxPublicFileBytes+1))
+		if err != nil {
+			s.writeError(w, err)
+			return
+		}
+		if len(data) > maxPublicFileBytes {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "file is too large"})
+			return
+		}
 		data = media.StripImageMetadata(data)
+		source = bytes.NewReader(data)
+		size = int64(len(data))
 	}
 
 	id := "PF-" + randomPublicFileID()
@@ -102,7 +122,7 @@ func (s *Server) uploadPublicFile(w http.ResponseWriter, r *http.Request) {
 		ID:          id,
 		GroupID:     groupID,
 		UploaderID:  userID,
-		SizeBytes:   int64(len(data)),
+		SizeBytes:   size,
 		ContentType: contentType,
 		StoragePath: groupID + "/" + id + ext,
 	}); err != nil {
@@ -128,8 +148,14 @@ func (s *Server) uploadPublicFile(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, err)
 		return
 	}
-	written, copyErr := io.Copy(out, bytes.NewReader(data))
+	written, copyErr := io.Copy(out, io.LimitReader(source, maxPublicFileBytes+1))
 	closeErr := out.Close()
+	if copyErr == nil && written > maxPublicFileBytes {
+		_ = os.Remove(path)
+		forget()
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "file is too large"})
+		return
+	}
 	if copyErr != nil || closeErr != nil {
 		_ = os.Remove(path)
 		forget()

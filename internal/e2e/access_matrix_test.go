@@ -160,8 +160,9 @@ func (f *fixture) rows() []matrixRow {
 		{route: "GET /api/requests/{requestID}/comments", path: "/api/requests/" + f.requestID + "/comments", deny: outsiderOnly},
 
 		// Group-scoped writes.
-		// Only the owner and admins may see or rotate the invite code.
-		{route: "POST /api/groups/{groupID}/invite-code", path: g + "/invite-code", deny: outsiderMember},
+		// G is public: every member may see its invite code; only the owner and
+		// admins may rotate it (private groups: TestE2EInviteCodes).
+		{route: "POST /api/groups/{groupID}/invite-code", path: g + "/invite-code", deny: outsiderOnly},
 		{route: "POST /api/groups/{groupID}/invite-code/rotate", path: g + "/invite-code/rotate", deny: outsiderMember},
 		// Removing the group admin: only the owner may (an admin may remove
 		// plain members only, and nobody removes themselves).

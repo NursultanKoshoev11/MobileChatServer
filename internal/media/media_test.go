@@ -126,8 +126,8 @@ func TestVideoTypeAcceptsOnlyRealVideoBrands(t *testing.T) {
 		return append([]byte{0, 0, 0, 0x18, 'f', 't', 'y', 'p'}, []byte(brand)...)
 	}
 	cases := map[string]string{
-		"isom": TypeMP4, "mp42": TypeMP4, "qt  ": TypeQuickTime,
-		"heic": "", "heix": "", "mif1": "", "msf1": "", "avif": "", "3gp4": "",
+		"isom": TypeMP4, "mp42": TypeMP4, "qt  ": TypeQuickTime, "3gp4": TypeMP4, "hvc1": TypeMP4,
+		"heic": "", "heix": "", "heim": "", "heis": "", "mif1": "", "msf1": "", "avif": "", "avis": "",
 	}
 	for brand, want := range cases {
 		if got, _ := VideoType(ftyp(brand)); got != want {
@@ -136,6 +136,57 @@ func TestVideoTypeAcceptsOnlyRealVideoBrands(t *testing.T) {
 	}
 	if got, ext := VideoType([]byte{0x1a, 0x45, 0xdf, 0xa3, 0, 0}); got != TypeWebM || ext != ".webm" {
 		t.Errorf("webm: got %q %q", got, ext)
+	}
+}
+
+func webpChunk(fourCC string, data []byte) []byte {
+	out := append([]byte(fourCC), 0, 0, 0, 0)
+	binary.LittleEndian.PutUint32(out[4:], uint32(len(data)))
+	out = append(out, data...)
+	if len(data)%2 == 1 {
+		out = append(out, 0)
+	}
+	return out
+}
+
+func riff(chunks ...[]byte) []byte {
+	body := []byte("WEBP")
+	for _, c := range chunks {
+		body = append(body, c...)
+	}
+	out := append([]byte("RIFF"), 0, 0, 0, 0)
+	binary.LittleEndian.PutUint32(out[4:], uint32(len(body)))
+	return append(out, body...)
+}
+
+func TestStripWebPRemovesExifAndXMP(t *testing.T) {
+	vp8x := make([]byte, 10)
+	vp8x[0] = 0x10 | webpFlagEXIF | webpFlagXMP // alpha + EXIF + XMP
+	image := webpChunk("VP8L", []byte{0x2f, 1, 2, 3, 4})
+	withMeta := riff(webpChunk("VP8X", vp8x), webpChunk("ICCP", []byte("icc")), image,
+		webpChunk("EXIF", []byte("GPS-SECRET")), webpChunk("XMP ", []byte("XMP-SECRET!")))
+
+	out := StripImageMetadata(withMeta)
+	if bytes.Contains(out, []byte("SECRET")) {
+		t.Fatal("WebP metadata survived")
+	}
+	want := make([]byte, 10)
+	want[0] = 0x10
+	expected := riff(webpChunk("VP8X", want), webpChunk("ICCP", []byte("icc")), image)
+	if !bytes.Equal(out, expected) {
+		t.Fatalf("stripped WebP:\n got %x\nwant %x", out, expected)
+	}
+	if got := binary.LittleEndian.Uint32(out[4:8]); int(got) != len(out)-8 {
+		t.Fatalf("RIFF size %d, want %d", got, len(out)-8)
+	}
+
+	simple := riff(webpChunk("VP8 ", []byte{1, 2, 3, 4}))
+	if got := StripImageMetadata(simple); !bytes.Equal(got, simple) {
+		t.Fatal("simple WebP without metadata changed")
+	}
+	truncated := withMeta[:len(withMeta)-5]
+	if got := StripImageMetadata(truncated); !bytes.Equal(got, truncated) {
+		t.Fatal("malformed WebP must be returned unchanged")
 	}
 }
 

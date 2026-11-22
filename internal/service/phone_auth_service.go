@@ -213,9 +213,10 @@ func (s *PhoneAuthService) Refresh(ctx context.Context, input RefreshInput) (dom
 		return domain.PhoneSession{}, err
 	}
 	if record.RevokedAt != nil {
-		if err := s.handleRefreshTokenReuse(ctx, record); err != nil {
-			return domain.PhoneSession{}, err
-		}
+		// A rotated or revoked token presented again is only logged: a client
+		// that lost a refresh response on a flaky network legitimately retries
+		// with the old token, so this must not sign the user out everywhere.
+		log.Printf("refresh token reuse rejected user_id=%q session_id=%q revoked_at=%s", record.UserID, record.ID, record.RevokedAt.UTC().Format(time.RFC3339))
 		return domain.PhoneSession{}, ErrUnauthorized
 	}
 	if time.Now().UTC().After(record.ExpiresAt) {
@@ -241,28 +242,6 @@ func (s *PhoneAuthService) Refresh(ctx context.Context, input RefreshInput) (dom
 		return domain.PhoneSession{}, err
 	}
 	return domain.PhoneSession{AccessToken: accessToken, RefreshToken: newRefreshToken, User: user}, nil
-}
-
-// refreshReuseGrace tolerates a client that sends the same refresh token twice
-// in quick succession (for example two parallel requests both refreshing): a
-// token revoked less than this long ago is rejected without being treated as
-// stolen.
-const refreshReuseGrace = 10 * time.Second
-
-// handleRefreshTokenReuse is called when an already rotated or revoked refresh
-// token is presented. Outside the short grace period this means the token was
-// copied (the legitimate client already holds its successor), so every refresh
-// token of the user is revoked and all their devices must sign in again.
-func (s *PhoneAuthService) handleRefreshTokenReuse(ctx context.Context, record storage.RefreshSessionRecord) error {
-	if record.RevokedAt == nil || time.Since(*record.RevokedAt) < refreshReuseGrace {
-		return nil
-	}
-	revoked, err := s.repo.RevokeAllRefreshSessionsForUser(ctx, record.UserID)
-	if err != nil {
-		return err
-	}
-	log.Printf("refresh token reuse detected: revoked all sessions user_id=%q session_id=%q revoked=%d", record.UserID, record.ID, revoked)
-	return nil
 }
 
 // LogoutAll revokes every refresh token of the user (all devices).

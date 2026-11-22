@@ -160,23 +160,25 @@ func TestE2EInviteCodes(t *testing.T) {
 	}
 	// Join with sloppy input: lower case, spaces, no dash.
 	sloppy := " " + strings.ToLower(strings.ReplaceAll(issued.InviteCode, "-", " ")) + " "
-	res := member.mustDo(http.StatusOK, http.MethodPost, "/api/groups/join-by-code", map[string]string{"invite_code": sloppy})
-	if strings.Contains(res.str(), issued.InviteCode) {
-		t.Fatalf("join response leaks the invite code: %s", res.str())
-	}
+	member.mustDo(http.StatusOK, http.MethodPost, "/api/groups/join-by-code", map[string]string{"invite_code": sloppy})
 	joinWithCode(t, owner, groupAdmin, group.ID)
 	owner.mustDo(http.StatusOK, http.MethodPost, base+"/members/"+groupAdmin.ID+"/role", map[string]string{"role": "admin"})
 
-	// Only owner/admin obtain the code.
-	member.mustDo(http.StatusForbidden, http.MethodPost, base+"/invite-code", nil)
+	// In a public group every member may see and share the code, but only the
+	// owner and admins may rotate it.
+	var memberView groupPayload
+	member.mustDo(http.StatusOK, http.MethodPost, base+"/invite-code", nil).json(t, &memberView)
+	if memberView.InviteCode != issued.InviteCode {
+		t.Fatalf("public-group member got %q, want %q", memberView.InviteCode, issued.InviteCode)
+	}
 	member.mustDo(http.StatusForbidden, http.MethodPost, base+"/invite-code/rotate", nil)
 	var adminView groupPayload
 	groupAdmin.mustDo(http.StatusOK, http.MethodPost, base+"/invite-code", nil).json(t, &adminView)
 	if adminView.InviteCode != issued.InviteCode {
 		t.Fatalf("admin got %q, want %q", adminView.InviteCode, issued.InviteCode)
 	}
-	if got := groupIDs(t, member)[group.ID].InviteCode; got != "" {
-		t.Fatalf("member's group list shows the invite code %q", got)
+	if got := groupIDs(t, member)[group.ID].InviteCode; got != issued.InviteCode {
+		t.Fatalf("public-group member's list shows %q, want %q", got, issued.InviteCode)
 	}
 	if got := groupIDs(t, owner)[group.ID].InviteCode; got != issued.InviteCode {
 		t.Fatalf("owner's group list shows %q, want %q", got, issued.InviteCode)
@@ -201,6 +203,27 @@ func TestE2EInviteCodes(t *testing.T) {
 	owner.mustDo(http.StatusOK, http.MethodPost, base+"/invite-code", nil).json(t, &kept)
 	if kept.InviteCode != legacy {
 		t.Fatalf("existing code changed on read: %q, want %q", kept.InviteCode, legacy)
+	}
+
+	// In a private group only the owner and admins see the code.
+	super := a.superAdmin()
+	privMember := a.newUser("IC Private Member")
+	var private groupPayload
+	super.mustDo(http.StatusCreated, http.MethodPost, "/api/groups", map[string]string{"title": "Private codes " + uniqueSuffix(), "visibility": "private"}).json(t, &private)
+	privBase := "/api/groups/" + private.ID
+	var privCode groupPayload
+	super.mustDo(http.StatusOK, http.MethodPost, privBase+"/invite-code", nil).json(t, &privCode)
+	res := privMember.mustDo(http.StatusOK, http.MethodPost, "/api/groups/join-by-code", map[string]string{"invite_code": privCode.InviteCode})
+	if strings.Contains(res.str(), privCode.InviteCode) {
+		t.Fatalf("private-group join response leaks the invite code: %s", res.str())
+	}
+	privMember.mustDo(http.StatusForbidden, http.MethodPost, privBase+"/invite-code", nil)
+	privMember.mustDo(http.StatusForbidden, http.MethodPost, privBase+"/invite-code/rotate", nil)
+	if got := groupIDs(t, privMember)[private.ID].InviteCode; got != "" {
+		t.Fatalf("private-group member's list shows the invite code %q", got)
+	}
+	if got := groupIDs(t, super)[private.ID].InviteCode; got != privCode.InviteCode {
+		t.Fatalf("private-group owner's list shows %q, want %q", got, privCode.InviteCode)
 	}
 }
 
@@ -242,7 +265,8 @@ func TestE2ELogoutAllAndRefreshReuse(t *testing.T) {
 		}
 	}
 
-	// Reuse detection: a rotated-out token presented later revokes everything.
+	// A rotated-out token presented again is rejected, but does not sign the
+	// user out elsewhere (a client may retry after a lost refresh response).
 	deviceA := a.signIn(u.Phone, "Ignored")
 	deviceB := a.signIn(u.Phone, "Ignored")
 	res := a.call(http.MethodPost, "/api/auth/refresh", "", map[string]string{"refresh_token": deviceA.RefreshToken})
@@ -251,16 +275,12 @@ func TestE2ELogoutAllAndRefreshReuse(t *testing.T) {
 	}
 	var rotated sessionPayload
 	res.json(t, &rotated)
-	// Age the rotation past the short grace period for concurrent refreshes.
-	if _, err := env.db.Pool.Exec(context.Background(), `UPDATE refresh_tokens SET revoked_at = now() - interval '1 minute' WHERE user_id = $1 AND revoked_at IS NOT NULL`, u.ID); err != nil {
-		t.Fatalf("age revoked tokens: %v", err)
-	}
 	if res := a.call(http.MethodPost, "/api/auth/refresh", "", map[string]string{"refresh_token": deviceA.RefreshToken}); res.Status != http.StatusUnauthorized {
 		t.Fatalf("reused refresh token: %d %s", res.Status, res.str())
 	}
 	for name, token := range map[string]string{"rotated successor": rotated.RefreshToken, "other device": deviceB.RefreshToken} {
-		if res := a.call(http.MethodPost, "/api/auth/refresh", "", map[string]string{"refresh_token": token}); res.Status != http.StatusUnauthorized {
-			t.Fatalf("%s still refreshes after reuse detection: %d %s", name, res.Status, res.str())
+		if res := a.call(http.MethodPost, "/api/auth/refresh", "", map[string]string{"refresh_token": token}); res.Status != http.StatusOK {
+			t.Fatalf("%s must keep working after a reused token was rejected: %d %s", name, res.Status, res.str())
 		}
 	}
 }

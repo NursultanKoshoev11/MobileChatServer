@@ -68,7 +68,8 @@ func (s *Service) UpdateGroupMemberRoleByPhone(ctx context.Context, actorID, gro
 }
 
 // EnsureGroupInviteCode returns the group's invite code (creating one if the
-// group has none). Only the group owner and admins may obtain it.
+// group has none). Any member of a public group may obtain it; for a private
+// group only the owner and admins may.
 func (s *Service) EnsureGroupInviteCode(ctx context.Context, userID, groupID string) (domain.Group, error) {
 	return s.issueGroupInviteCode(ctx, userID, groupID, false)
 }
@@ -139,8 +140,10 @@ func (s *Service) JoinByInviteCode(ctx context.Context, userID, inviteCode strin
 	if err != nil {
 		return domain.Group{}, err
 	}
-	// The joiner is a plain member, who may not see the invite code.
-	group.InviteCode = ""
+	// The joiner is a plain member, who may see the code of a public group only.
+	if !storage.CanSeeInviteCode(group.Visibility, domain.RoleMember) {
+		group.InviteCode = ""
+	}
 	return group, nil
 }
 

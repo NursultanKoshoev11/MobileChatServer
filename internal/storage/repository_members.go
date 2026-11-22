@@ -80,22 +80,37 @@ func (r *Repository) RemoveGroupMember(ctx context.Context, groupID, actorID, ta
 	if actorID == targetUserID {
 		return ErrForbidden
 	}
-	var actorRole domain.GroupRole
-	if err := r.db.QueryRow(ctx, `SELECT role FROM group_members WHERE group_id = $1 AND user_id = $2 FOR UPDATE`, groupID, actorID).Scan(&actorRole); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrForbidden
-		}
-		return fmt.Errorf("load actor membership: %w", err)
+	// Lock both membership rows in one statement, in user_id order, so two
+	// concurrent removals involving the same pair cannot deadlock.
+	rows, err := r.db.Query(ctx, `
+		SELECT user_id, role FROM group_members
+		WHERE group_id = $1 AND user_id IN ($2, $3)
+		ORDER BY user_id
+		FOR UPDATE`, groupID, actorID, targetUserID)
+	if err != nil {
+		return fmt.Errorf("lock memberships for removal: %w", err)
 	}
-	if actorRole != domain.RoleOwner && actorRole != domain.RoleAdmin {
+	roles := map[string]domain.GroupRole{}
+	for rows.Next() {
+		var userID string
+		var role domain.GroupRole
+		if err := rows.Scan(&userID, &role); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan membership for removal: %w", err)
+		}
+		roles[userID] = role
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("read memberships for removal: %w", err)
+	}
+	actorRole, actorIsMember := roles[actorID]
+	if !actorIsMember || (actorRole != domain.RoleOwner && actorRole != domain.RoleAdmin) {
 		return ErrForbidden
 	}
-	var targetRole domain.GroupRole
-	if err := r.db.QueryRow(ctx, `SELECT role FROM group_members WHERE group_id = $1 AND user_id = $2 FOR UPDATE`, groupID, targetUserID).Scan(&targetRole); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrNotFound
-		}
-		return fmt.Errorf("load target membership: %w", err)
+	targetRole, targetIsMember := roles[targetUserID]
+	if !targetIsMember {
+		return ErrNotFound
 	}
 	if targetRole == domain.RoleOwner || (actorRole == domain.RoleAdmin && targetRole != domain.RoleMember) {
 		return ErrForbidden
