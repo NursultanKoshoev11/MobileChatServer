@@ -212,7 +212,14 @@ func (s *PhoneAuthService) Refresh(ctx context.Context, input RefreshInput) (dom
 		}
 		return domain.PhoneSession{}, err
 	}
-	if record.RevokedAt != nil || time.Now().UTC().After(record.ExpiresAt) {
+	if record.RevokedAt != nil {
+		// A rotated or revoked token presented again is only logged: a client
+		// that lost a refresh response on a flaky network legitimately retries
+		// with the old token, so this must not sign the user out everywhere.
+		log.Printf("refresh token reuse rejected user_id=%q session_id=%q revoked_at=%s", record.UserID, record.ID, record.RevokedAt.UTC().Format(time.RFC3339))
+		return domain.PhoneSession{}, ErrUnauthorized
+	}
+	if time.Now().UTC().After(record.ExpiresAt) {
 		return domain.PhoneSession{}, ErrUnauthorized
 	}
 	user, err := s.repo.GetAuthPhoneUserByID(ctx, record.UserID)
@@ -235,6 +242,15 @@ func (s *PhoneAuthService) Refresh(ctx context.Context, input RefreshInput) (dom
 		return domain.PhoneSession{}, err
 	}
 	return domain.PhoneSession{AccessToken: accessToken, RefreshToken: newRefreshToken, User: user}, nil
+}
+
+// LogoutAll revokes every refresh token of the user (all devices).
+func (s *PhoneAuthService) LogoutAll(ctx context.Context, userID string) error {
+	if userID == "" {
+		return ErrUnauthorized
+	}
+	_, err := s.repo.RevokeAllRefreshSessionsForUser(ctx, userID)
+	return err
 }
 
 func (s *PhoneAuthService) Logout(ctx context.Context, input RefreshInput) error {

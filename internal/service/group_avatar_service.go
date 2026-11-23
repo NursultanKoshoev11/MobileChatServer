@@ -3,9 +3,11 @@ package service
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"strings"
 
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/domain"
+	"github.com/NursultanKoshoev11/MobileChatServer/internal/media"
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/storage"
 )
 
@@ -22,13 +24,11 @@ func (s *Service) UpdateGroupAvatar(ctx context.Context, actorID, groupID, avata
 		return domain.Group{}, NewValidationError("group_id is required")
 	}
 	if avatarData != "" {
-		payload, err := validateImageDataURL(avatarData, maxGroupAvatarBytes)
+		normalized, err := sanitizeImageDataURL(avatarData, maxGroupAvatarBytes, "group avatar")
 		if err != nil {
 			return domain.Group{}, err
 		}
-		if len(payload) == 0 {
-			return domain.Group{}, NewValidationError("group avatar data is invalid")
-		}
+		avatarData = normalized
 	}
 	var group domain.Group
 	err := s.recordAuditedMutation(ctx, actorID, "group_avatar_updated", "group", groupID, func(repo *storage.Repository) error {
@@ -42,7 +42,10 @@ func (s *Service) UpdateGroupAvatar(ctx context.Context, actorID, groupID, avata
 	return group, nil
 }
 
-func validateImageDataURL(value string, maxBytes int) ([]byte, error) {
+// sanitizeImageDataURL validates a base64 image data URL (JPEG, PNG or WebP,
+// checked by magic number rather than the declared type), strips EXIF/GPS and
+// text metadata, and returns the normalized data URL.
+func sanitizeImageDataURL(value string, maxBytes int, label string) (string, error) {
 	allowedPrefixes := []string{
 		"data:image/jpeg;base64,",
 		"data:image/png;base64,",
@@ -56,14 +59,19 @@ func validateImageDataURL(value string, maxBytes int) ([]byte, error) {
 		}
 	}
 	if payload == "" {
-		return nil, NewValidationError("group avatar must be a JPEG, PNG, or WebP image")
+		return "", NewValidationError(label + " must be a JPEG, PNG, or WebP image")
 	}
 	decoded, err := base64.StdEncoding.DecodeString(payload)
 	if err != nil || len(decoded) == 0 {
-		return nil, NewValidationError("group avatar data is invalid")
+		return "", NewValidationError(label + " data is invalid")
 	}
 	if len(decoded) > maxBytes {
-		return nil, NewValidationError("group avatar image must be at most 512 KB")
+		return "", NewValidationError(fmt.Sprintf("%s image must be at most %d KB", label, maxBytes/1024))
 	}
-	return decoded, nil
+	contentType := media.ImageType(decoded)
+	if contentType == "" {
+		return "", NewValidationError(label + " must be a JPEG, PNG, or WebP image")
+	}
+	cleaned := media.StripImageMetadata(decoded)
+	return "data:" + contentType + ";base64," + base64.StdEncoding.EncodeToString(cleaned), nil
 }

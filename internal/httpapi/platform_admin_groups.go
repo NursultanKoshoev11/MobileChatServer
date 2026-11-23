@@ -14,5 +14,6 @@ func (s *Server) deleteGroupAsPlatformAdmin(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	s.hub.CloseGroup(strings.TrimSpace(groupID))
+	s.removeGroupFiles(groupID)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }

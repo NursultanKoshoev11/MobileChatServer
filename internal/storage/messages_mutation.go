@@ -15,6 +15,9 @@ func (r *Repository) UpdateMessage(ctx context.Context, groupID, actorID, messag
 			UPDATE messages
 			SET text = $4, edited_at = now()
 			WHERE id = $1 AND group_id = $2 AND sender_id = $3 AND deleted_at IS NULL
+			  -- Only a current member may edit: a sender who left or was
+			  -- removed can no longer change their old messages.
+			  AND EXISTS (SELECT 1 FROM group_members gm WHERE gm.group_id = $2 AND gm.user_id = $3)
 			RETURNING id, group_id, sender_id, text, created_at, edited_at, deleted_at
 		)
 		SELECT m.id, m.group_id, m.sender_id, u.display_name, m.text, m.created_at, m.edited_at, m.deleted_at

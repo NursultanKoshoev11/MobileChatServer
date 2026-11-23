@@ -25,9 +25,6 @@ import (
 
 const maxJSONBodyBytes = 2 * 1024 * 1024
 
-// backgroundNotifyTimeout bounds push notifications sent after a response.
-const backgroundNotifyTimeout = 30 * time.Second
-
 type userContextKey struct{}
 
 type Server struct {
@@ -111,6 +108,7 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 		r.Post("/verify-code", server.verifyPhoneCode)
 		r.Post("/refresh", server.refreshPhoneSession)
 		r.Post("/logout", server.logoutPhoneSession)
+		r.With(server.auth, server.userRateLimit).Post("/logout-all", server.logoutAllSessions)
 	})
 
 	r.Group(func(r chi.Router) {
@@ -130,8 +128,10 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 		r.Post("/api/groups/join-by-code", server.joinByCode)
 		r.Post("/api/groups/{groupID}/join", server.joinPublicGroup)
 		r.Post("/api/groups/{groupID}/invite-code", server.ensureGroupInviteCode)
+		r.Post("/api/groups/{groupID}/invite-code/rotate", server.rotateGroupInviteCode)
 		r.Put("/api/groups/{groupID}/avatar", server.updateGroupAvatar)
 		r.Get("/api/groups/{groupID}/members", server.listGroupMembers)
+		r.Delete("/api/groups/{groupID}/members/{userID}", server.removeGroupMember)
 		r.Post("/api/groups/{groupID}/members/{userID}/role", server.updateGroupMemberRole)
 		r.Post("/api/groups/{groupID}/members/role-by-phone", server.updateGroupMemberRoleByPhone)
 		r.Post("/api/groups/{groupID}/comment-mutes/by-phone", server.setGroupCommentMuteByPhone)
@@ -204,16 +204,25 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) deleteMyAccount(w http.ResponseWriter, r *http.Request) {
 	userID := currentUser(r).ID
+	// Upload records are removed with the account (FK cascade), so list the
+	// user's stored files first and delete them from disk afterwards.
+	uploads, listErr := s.svc.ListUserUploads(r.Context(), userID)
+	if listErr != nil {
+		s.logger.Printf("account deletion: listing uploads failed user_id=%q error=%q", userID, listErr.Error())
+	}
 	if err := s.svc.DeleteAccount(r.Context(), userID); err != nil {
 		s.writeError(w, err)
 		return
 	}
+	s.removeStoredFiles(uploads)
 	s.hub.DisconnectUser(userID)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted", "public_content": "anonymized"})
 }
 
+// websocketHealth is public, so it reports only liveness; the live socket
+// count is not exposed.
 func (s *Server) websocketHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "clients": s.hub.ClientCount()})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (s *Server) DrainWebSockets(timeout time.Duration) {
@@ -275,6 +284,19 @@ func (s *Server) logoutPhoneSession(w http.ResponseWriter, r *http.Request) {
 		s.hub.DisconnectUserSessions(userID)
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "logged_out"})
+}
+
+// logoutAllSessions signs the user out everywhere: all refresh tokens are
+// revoked and the user's sockets on this instance are closed. Access tokens
+// already issued stay valid until they expire (ACCESS_TOKEN_TTL_MINUTES).
+func (s *Server) logoutAllSessions(w http.ResponseWriter, r *http.Request) {
+	userID := currentUser(r).ID
+	if err := s.phoneAuth.LogoutAll(r.Context(), userID); err != nil {
+		s.writeError(w, err)
+		return
+	}
+	s.hub.DisconnectUserSessions(userID)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {
@@ -341,6 +363,15 @@ func (s *Server) joinPublicGroup(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) ensureGroupInviteCode(w http.ResponseWriter, r *http.Request) {
 	group, err := s.svc.EnsureGroupInviteCode(r.Context(), currentUser(r).ID, chi.URLParam(r, "groupID"))
+	if err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, group)
+}
+
+func (s *Server) rotateGroupInviteCode(w http.ResponseWriter, r *http.Request) {
+	group, err := s.svc.RotateGroupInviteCode(r.Context(), currentUser(r).ID, chi.URLParam(r, "groupID"))
 	if err != nil {
 		s.writeError(w, err)
 		return
@@ -416,6 +447,21 @@ func (s *Server) leaveGroup(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "left"})
 }
 
+// removeGroupMember removes another member from the group (owner: anyone but
+// themselves; admin: plain members only) and closes the removed user's
+// sockets subscribed to the group.
+func (s *Server) removeGroupMember(w http.ResponseWriter, r *http.Request) {
+	groupID := chi.URLParam(r, "groupID")
+	targetUserID := chi.URLParam(r, "userID")
+	if err := s.svc.RemoveMember(r.Context(), currentUser(r).ID, groupID, targetUserID); err != nil {
+		s.writeError(w, err)
+		return
+	}
+	s.hub.RemoveUserFromGroup(groupID, targetUserID)
+	s.hub.NotifyUser(targetUserID, realtime.Event{Type: "group.member_removed", GroupID: groupID, Payload: map[string]string{"group_id": groupID, "user_id": targetUserID}})
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) joinByCode(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		InviteCode string `json:"invite_code"`
@@ -466,13 +512,9 @@ func (s *Server) inviteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.hub.NotifyUser(target, realtime.Event{Type: "invite.created", GroupID: invite.GroupID, Payload: invite})
-	// The request context is cancelled as soon as this handler returns, which
-	// would abort the push send; detach it but keep a bound on the work.
-	notifyCtx, cancelNotify := context.WithTimeout(context.WithoutCancel(r.Context()), backgroundNotifyTimeout)
-	go func() {
-		defer cancelNotify()
-		s.svc.NotifyUserAboutInvite(notifyCtx, target, invite)
-	}()
+	// The push runs after the response with its own bounded context (the
+	// request context is cancelled when this handler returns).
+	s.svc.Go("push.invite_created", func(ctx context.Context) { s.svc.NotifyUserAboutInvite(ctx, target, invite) })
 	writeJSON(w, http.StatusCreated, invite)
 }
 
@@ -862,7 +904,15 @@ func (s *Server) writeError(w http.ResponseWriter, err error) {
 	var validation service.ValidationError
 	var unavailable service.ServiceUnavailableError
 	var pending service.ContentModerationPendingError
+	var quota service.UploadQuotaExceededError
 	switch {
+	case errors.As(err, &quota):
+		writeJSON(w, http.StatusTooManyRequests, map[string]any{
+			"error":       "daily upload quota exceeded",
+			"code":        "upload_quota_exceeded",
+			"quota_bytes": quota.QuotaBytes,
+			"used_bytes":  quota.UsedBytes,
+		})
 	case errors.As(err, &pending):
 		if pending.Item.GroupID != "" {
 			// Every group member receives this event, so it must not carry the held

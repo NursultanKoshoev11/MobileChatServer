@@ -21,7 +21,7 @@ func (s *Server) createGroupCreationRequest(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	s.notifyAdminsRealtime(r, "group_creation_request.created", request)
-	go s.svc.NotifyAdminsAboutGroupCreationRequest(context.Background(), request)
+	s.svc.Go("push.group_creation_request_created", func(ctx context.Context) { s.svc.NotifyAdminsAboutGroupCreationRequest(ctx, request) })
 	writeJSON(w, http.StatusCreated, request)
 }
 
@@ -61,7 +61,7 @@ func (s *Server) approveGroupCreationRequest(w http.ResponseWriter, r *http.Requ
 	}
 	s.notifyAdminsRealtime(r, "group_creation_request.reviewed", request)
 	s.hub.NotifyUser(request.RequesterID, realtime.Event{Type: "group_creation_request.reviewed", Payload: request})
-	go s.svc.NotifyUserAboutGroupCreationReview(context.Background(), request.RequesterID, request)
+	s.svc.Go("push.group_creation_request_reviewed", func(ctx context.Context) { s.svc.NotifyUserAboutGroupCreationReview(ctx, request.RequesterID, request) })
 	writeJSON(w, http.StatusOK, request)
 }
 
@@ -77,7 +77,7 @@ func (s *Server) rejectGroupCreationRequest(w http.ResponseWriter, r *http.Reque
 	}
 	s.notifyAdminsRealtime(r, "group_creation_request.reviewed", request)
 	s.hub.NotifyUser(request.RequesterID, realtime.Event{Type: "group_creation_request.reviewed", Payload: request})
-	go s.svc.NotifyUserAboutGroupCreationReview(context.Background(), request.RequesterID, request)
+	s.svc.Go("push.group_creation_request_reviewed", func(ctx context.Context) { s.svc.NotifyUserAboutGroupCreationReview(ctx, request.RequesterID, request) })
 	writeJSON(w, http.StatusOK, request)
 }
 
@@ -93,7 +93,7 @@ func (s *Server) needMoreInfoForGroupCreationRequest(w http.ResponseWriter, r *h
 	}
 	s.notifyAdminsRealtime(r, "group_creation_request.reviewed", request)
 	s.hub.NotifyUser(request.RequesterID, realtime.Event{Type: "group_creation_request.reviewed", Payload: request})
-	go s.svc.NotifyUserAboutGroupCreationReview(context.Background(), request.RequesterID, request)
+	s.svc.Go("push.group_creation_request_reviewed", func(ctx context.Context) { s.svc.NotifyUserAboutGroupCreationReview(ctx, request.RequesterID, request) })
 	writeJSON(w, http.StatusOK, request)
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -47,6 +48,22 @@ type Hub struct {
 	remoteIPs            map[string]map[*Client]bool
 	revokedUsers         map[string]struct{}
 	eventCounter         uint64
+	// shuttingDown rejects new registrations and makes write pumps send a
+	// "going away" close frame.
+	shuttingDown atomic.Bool
+	// activeWriters counts running WritePump goroutines (one per socket).
+	activeWriters atomic.Int64
+}
+
+// remoteIPKey groups IPv6 clients by their /64 prefix (one subscriber usually
+// owns a whole /64), matching the HTTP rate limiter. IPv4 addresses and
+// unparsable values are used as-is.
+func remoteIPKey(raw string) string {
+	ip := net.ParseIP(strings.TrimSpace(raw))
+	if ip == nil || ip.To4() != nil {
+		return raw
+	}
+	return ip.Mask(net.CIDRMask(64, 128)).String() + "/64"
 }
 
 func NewHub(logger *log.Logger, validators ...AuthRefreshValidator) *Hub {
@@ -67,6 +84,10 @@ func NewHub(logger *log.Logger, validators ...AuthRefreshValidator) *Hub {
 func (h *Hub) Register(client *Client) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.shuttingDown.Load() {
+		h.logger.Printf("websocket rejected: server is shutting down user_id=%q remote_ip=%q", client.UserID, client.RemoteIP)
+		return false
+	}
 	if _, revoked := h.revokedUsers[client.UserID]; revoked {
 		h.logger.Printf("websocket rejected: account was deleted user_id=%q remote_ip=%q", client.UserID, client.RemoteIP)
 		return false
@@ -79,7 +100,8 @@ func (h *Hub) Register(client *Client) bool {
 		h.logger.Printf("websocket rejected: per-user connection limit reached user_id=%q remote_ip=%q", client.UserID, client.RemoteIP)
 		return false
 	}
-	if client.RemoteIP != "" && len(h.remoteIPs[client.RemoteIP]) >= maxConnectionsPerIP {
+	ipKey := remoteIPKey(client.RemoteIP)
+	if client.RemoteIP != "" && len(h.remoteIPs[ipKey]) >= maxConnectionsPerIP {
 		h.logger.Printf("websocket rejected: per-ip connection limit reached user_id=%q remote_ip=%q", client.UserID, client.RemoteIP)
 		return false
 	}
@@ -94,10 +116,10 @@ func (h *Hub) Register(client *Client) bool {
 	}
 	h.users[client.UserID][client] = true
 	if client.RemoteIP != "" {
-		if h.remoteIPs[client.RemoteIP] == nil {
-			h.remoteIPs[client.RemoteIP] = make(map[*Client]bool)
+		if h.remoteIPs[ipKey] == nil {
+			h.remoteIPs[ipKey] = make(map[*Client]bool)
 		}
-		h.remoteIPs[client.RemoteIP][client] = true
+		h.remoteIPs[ipKey][client] = true
 	}
 	return true
 }
@@ -196,10 +218,11 @@ func (h *Hub) Unregister(client *Client) {
 		}
 	}
 	if client.RemoteIP != "" {
-		if clients := h.remoteIPs[client.RemoteIP]; clients != nil {
+		ipKey := remoteIPKey(client.RemoteIP)
+		if clients := h.remoteIPs[ipKey]; clients != nil {
 			delete(clients, client)
 			if len(clients) == 0 {
-				delete(h.remoteIPs, client.RemoteIP)
+				delete(h.remoteIPs, ipKey)
 			}
 		}
 	}
@@ -273,21 +296,30 @@ func (h *Hub) deliver(client *Client, event Event) {
 	h.Unregister(client)
 }
 
+// Drain is used on graceful shutdown. It stops accepting new sockets, sends
+// every connected client a "going away" close frame (clients reconnect to the
+// next instance), waits up to timeout for the write pumps to flush it, and then
+// force-closes whatever is left.
 func (h *Hub) Drain(timeout time.Duration) {
 	if timeout <= 0 {
 		timeout = websocketDrain
 	}
+	h.shuttingDown.Store(true)
+	clients := h.CloseAll()
 	deadline := time.Now().Add(timeout)
-	for {
-		if h.ClientCount() == 0 || time.Now().After(deadline) {
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
+	for h.activeWriters.Load() > 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
 	}
-	h.CloseAll()
+	for _, client := range clients {
+		if client.Conn != nil {
+			_ = client.Conn.Close()
+		}
+	}
 }
 
-func (h *Hub) CloseAll() {
+// CloseAll unregisters every client, which makes each write pump send a close
+// frame and close its connection. It returns the clients it closed.
+func (h *Hub) CloseAll() []*Client {
 	h.mu.Lock()
 	clients := make([]*Client, 0)
 	for _, groupClients := range h.groups {
@@ -309,6 +341,11 @@ func (h *Hub) CloseAll() {
 		seen[client] = true
 		h.Unregister(client)
 	}
+	closed := make([]*Client, 0, len(seen))
+	for client := range seen {
+		closed = append(closed, client)
+	}
+	return closed
 }
 
 func (h *Hub) ClientCount() int {
@@ -489,13 +526,18 @@ func (c *Client) handleAuthRefresh(token string) bool {
 
 func (c *Client) WritePump() {
 	ticker := time.NewTicker(pingPeriod)
-	defer func() { ticker.Stop(); _ = c.Conn.Close() }()
+	c.Hub.activeWriters.Add(1)
+	defer func() { ticker.Stop(); _ = c.Conn.Close(); c.Hub.activeWriters.Add(-1) }()
 	for {
 		select {
 		case event, ok := <-c.Send:
 			_ = c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
-				_ = c.Conn.WriteMessage(websocket.CloseMessage, []byte{})
+				closeFrame := []byte{}
+				if c.Hub.shuttingDown.Load() {
+					closeFrame = websocket.FormatCloseMessage(websocket.CloseGoingAway, "server shutting down")
+				}
+				_ = c.Conn.WriteMessage(websocket.CloseMessage, closeFrame)
 				return
 			}
 			payload, err := json.Marshal(event)

@@ -80,7 +80,9 @@ func (s *Service) CreatePublicRequest(ctx context.Context, authorID, groupID str
 func (s *Service) createPublicRequest(ctx context.Context, authorID, groupID string, input CreatePublicRequestInput, runModeration bool) (domain.PublicRequest, error) {
 	groupID = strings.TrimSpace(groupID)
 	title := strings.TrimSpace(input.Title)
-	body := strings.TrimSpace(input.Body)
+	// Inline photos are stored as sent, so location and device metadata are
+	// removed before anything is validated, moderated or persisted.
+	body := stripInlinePublicRequestPhotoMetadata(strings.TrimSpace(input.Body))
 	if groupID == "" {
 		return domain.PublicRequest{}, NewValidationError("group_id is required")
 	}
@@ -145,7 +147,10 @@ func (s *Service) createPublicRequest(ctx context.Context, authorID, groupID str
 	if err != nil {
 		return domain.PublicRequest{}, err
 	}
-	go s.notifyGroupAboutNewPublicRequest(context.Background(), authorID, groupID, request.ID, request.Title, bodyMeta.NotificationBody())
+	notificationBody := bodyMeta.NotificationBody()
+	s.Go("push.public_request_created", func(ctx context.Context) {
+		s.notifyGroupAboutNewPublicRequest(ctx, authorID, groupID, request.ID, request.Title, notificationBody)
+	})
 	return request, nil
 }
 

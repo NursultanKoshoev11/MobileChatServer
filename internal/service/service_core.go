@@ -67,16 +67,34 @@ func (s *Service) UpdateGroupMemberRoleByPhone(ctx context.Context, actorID, gro
 	return s.UpdateGroupMemberRole(ctx, actorID, groupID, user.ID, role)
 }
 
+// EnsureGroupInviteCode returns the group's invite code (creating one if the
+// group has none). Any member of a public group may obtain it; for a private
+// group only the owner and admins may.
 func (s *Service) EnsureGroupInviteCode(ctx context.Context, userID, groupID string) (domain.Group, error) {
+	return s.issueGroupInviteCode(ctx, userID, groupID, false)
+}
+
+// RotateGroupInviteCode replaces the group's invite code with a new one; the
+// old code (and QR passes that carry it) stops working. Owner/admin only.
+func (s *Service) RotateGroupInviteCode(ctx context.Context, userID, groupID string) (domain.Group, error) {
+	return s.issueGroupInviteCode(ctx, userID, groupID, true)
+}
+
+func (s *Service) issueGroupInviteCode(ctx context.Context, userID, groupID string, rotate bool) (domain.Group, error) {
+	groupID = strings.TrimSpace(groupID)
 	if groupID == "" {
 		return domain.Group{}, NewValidationError("group_id is required")
+	}
+	eventType := "group_invite_code_accessed"
+	if rotate {
+		eventType = "group_invite_code_rotated"
 	}
 	var lastErr error
 	for attempt := 0; attempt < 8; attempt++ {
 		var group domain.Group
-		err := s.recordAuditedMutation(ctx, userID, "group_invite_code_accessed", "group", groupID, func(repo *storage.Repository) error {
+		err := s.recordAuditedMutation(ctx, userID, eventType, "group", groupID, func(repo *storage.Repository) error {
 			var ensureErr error
-			group, ensureErr = repo.EnsureGroupInviteCodeInTransaction(ctx, groupID, userID, randomInviteCode())
+			group, ensureErr = repo.EnsureGroupInviteCodeInTransaction(ctx, groupID, userID, randomInviteCode(), rotate)
 			return ensureErr
 		})
 		if err == nil {
@@ -106,6 +124,9 @@ func (s *Service) JoinByInviteCode(ctx context.Context, userID, inviteCode strin
 	if inviteCode == "" {
 		return domain.Group{}, NewValidationError("invite_code is required")
 	}
+	if len(inviteCode) > maxInviteCodeInputLen {
+		return domain.Group{}, storage.ErrNotFound
+	}
 	groupID, err := s.repo.FindGroupIDByInviteCode(ctx, inviteCode)
 	if err != nil {
 		return domain.Group{}, err
@@ -118,6 +139,10 @@ func (s *Service) JoinByInviteCode(ctx context.Context, userID, inviteCode strin
 	})
 	if err != nil {
 		return domain.Group{}, err
+	}
+	// The joiner is a plain member, who may see the code of a public group only.
+	if !storage.CanSeeInviteCode(group.Visibility, domain.RoleMember) {
+		group.InviteCode = ""
 	}
 	return group, nil
 }
@@ -240,20 +265,25 @@ func normalizePhone(phone string) string {
 	return phone
 }
 
+// maxInviteCodeInputLen bounds the normalized invite code accepted for a
+// lookup; real codes are 6 (legacy AAA-999) or 10 characters.
+const maxInviteCodeInputLen = 32
+
+// normalizeInviteCode uppercases the code and drops separators (dashes,
+// spaces and any other non-alphanumeric characters). The result is the
+// compact form matched against the dash-stripped, upper-cased expression
+// indexed by migration 0026, so both legacy
+// AAA-999 codes and new XXXXX-XXXXX codes are found by an index lookup.
 func normalizeInviteCode(code string) string {
 	code = strings.ToUpper(strings.TrimSpace(code))
 	var compact strings.Builder
-	compact.Grow(6)
+	compact.Grow(len(code))
 	for _, char := range code {
 		if (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') {
 			compact.WriteRune(char)
 		}
 	}
-	value := compact.String()
-	if len(value) >= 6 {
-		return value[:3] + "-" + value[3:6]
-	}
-	return value
+	return compact.String()
 }
 
 func randomHex(bytesCount int) string {
@@ -264,10 +294,15 @@ func randomHex(bytesCount int) string {
 	return hex.EncodeToString(buf)
 }
 
+// inviteCodeAlphabet omits characters that are easy to confuse when read
+// aloud or typed: 0/O, 1/I/L and U/V.
+const inviteCodeAlphabet = "ABCDEFGHJKMNPQRSTVWXYZ23456789"
+
+// randomInviteCode returns a new 10-character code (about 49 bits from
+// crypto/rand) displayed and stored as XXXXX-XXXXX.
 func randomInviteCode() string {
-	const letters = "ABCDEFGHJKLMNPQRSTUVWXYZ"
-	const digits = "23456789"
-	return randomChars(letters, 3) + "-" + randomChars(digits, 3)
+	code := randomChars(inviteCodeAlphabet, 10)
+	return code[:5] + "-" + code[5:]
 }
 
 func randomChars(alphabet string, count int) string {

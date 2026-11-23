@@ -19,6 +19,12 @@ import (
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/storage"
 )
 
+const (
+	webSocketDrainTimeout         = 5 * time.Second
+	httpShutdownTimeout           = 20 * time.Second
+	backgroundJobsShutdownTimeout = 15 * time.Second
+)
+
 func main() {
 	logger := log.New(jsonlog.New(os.Stdout), "", 0)
 
@@ -107,7 +113,12 @@ func main() {
 		SMSGlobalHourlyMax:        cfg.SMSGlobalHourlyMax,
 	}, smsSender)
 
+	svc.SetUploadQuota(cfg.UploadDailyQuotaBytes)
+
 	handler := httpapi.New(svc, phoneAuth, logger, cfg.AllowedOrigins, cfg.TrustedProxyCIDRs)
+	// Tight server-wide deadlines protect against slow clients; the file upload
+	// and download handlers extend their own deadlines (see httpapi), and
+	// WebSocket connections clear them after the upgrade.
 	server := &http.Server{
 		Addr:              ":" + cfg.Port,
 		Handler:           handler,
@@ -116,6 +127,19 @@ func main() {
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
+	// Hijacked WebSocket connections are not tracked by http.Server.Shutdown;
+	// close them with a close frame once the listeners have stopped.
+	webSocketsClosed := make(chan struct{})
+	server.RegisterOnShutdown(func() {
+		defer close(webSocketsClosed)
+		if drainable, ok := handler.(interface{ DrainWebSockets(time.Duration) }); ok {
+			drainable.DrainWebSockets(webSocketDrainTimeout)
+		}
+	})
+
+	maintenanceCtx, stopMaintenance := context.WithCancel(context.Background())
+	defer stopMaintenance()
+	go phoneAuth.RunPhoneCodeRetention(maintenanceCtx, logger)
 
 	go func() {
 		logger.Printf("listening on %s", server.Addr)
@@ -128,17 +152,26 @@ func main() {
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
 
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 35*time.Second)
-	defer shutdownCancel()
+	// Shutdown order (bounded to fit docker's stop_grace_period of 45s):
+	// stop accepting and close WebSockets with a close frame, let in-flight
+	// HTTP requests finish, then wait for background jobs such as push fan-out.
 	logger.Println("shutdown started")
-	if drainable, ok := handler.(interface{ DrainWebSockets(time.Duration) }); ok {
-		drainable.DrainWebSockets(30 * time.Second)
-	}
+	stopMaintenance()
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), httpShutdownTimeout)
+	defer shutdownCancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		logger.Printf("graceful shutdown failed: %v", err)
 		if closeErr := server.Close(); closeErr != nil {
 			logger.Printf("forced close failed: %v", closeErr)
 		}
+	}
+	select {
+	case <-webSocketsClosed:
+	case <-time.After(webSocketDrainTimeout):
+		logger.Println("websocket drain did not finish in time")
+	}
+	if !svc.WaitBackground(backgroundJobsShutdownTimeout) {
+		logger.Println("background jobs still running at shutdown deadline; exiting anyway")
 	}
 	logger.Println("shutdown completed")
 }

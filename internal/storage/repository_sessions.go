@@ -49,6 +49,16 @@ func (r *Repository) RevokeRefreshSession(ctx context.Context, sessionID string)
 	return nil
 }
 
+// RevokeAllRefreshSessionsForUser revokes every active refresh token of the
+// user and returns how many were revoked.
+func (r *Repository) RevokeAllRefreshSessionsForUser(ctx context.Context, userID string) (int64, error) {
+	result, err := r.db.Exec(ctx, `UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL`, userID)
+	if err != nil {
+		return 0, fmt.Errorf("revoke all refresh sessions: %w", err)
+	}
+	return result.RowsAffected(), nil
+}
+
 func (r *Repository) RotateRefreshSession(ctx context.Context, oldSessionID, newSessionID, userID, newSecretHash string, expiresAt time.Time) error {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {

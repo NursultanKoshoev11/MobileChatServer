@@ -3,6 +3,9 @@ package httpapi
 import (
 	"net/http"
 
+	"github.com/NursultanKoshoev11/MobileChatServer/internal/domain"
+	"github.com/NursultanKoshoev11/MobileChatServer/internal/storage"
+
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/realtime"
 	"github.com/go-chi/chi/v5"
 )
@@ -26,6 +29,14 @@ func (s *Server) updateGroupAvatar(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, err)
 		return
 	}
-	s.broadcastGroupAndUsers(r, group.ID, realtime.Event{Type: "group.avatar_updated", GroupID: group.ID, Payload: group})
+	// Every member receives the broadcast; a private group's invite code is for
+	// the owner and admins only.
+	broadcast := group
+	if !storage.CanSeeInviteCode(group.Visibility, domain.RoleMember) {
+		broadcast.InviteCode = ""
+	}
+	broadcast.QRPass = ""
+	broadcast.MyRole = nil
+	s.broadcastGroupAndUsers(r, group.ID, realtime.Event{Type: "group.avatar_updated", GroupID: group.ID, Payload: broadcast})
 	writeJSON(w, http.StatusOK, group)
 }

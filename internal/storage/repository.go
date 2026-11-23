@@ -135,6 +135,9 @@ func (r *Repository) ListUserGroups(ctx context.Context, userID string) ([]domai
 		if err := rows.Scan(&group.ID, &group.Title, &group.Description, &group.Visibility, &group.OwnerID, &group.AvatarData, &group.InviteCode, &group.CreatedAt, &group.MemberCount, &role, &group.UnreadPublicRequestCount); err != nil {
 			return nil, fmt.Errorf("scan user group: %w", err)
 		}
+		if !CanSeeInviteCode(group.Visibility, role) {
+			group.InviteCode = ""
+		}
 		group.MyRole = &role
 		groups = append(groups, group)
 	}
@@ -215,7 +218,7 @@ func (r *Repository) EnsureGroupInviteCode(ctx context.Context, groupID, userID,
 	}
 	defer tx.Rollback(ctx)
 	txRepo := &Repository{db: tx, pool: r.pool}
-	group, err := txRepo.EnsureGroupInviteCodeInTransaction(ctx, groupID, userID, generatedCode)
+	group, err := txRepo.EnsureGroupInviteCodeInTransaction(ctx, groupID, userID, generatedCode, false)
 	if err != nil {
 		return domain.Group{}, err
 	}
@@ -226,8 +229,11 @@ func (r *Repository) EnsureGroupInviteCode(ctx context.Context, groupID, userID,
 }
 
 // EnsureGroupInviteCodeInTransaction returns the group's invite code and
-// creates one if needed, using the caller's transaction for audit atomicity.
-func (r *Repository) EnsureGroupInviteCodeInTransaction(ctx context.Context, groupID, userID, generatedCode string) (domain.Group, error) {
+// creates one if needed (or replaces it when rotate is true), using the
+// caller's transaction for audit atomicity. Any member of a public group may
+// obtain the code; for a private group only the owner and admins may. Rotation
+// is owner/admin only for every group. Non-members get ErrForbidden.
+func (r *Repository) EnsureGroupInviteCodeInTransaction(ctx context.Context, groupID, userID, generatedCode string, rotate bool) (domain.Group, error) {
 	generatedCode = strings.ToUpper(strings.TrimSpace(generatedCode))
 	if generatedCode == "" {
 		return domain.Group{}, fmt.Errorf("generated invite code is empty")
@@ -248,8 +254,11 @@ func (r *Repository) EnsureGroupInviteCodeInTransaction(ctx context.Context, gro
 		}
 		return domain.Group{}, fmt.Errorf("load group for invite code: %w", err)
 	}
+	if !CanSeeInviteCode(group.Visibility, role) || (rotate && !isGroupManager(role)) {
+		return domain.Group{}, ErrForbidden
+	}
 
-	if strings.TrimSpace(group.InviteCode) == "" {
+	if rotate || strings.TrimSpace(group.InviteCode) == "" {
 		if err := r.db.QueryRow(ctx, `UPDATE groups SET invite_code=$2, updated_at=now() WHERE id=$1 RETURNING invite_code`, group.ID, generatedCode).Scan(&group.InviteCode); err != nil {
 			return domain.Group{}, fmt.Errorf("set group invite code: %w", err)
 		}
@@ -475,6 +484,17 @@ func EscapeLikePattern(value string) string {
 }
 
 var likePatternEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
+func isGroupManager(role domain.GroupRole) bool {
+	return role == domain.RoleOwner || role == domain.RoleAdmin
+}
+
+// CanSeeInviteCode reports whether a member with role may see a group's invite
+// code: every member of a public group, only the owner and admins of a
+// private one.
+func CanSeeInviteCode(visibility domain.GroupVisibility, role domain.GroupRole) bool {
+	return visibility == domain.VisibilityPublic || isGroupManager(role)
+}
 
 func nullableInviteCode(inviteCode string) any {
 	value := strings.TrimSpace(inviteCode)
