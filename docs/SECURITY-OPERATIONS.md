@@ -140,7 +140,7 @@ The API listens on 8080 without TLS. Only the edge proxy may reach it.
 ## 4. SSH deploy keys: one key per host, forced command
 
 Each GitHub deployment secret should be a dedicated ed25519 key used for one
-host only (`KOOM_PROD_DEPLOY_KEY` for the API host, a different key for the
+host only (`KOOM_PROD_DEPLOY_KEY` for the API host, `KOOM_EDGE_DEPLOY_KEY` for the
 edge site deploy). Generate them offline, store only the private key in the
 GitHub `production` environment secrets, never reuse a personal key.
 

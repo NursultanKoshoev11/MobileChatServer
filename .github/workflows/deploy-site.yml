@@ -70,11 +70,11 @@ jobs:
       - name: Configure restricted SSH access
         shell: bash
         env:
-          KOOM_PROD_DEPLOY_KEY: ${{ secrets.KOOM_PROD_DEPLOY_KEY }}
+          KOOM_EDGE_DEPLOY_KEY: ${{ secrets.KOOM_EDGE_DEPLOY_KEY }}
         run: |
           set -Eeuo pipefail
           install -d -m 700 "$HOME/.ssh"
-          printf '%s\n' "$KOOM_PROD_DEPLOY_KEY" > "$HOME/.ssh/koom-production"
+          printf '%s\n' "$KOOM_EDGE_DEPLOY_KEY" > "$HOME/.ssh/koom-production"
           chmod 600 "$HOME/.ssh/koom-production"
           install -m 600 .github/koom-edge-known-hosts "$HOME/.ssh/known_hosts"
           ssh-keygen -y -f "$HOME/.ssh/koom-production" >/dev/null
