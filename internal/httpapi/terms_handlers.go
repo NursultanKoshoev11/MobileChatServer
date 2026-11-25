@@ -23,22 +23,25 @@ const termsOfUseHTML = `<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>KOOM — Условия использования / Колдонуу шарттары</title>
   <style>
-    :root{color-scheme:light;--bg:#f7f9ff;--card:#ffffff;--text:#10254f;--muted:#617191;--line:#dce6f5;--brand:#0878f9;}
+    :root{color-scheme:light;--bg:#f7f9ff;--card:#ffffff;--text:#10254f;--muted:#5f6e8a;--line:#dce6f5;--brand:#0b5ed7;--r-sm:12px;--r-md:16px;--r-lg:24px}
     *{box-sizing:border-box}
-    body{margin:0;background:linear-gradient(180deg,#edf5ff 0,#f7f9ff 280px);color:var(--text);font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;line-height:1.7}
+    html{scroll-behavior:smooth}
+    body{margin:0;background:linear-gradient(180deg,#edf5ff 0,#f7f9ff 280px);color:var(--text);font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;font-weight:400;line-height:1.7}
+    a:focus-visible{outline:3px solid var(--brand);outline-offset:3px;border-radius:var(--r-sm)}
     .policy-top{height:72px;display:flex;align-items:center;justify-content:space-between;padding:0 max(22px,calc((100% - 980px)/2));border-bottom:1px solid #dce6f5;background:#f7f9ffeb}
-    .policy-brand{display:flex;align-items:center;gap:10px;color:var(--text);font-size:20px;font-weight:850;letter-spacing:-.04em;text-decoration:none}
-    .policy-brand img{width:36px;height:36px;border-radius:12px}
-    .policy-home{color:#506383;font-size:13px;font-weight:700;text-decoration:none}.policy-home:hover{color:var(--brand)}
+    .policy-brand{display:flex;align-items:center;gap:10px;color:var(--text);font-size:20px;font-weight:700;letter-spacing:-.02em;text-decoration:none}
+    .policy-brand img{width:36px;height:36px;border-radius:var(--r-sm)}
+    .policy-home{color:#506383;font-size:13px;font-weight:600;text-decoration:none}.policy-home:hover{color:var(--brand)}
     main{max-width:980px;margin:0 auto;padding:38px 18px 64px}
-    .card{background:var(--card);border:1px solid var(--line);border-radius:22px;padding:clamp(24px,5vw,46px);box-shadow:0 18px 55px rgba(17,45,86,.08);margin-bottom:28px}
-    h1{font-size:clamp(28px,5vw,38px);line-height:1.15;letter-spacing:-.045em;margin:0 0 8px}
-    h2{font-size:20px;letter-spacing:-.025em;margin:30px 0 10px;border-top:1px solid var(--line);padding-top:22px}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);padding:clamp(24px,5vw,46px);box-shadow:0 18px 55px rgba(17,45,86,.08);margin-bottom:28px;scroll-margin-top:90px}
+    h1{font-size:clamp(28px,5vw,38px);line-height:1.15;letter-spacing:-.022em;font-weight:700;margin:0 0 8px}
+    h2{font-size:20px;letter-spacing:-.01em;font-weight:600;margin:30px 0 10px;border-top:1px solid var(--line);padding-top:22px}
     p,li{font-size:15px} ul{padding-left:22px} li{padding-left:3px;margin:6px 0}.muted{color:var(--muted)} a{color:var(--brand)}
-    .lang{display:flex;gap:14px;margin:0 0 22px;font-weight:700;font-size:14px}
-    .notice{background:#fff4f2;border:1px solid #ffd7cf;border-radius:14px;padding:14px 18px}
+    .lang{display:flex;flex-wrap:wrap;gap:14px;margin:0 0 22px;font-weight:600;font-size:14px}
+    .notice{background:#fff4f2;border:1px solid #ffd7cf;border-radius:var(--r-sm);padding:14px 18px}
     footer{max-width:980px;margin:0 auto;padding:0 18px 40px;color:var(--muted);font-size:13px}
-    @media(max-width:600px){.policy-top{height:64px;padding:0 18px}main{padding:22px 14px 40px}.card{border-radius:17px}p,li{font-size:14px}}
+    @media(max-width:600px){.policy-top{height:64px;padding:0 18px}main{padding:22px 14px 40px}.card{border-radius:var(--r-md)}p,li{font-size:14px}}
+    @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
   </style>
 </head>
 <body>
@@ -136,6 +139,6 @@ const termsOfUseHTML = `<!doctype html>
     <p>Бул шарттарды жаңыртышыбыз мүмкүн; жаңыртуу датасы жогоруда көрсөтүлгөн. Суроолор жана кайрылуулар: <a href="mailto:nursultankosoev2@gmail.com">nursultankosoev2@gmail.com</a>.</p>
   </article>
 </main>
-<footer><a href="/privacy">Политика конфиденциальности / Купуялык саясаты</a> · <a href="/child-safety">Child safety</a></footer>
+<footer><a href="/privacy">Политика конфиденциальности / Купуялык саясаты</a> · <a href="/account-deletion">Удаление аккаунта / Аккаунтту өчүрүү</a> · <a href="/child-safety">Child safety</a></footer>
 </body>
 </html>`
