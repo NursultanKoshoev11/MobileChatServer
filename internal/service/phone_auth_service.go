@@ -7,6 +7,7 @@ import (
 	"log"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/domain"
 	"github.com/NursultanKoshoev11/MobileChatServer/internal/security"
@@ -303,10 +304,11 @@ func (s *PhoneAuthService) getOrCreatePhoneUser(ctx context.Context, mobile stri
 
 func validateNewPhoneUserDisplayName(displayNameInput string) error {
 	displayName := strings.TrimSpace(displayNameInput)
-	if displayName == "" {
+	nameLength := utf8.RuneCountInString(displayName)
+	if nameLength == 0 {
 		return NewValidationError("display_name is required for new account")
 	}
-	if len(displayName) < 2 || len(displayName) > maxDisplayNameLen {
+	if nameLength < 2 || nameLength > maxDisplayNameLen {
 		return NewValidationError(fmt.Sprintf("display_name must be between 2 and %d characters", maxDisplayNameLen))
 	}
 	return nil

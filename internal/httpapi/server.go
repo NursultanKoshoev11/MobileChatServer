@@ -116,6 +116,7 @@ func New(svc *service.Service, phoneAuth *service.PhoneAuthService, logger *log.
 		r.Use(server.userRateLimit)
 		r.Get("/api/me", server.me)
 		r.Delete("/api/me", server.deleteMyAccount)
+		r.Put("/api/me/profile", server.updateMyProfile)
 		r.Put("/api/me/avatar", server.updateMyAvatar)
 		r.Post("/api/ws-token", server.issueWebSocketToken)
 		r.Get("/api/ws", server.userWebSocket)

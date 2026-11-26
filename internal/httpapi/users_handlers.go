@@ -5,6 +5,23 @@ import (
 	"strconv"
 )
 
+type updateMyProfileInput struct {
+	DisplayName string `json:"display_name"`
+}
+
+func (s *Server) updateMyProfile(w http.ResponseWriter, r *http.Request) {
+	var input updateMyProfileInput
+	if !readJSON(w, r, &input) {
+		return
+	}
+	user, err := s.svc.UpdateUserDisplayName(r.Context(), currentUser(r).ID, input.DisplayName)
+	if err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, user)
+}
+
 func (s *Server) searchUsers(w http.ResponseWriter, r *http.Request) {
 	limit := 20
 	if raw := r.URL.Query().Get("limit"); raw != "" {
