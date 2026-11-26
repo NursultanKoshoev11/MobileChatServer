@@ -46,3 +46,17 @@ func (r *Repository) UpdateUserAvatar(ctx context.Context, userID, avatarData st
 	}
 	return r.GetUserProfileByID(ctx, userID)
 }
+
+func (r *Repository) UpdateUserDisplayName(ctx context.Context, userID, displayName string) (domain.User, error) {
+	command, err := r.db.Exec(ctx, `
+		UPDATE users
+		SET display_name = $2, updated_at = now()
+		WHERE id = $1`, userID, displayName)
+	if err != nil {
+		return domain.User{}, fmt.Errorf("update user display name: %w", err)
+	}
+	if command.RowsAffected() == 0 {
+		return domain.User{}, ErrNotFound
+	}
+	return r.GetUserProfileByID(ctx, userID)
+}
